@@ -57,6 +57,44 @@ llama-server -m <models>/UI-TARS-1.5-7B.Q4_K_M.gguf --mmproj <models>/UI-TARS-1.
 Point `UITARS_BASE_URL` at the server if it is not on `127.0.0.1:8080` (e.g. a LAN
 workstation running a larger model).
 
+### Measured: resolution, not model size, is the bottleneck
+
+`eval_reading.py` captures one live Hacker News page, reads the DOM **only to build a
+ground-truth set** (the model never sees it), then asks the model to read each story's
+points from pixels alone — the canvas/WebGL situation where no DOM extraction exists.
+
+UI-TARS-1.5-7B-Q4, 12 stories, same page:
+
+| Condition | Correct |
+| --- | --- |
+| Full page, 100% browser zoom | 6/12 (50%) |
+| Full page, 150% browser zoom | 10/12 (83%) |
+| Magnified crop of the story's row | **12/12 (100%)** |
+
+Errors are pure small-scale OCR confusions (128→188, 582→482, 486→496, 58→88), not
+misunderstanding: the same model reads the same value perfectly once it is bigger. So
+exact-value reading on a DOM-less page is a **resolution** problem, and there are two
+independent fixes:
+
+- **Browser page-zoom at capture time** — deterministic, needs no cooperation from the
+  model, works on canvas. 50% → 83%.
+- **Magnified region reads** (`zoom()`) — 100%, but requires either the model to invoke
+  it (the 7B does not) or the worker to magnify around a located region.
+
+Reproduce:
+
+```bash
+python eval_reading.py --label ui-tars --base-url http://127.0.0.1:8080/v1
+python eval_reading.py --label ui-tars-z150 --page-zoom 150 --out-dir runs/eval150
+# compare a second model on the identical captured page:
+python eval_reading.py --label other --base-url http://127.0.0.1:8081/v1 \
+    --reuse runs/eval/page.png
+```
+
+(Caveat: with `--page-zoom`, `getBoundingClientRect` returns unzoomed coordinates under
+`body.zoom`, so the *magnified* column of a zoomed run crops the wrong rows and its
+number is not meaningful. The full-page column is unaffected.)
+
 ### Choosing a model
 
 Two different weaknesses show up in practice, and they respond differently to model
