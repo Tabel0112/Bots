@@ -37,10 +37,11 @@ def normalize_key(k):
 
 
 class SteelBrowser:
-    def __init__(self, width=1280, height=800, api_key=None):
+    def __init__(self, width=1280, height=800, api_key=None, session_timeout_ms=900_000):
         self.client = Steel(steel_api_key=api_key) if api_key else Steel()
         self.width = width
         self.height = height
+        self.session_timeout_ms = session_timeout_ms
         self.session = None
         self.network_log = []
         self._pw = None
@@ -50,6 +51,7 @@ class SteelBrowser:
     def start(self):
         self.session = self.client.sessions.create(
             dimensions={"width": self.width, "height": self.height},
+            api_timeout=self.session_timeout_ms,
         )
         self._connect_cdp()
         return self.session
