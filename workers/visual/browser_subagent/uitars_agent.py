@@ -10,8 +10,6 @@ import time
 
 import httpx
 
-from .steel_browser import SteelBrowser
-
 DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1"
 MAX_IMAGES_IN_CONTEXT = 4
 
@@ -110,9 +108,6 @@ class UITarsSubagent:
         self.height = height
         self.temperature = temperature
         self._trace = None
-        rh, rw = smart_resize(height, width)
-        self.sx = width / rw
-        self.sy = height / rh
         self._http = httpx.Client(timeout=300)
 
     def _log(self, record):
@@ -146,8 +141,10 @@ class UITarsSubagent:
         return r.json()["choices"][0]["message"]["content"]
 
     def _scale(self, x, y):
-        return (max(0, min(self.width - 1, round(x * self.sx))),
-                max(0, min(self.height - 1, round(y * self.sy))))
+        # UI-TARS-1.5 coordinates arrive in raw screenshot pixel space (verified by
+        # 3-point calibration); clamp only, no smart_resize ratio.
+        return (max(0, min(self.width - 1, round(x))),
+                max(0, min(self.height - 1, round(y))))
 
     @staticmethod
     def _img_content(b64):
@@ -167,6 +164,8 @@ class UITarsSubagent:
                             msg["content"].append({"type": "text", "text": "(screenshot pruned)"})
 
     def run(self, subtask, start_url=None):
+        from .steel_browser import SteelBrowser
+
         os.makedirs(os.path.join(self.log_dir, "steps"), exist_ok=True)
         self._trace = open(os.path.join(self.log_dir, "trace.jsonl"), "a", encoding="utf-8")
         browser = SteelBrowser(width=self.width, height=self.height)

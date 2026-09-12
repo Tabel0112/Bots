@@ -39,24 +39,40 @@ Names only, values in an untracked `.env` in this directory (`KEY=value` lines):
 
 ## Local UI-TARS server
 
-One-time setup (files live outside the repo):
+One-time setup (model files live outside the repo, any location):
 
-1. llama.cpp CUDA build in `C:\Users\Thomas\llamacpp` (from ggml-org/llama.cpp releases,
-   `llama-bNNNN-bin-win-cuda-12.4-x64.zip` + `cudart-...zip`, unzipped together).
-2. Model in `C:\Users\Thomas\models`: `UI-TARS-1.5-7B.Q4_K_M.gguf` +
-   `UI-TARS-1.5-7B.mmproj-f16.gguf` (HF `mradermacher/UI-TARS-1.5-7B-GGUF`).
+1. llama.cpp release build for your GPU (from ggml-org/llama.cpp releases; on Windows
+   CUDA, `llama-bNNNN-bin-win-cuda-12.4-x64.zip` + the matching `cudart-...zip`,
+   unzipped together).
+2. `UI-TARS-1.5-7B.Q4_K_M.gguf` + `UI-TARS-1.5-7B.mmproj-f16.gguf` from HF
+   `mradermacher/UI-TARS-1.5-7B-GGUF` (Q4 fits an 8GB GPU; F16 on 24GB+ removes
+   quantization grounding error).
 
-Start the server:
+Start the server (local example — substitute your own paths):
 
 ```bash
-C:/Users/Thomas/llamacpp/llama-server.exe -m C:/Users/Thomas/models/UI-TARS-1.5-7B.Q4_K_M.gguf --mmproj C:/Users/Thomas/models/UI-TARS-1.5-7B.mmproj-f16.gguf -ngl 99 -c 8192 --port 8080
+llama-server -m <models>/UI-TARS-1.5-7B.Q4_K_M.gguf --mmproj <models>/UI-TARS-1.5-7B.mmproj-f16.gguf -ngl 99 -c 8192 --port 8080
 ```
+
+Point `UITARS_BASE_URL` at the server if it is not on `127.0.0.1:8080` (e.g. a LAN
+workstation running the F16 model).
+
+## Coordinate convention
+
+- UI-TARS-1.5 action coordinates are treated as **raw screenshot pixels** (no
+  smart-resize rescaling). Verified by a 3-point grounding calibration
+  (`calibrate_vision.py`): coordinates came back within ~1% of original pixel space.
+- Steel mouse/keyboard actions operate in **full-window screenshot space** (the
+  screenshot includes the browser chrome), so model clicks map 1:1 to actions.
+- DOM APIs use page-viewport space, which sits at a constant offset from screenshot
+  space (~(4, 87) px, browser chrome + border). The offset is measured empirically once
+  per session with a mousemove probe, and `semantic_target` lookups subtract it.
 
 ## Dependencies
 
-Python 3.11+. `pip install steel-sdk playwright pillow httpx anthropic` (anthropic only
-for the claude backend; playwright is used for CDP navigation/DOM evidence only — no
-browser download needed).
+Python 3.11+. `pip install -r requirements.txt` (anthropic is only needed for the
+claude backend; playwright is used for CDP navigation/DOM evidence only — no browser
+download needed). `test_parser.py` runs offline with only httpx installed.
 
 ## Input / output / failure
 
@@ -80,9 +96,15 @@ python smoke_test.py     # live Steel session: navigate/screenshot/act/element/n
 
 ## Known limitations
 
-- UI-TARS end-to-end run not yet validated (local server setup in progress); the Steel
-  layer and parser are tested. The claude backend loop is written but needs an API key
-  to run.
+- The committed example (`examples/hn-top-story/`) is **observation-only**: navigate →
+  one model call → `finished()`. No click/type/scroll steps, so `semantic_target` and
+  `findings` are null and Ghost has nothing to compile from it yet. An interaction-step
+  example is the next deliverable. Its `report.json` was hand-edited after the run to
+  point evidence paths at the copies shipped beside it.
+- The claude backend loop is written but untested (needs `ANTHROPIC_API_KEY`); its
+  metrics fields are not populated yet.
 - `type` uses trailing `\n` to submit; canvas-only pages depend entirely on the VLM's
   visual grounding; no auth flows (out of MVP scope).
+- Q4 grounding error is roughly 10-40px on sparse synthetic images (better on real
+  pages); the F16 model is the upgrade path if precision limits real tasks.
 - Report shape is provisional (`0.1-provisional`), to be settled at INT-1.
