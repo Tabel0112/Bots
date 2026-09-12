@@ -220,3 +220,6 @@ __marimo__/
 # ARGUS visual worker
 workers/visual/runs/
 *.gguf
+
+# moderator run artifacts
+moderator/runs/
