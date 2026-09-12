@@ -11,6 +11,9 @@ Status: **draft, not agreed**. Written 2026-09-12 for Abel's review. Nothing her
 - Natural-language parsing is part of the MVP. The interpreted request is a handoff artifact that every teammate can read.
 - Framework first, connections later. Everything below must work with a fake toolbox before Steel is wired in.
 
+
+> **Hardware limit:** at most 4 subagents may run at once. Our machine cannot handle more. `max_concurrency` must stay at or below 4, and the open-world `caps.max_subtasks` must respect it. Look through the docs and change this later if the hardware changes.
+
 ## Components
 
 | Component | Owns | Never does |

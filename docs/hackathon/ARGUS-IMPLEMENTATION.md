@@ -4,6 +4,9 @@ Status: plan for Abel's review, written 2026-09-12. Scope is the ARGUS base only
 
 Decisions this plan assumes (all recorded in [DECISIONS.md](../ai/DECISIONS.md) or [ARGUS.md](ARGUS.md)): Python backend, JSON storage, sequential stages with concurrency only between subagents, ARGUS owns browser sessions, the moderator is Thomas's separate deliverable called through three callables, natural-language interpretation is in the MVP.
 
+
+> **Hardware limit:** at most 4 subagents may run at once. Our machine cannot handle more. `max_concurrency` must stay at or below 4, and the open-world `caps.max_subtasks` must respect it. Look through the docs and change this later if the hardware changes.
+
 ## Package layout
 
 ```text
