@@ -30,12 +30,15 @@ hotkey(key='')
 type(content='') #If you want to submit your input, use "\\n" at the end of `content`.
 scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left')
 open_url(url='') #Navigate the browser directly to a URL.
+zoom(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x2,y2)<|box_end|>') #Magnify the rectangle from corner (x1,y1) to corner (x2,y2) to read small text exactly.
 wait() #Sleep for 5s and take a screenshot to check for any changes.
 finished(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format.
 
 ## Note
 - Use English in `Thought` part and in `finished(content=...)`.
 - Write a small plan and finally summarize your next action (with its target element) in one sentence in `Thought` part.
+- Small text is unreliable at full-page scale: before reporting any exact number or exact small text, zoom() into its region and read it from the magnified view.
+- Coordinates in your actions ALWAYS refer to the full-page screenshot, never to a magnified zoom view.
 
 ## User Instruction
 {instruction}"""
@@ -270,6 +273,14 @@ class UITarsSubagent:
                             inp["coordinate"] = list(self._scale(*_parse_coords(kw["start_box"])))
                         entry["action"]["input"] = inp
                         _, shot = browser.execute("scroll", inp)
+                    elif name == "zoom":
+                        x0, y0 = self._scale(*_parse_coords(kw["start_box"]))
+                        x1, y1 = self._scale(*_parse_coords(kw["end_box"]))
+                        entry["action"]["input"] = {"region": [x0, y0, x1, y1]}
+                        shot = browser.zoom_b64([x0, y0, x1, y1])
+                        feedback.append(
+                            f"magnified view of region ({x0},{y0})-({x1},{y1}); "
+                            "action coordinates must still refer to the full-page screenshot")
                     elif name == "open_url":
                         nav = browser.navigate(str(kw.get("url", "")))
                         entry["title"] = nav["title"]

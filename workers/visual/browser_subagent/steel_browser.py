@@ -176,6 +176,9 @@ class SteelBrowser:
         img = Image.open(io.BytesIO(base64.b64decode(full)))
         x0, y0, x1, y1 = [int(v) for v in region]
         crop = img.crop((max(0, x0), max(0, y0), min(img.width, x1), min(img.height, y1)))
+        if crop.width and crop.width < 800:
+            factor = min(4, max(2, round(800 / crop.width)))
+            crop = crop.resize((crop.width * factor, crop.height * factor), Image.LANCZOS)
         buf = io.BytesIO()
         crop.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode()

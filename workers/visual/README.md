@@ -55,7 +55,37 @@ llama-server -m <models>/UI-TARS-1.5-7B.Q4_K_M.gguf --mmproj <models>/UI-TARS-1.
 ```
 
 Point `UITARS_BASE_URL` at the server if it is not on `127.0.0.1:8080` (e.g. a LAN
-workstation running the F16 model).
+workstation running a larger model).
+
+### Choosing a model
+
+Two different weaknesses show up in practice, and they respond differently to model
+size:
+
+- **Grounding (where to click)** — the 7B Q4 is already good: clicks land within ~10px
+  on real pages.
+- **Reading small text and self-directing (when to zoom, when to scan)** — the 7B is
+  weak: it misreads small numbers (unstable across runs) and does not reliably invoke
+  `zoom()` even when instructed to.
+
+Sizes for a fixed memory budget (GGUF, plus ~1.4GB mmproj and context on top):
+
+| Model | Quant | File | Fits 36GB unified? |
+| --- | --- | --- | --- |
+| UI-TARS-1.5-7B | Q4_K_M | 4.7GB | yes, easily |
+| UI-TARS-1.5-7B | F16 | 15.2GB | yes — same weights, so no gain in self-direction |
+| UI-TARS-72B-DPO | Q2_K | 29.6GB | borderline; Q2 degrades instruction-following badly |
+| UI-TARS-72B-DPO | Q3_K_S | 34.5GB | no — leaves nothing for mmproj/context/KV |
+| UI-TARS-72B-DPO | Q4_K_S | 43.9GB | no |
+
+On an Apple-silicon machine also raise the GPU wired limit
+(`sudo sysctl iogpu.wired_limit_mb=...`), and expect slow image prefill: a 72B at low
+quant may take tens of seconds per step, which multiplies across an agent loop.
+
+Practical reading: F16 of the same 7B is not worth it (identical weights), and 72B does
+not comfortably fit 36GB. If 7B self-direction is the blocker, the higher-leverage move
+is the `--backend claude` path for accuracy-critical steps rather than a bigger local
+model. Untested alternatives worth a try at the same size: `Holo1.5-7B`.
 
 ## Coordinate convention
 
@@ -106,5 +136,12 @@ python smoke_test.py     # live Steel session: navigate/screenshot/act/element/n
 - `type` uses trailing `\n` to submit; canvas-only pages depend entirely on the VLM's
   visual grounding; no auth flows (out of MVP scope).
 - Q4 grounding error is roughly 10-40px on sparse synthetic images (better on real
-  pages); the F16 model is the upgrade path if precision limits real tasks.
+  pages).
+- **The 7B does not reliably use `zoom()`.** The action exists and works, and the
+  prompt instructs the model to zoom before reporting exact values, but in a live
+  Hacker News run the model took 8 steps, called `zoom()` zero times, wandered into a
+  story page, and still misread the points (197 vs 182 actual; 168 and 162 on earlier
+  runs). Exact-value reading on a DOM-less page therefore needs a driver that follows
+  the instruction — see "Choosing a model". Where a DOM exists, prefer structural
+  extraction over reading pixels.
 - Report shape is provisional (`0.1-provisional`), to be settled at INT-1.
