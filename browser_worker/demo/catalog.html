@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>ARGUS test catalog</title>
+<style>
+body{font:17px system-ui,sans-serif;max-width:850px;margin:50px auto;padding:0 24px;color:#182335;background:#f5f7fa}
+form,article{padding:20px;background:white;border:1px solid #cfd8e5;border-radius:10px;margin:16px 0}
+label{display:inline-block;margin-right:18px}input,select,button{font:inherit;padding:9px;border:1px solid #8291a8;border-radius:5px}
+button{background:#244fbe;color:white;cursor:pointer}h1{letter-spacing:-1px}a{color:#244fbe}
+</style></head>
+<body><main>
+<h1>ARGUS test catalog</h1><p>A controlled search and filter fixture for the browser worker.</p>
+<form id="search-form" method="get">
+<label>Search products <input name="q" type="search" placeholder="Search products"></label>
+<label>Maximum price <select name="max_price"><option value="50">50 USD</option><option value="100">100 USD</option><option value="150">150 USD</option><option value="200">200 USD</option></select></label>
+<button type="submit" data-action="search">Search</button>
+</form>
+<section id="applied" hidden><h2>Applied filters</h2>
+<p>Query: <span id="applied-query"></span></p><p>Maximum price: <span id="applied-max"></span></p></section>
+<section id="results" data-ready="false"><h2>Results</h2></section>
+<p id="empty" hidden>No matching products.</p>
+</main>
+<script>
+const products = [
+ {id:'studio', title:'Studio headphones', price:129, currency:'USD'},
+ {id:'travel', title:'Travel headphones', price:79, currency:'USD'},
+ {id:'premium', title:'Premium headphones', price:199, currency:'USD'},
+ {id:'keyboard', title:'Mechanical keyboard', price:89, currency:'USD'}
+];
+document.querySelector('form').addEventListener('submit', event => {
+ event.preventDefault();
+ const form = new FormData(event.target), q = form.get('q'), max = Number(form.get('max_price'));
+ document.querySelector('#applied').hidden = false;
+ document.querySelector('#applied-query').textContent = q;
+ document.querySelector('#applied-max').textContent = String(max);
+ const results = document.querySelector('#results');
+ results.querySelectorAll('article').forEach(el => el.remove());
+ const filtered = products.filter(p => p.title.toLowerCase().includes(q.toLowerCase()) && p.price <= max);
+ filtered.forEach(p => {
+   const card = document.createElement('article');
+   card.setAttribute('aria-label',p.title);
+   const heading = document.createElement('h3'); heading.textContent = p.title; card.append(heading);
+   const price = document.createElement('span'); price.dataset.testid='price'; price.textContent = String(p.price); card.append(price);
+   card.append(document.createTextNode(' '));
+   const currency = document.createElement('span'); currency.dataset.testid='currency'; currency.textContent=p.currency; card.append(currency);
+   const link = document.createElement('a'); link.href='/products/'+p.id; link.textContent='View '+p.title; card.append(link);
+   results.append(card);
+ });
+ results.dataset.ready='true';
+ document.querySelector('#empty').hidden = filtered.length !== 0;
+});
+</script></body></html>

@@ -1,40 +1,44 @@
 # Current checkpoint
 
-Updated: 2026-09-12. Phase: **planning and research**. Four workstream assignments are confirmed in [TEAM.md](TEAM.md).
+Updated: 2026-09-12. **HTML-1 DOM worker implemented locally; shared integration pending.** Ghost and visual modules have separate implementation/evidence below. Assignments and handoffs remain in [TEAM.md](TEAM.md).
 
-## What the next AI needs to know
+## Latest user direction
 
-We are building ARGUS + Ghost API for the Battle of the Schools Web Agents hackathon. ARGUS plans work and coordinates reasoning/verification; Ghost turns successful browser interactions into reusable, parameterized, qualified capabilities. Browser subagents will use Steel. See [architecture](ARCHITECTURE.md) for the intended moderator flow and [decisions](DECISIONS.md) for confirmed versus open choices.
+The user supplied a detailed browser-worker runtime specification and explicitly requested its full implementation. This supersedes the earlier planning-only restriction for Tianqi's HTML-1 workstream. The browser worker handles one structured subtask; ARGUS decomposition/moderation, Ghost qualification, and visual execution remain separate responsibilities.
 
-The shared repository checkpoint contains documentation, AI entry points and planning placeholders. A previous request produced a local synthetic backend, but the user clarified that implementation was premature. That experiment is not included in this documentation commit. Do not assume that its files exist in a teammate's checkout or treat its fixed controller/schema/defaults as the agreed final architecture.
+## What exists now
 
-## Local experiment — not part of this shared checkpoint
+[browser_worker/README.md](../../browser_worker/README.md) is the setup and usage entry point. The new `browser_worker/` module includes:
 
-These paths remain only in the original working checkout unless separately published:
+- Strict Pydantic request, action, evidence, and report contract 0.2; trusted site config and deterministic input/action/domain/value-origin validation.
+- Async Steel session create/attach/release and Playwright browser operations; local Chromium mode for reproducible tests. Observation-bound element refs, fresh DOM checks, guarded redirect hops, and typed execution errors.
+- GPT-5.4 Responses function tools with medium reasoning, one operation per call, bounded retries/actions/model calls/runtime, cancellation, and operational logging.
+- Deterministic extraction from observed field mappings and independent schema, provenance, filter, count, empty-state, freshness, and link checks. Unproven completion returns `inconclusive`.
+- A transport-neutral `Worker.run`, FastAPI submit/execute/poll/cancel routes, in-process session exclusion/idempotency, and typed visual handoff/trace output.
+- A small local catalog and explicitly scripted reasoning substitute for no-key smoke tests. Reports identify browser/reasoning backends. This is not the product-level two-version demonstration.
 
-| Paths | Experimental behavior/status |
-| --- | --- |
-| `backend/contracts/` | Python 0.1 types/protocols and nine synthetic fixtures; no general moderator/subtask contract |
-| `backend/browser/fake.py`, `backend/ghost/fake.py` | Synthetic actions, sample candidate compilation/binding and validation; no Steel/model calls |
-| `backend/argus/` | Sequential fake-run controller, ordered events, terminal state and cooperative budgets |
-| `backend/api/`, `backend/storage/` | Local API, polling/SSE snapshots, process-local storage |
-| `tests/integration/`, `scripts/`, `.env.example` | Experimental tests, fixture/link utilities and unused environment-variable names |
+The full product flow remains in [ARCHITECTURE.md](ARCHITECTURE.md). Contract 0.2 is an implemented local HTML-1 boundary awaiting INT-1 agreement and receiver verification, not a project-wide contract. The older provisional contract 0.1 is preserved. ARGUS should call `Worker.run` in-process; FastAPI is optional, not a required HTTP layer between ARGUS and its toolbox. DOM/visual adapter convergence, shared Steel ownership and `needs_visual` compatibility require coordination with Thomas at INT-1.
 
-The local-only run command is `python3 -m backend.api.server`; its tests use `python3 -m unittest discover -v`. Both require the unpublished files. The fake API binds localhost and stores data only in memory. Do not use these as clean-clone setup instructions.
+## Validation and checkout
 
-No live exploration/compilation, fresh qualification, real reuse, repair/fallback, vision execution, moderator reasoning, natural-language decomposition, dashboard or durable storage has been demonstrated here. Constructed reuse/repair fixtures are UI examples, not execution evidence. Team members may have additional work; its revisions and results have not been reported in this context.
+Work started from `main` at `baf341a`; PR #7 on `codex/browser-worker-steel` is rebased onto `origin/main` at `b4c9e76`, preserving the merged Ghost and visual modules. Recheck Git status and the pull request before editing.
 
-## Repository and validation checkpoint
+PR #7 review checks: **74 DOM tests passed** on Python 3.12.14/Windows (37.72 seconds); Ruff lint/format and whitespace checks passed. The existing Ghost Python suite also passed all 12 tests. Ghost/visual source and Ghost CI remain unchanged against main. DOM test/lint configuration is scoped to its module; a separate Linux CI job was added (remote result pending). Review fixes cover ambient network traffic, model failure-code authority and portable browser setup.
 
-Documentation prepared from `main` at `25f061c` (`created team setup`), remote `Tabel0112/Bots`. The user authorized committing and pushing the documentation. The commit replaces the duplicate tracked `hackathon-team/` pack with the current docs; the originals remain recoverable from Git at `25f061c`. The synthetic implementation is intentionally left untracked. Recheck local Git status and remote history before edits rather than assuming this dated snapshot is current.
+Prior evidence, not rerun for this review: the local demo drove real Chrome through search/extraction/verification/cleanup; a credentialed Steel-only sanity check created a session, connected Playwright, observed `https://example.com/` as `Example Domain`, and released the session in 5.671 seconds. It exposed and fixed a session ID format bug using a canonical UUID. No live GPT call or complete configured Steel task has been verified; the latter needs a reachable configured site instead of the local fixture.
 
-Prior local experiment validation on 2026-09-12: **24 tests passed** on Python 3.13.5, including localhost HTTP behavior. That suite is not part of this documentation release and was not rerun for it. Publication validation: **70 local Markdown links resolve** in an exported staged snapshot; the Claude import resolves, the unpublished backend is absent, and the staged whitespace check passes. No live Steel test or fresh-Claude startup test has run.
+Earlier documentation-only checkpoints and the local synthetic backend experiment are historical. The experiment's 24-test result does not describe this worker and must not be used as its validation. No older `backend/` code was present in the starting checkout.
 
-## Latest work and next useful step
+## Next handoff
 
-Prepared the planning docs, team progress board, root AI entry points and coding-task completion rule for sharing. Coding agents must maintain module READMEs, record changes and actual checks in TEAM, and update project context when appropriate. No runtime implementation changes are part of this publication.
+1. Agree the local 0.2 boundary at INT-1, then have Abel verify `Worker.run` inputs/reports and Sting review real trace evidence. The worker does not promote skills.
+2. Coordinate with Thomas on one shared Steel toolbox/session owner and verify a continuing `needs_visual` handoff in an ARGUS-owned session. Worker-owned sessions are released.
+3. Configure an OpenAI key and a reachable read-only site for the remaining live GPT + configured Steel task test. The independent Steel lifecycle check is already verified.
+4. Record receiver revisions/results in TEAM; HTML-1 remains Building and INT-1/INT-2 remain unintegrated.
 
-Next planning checkpoint is INT-1 in TEAM: walk through one concrete request and agree component inputs, outputs, evidence, failures and shared session responsibility. Each person can continue research with common samples; connect a working slice when its components are ready. Public-site choice, agent framework/model, remaining ownership and precise experiments are open.
+## Visual worker module
+
+`workers/visual/` is merged on main. VLM-1 is Ready to connect, with reported parser, live Steel smoke, grounding calibration and a successful one-step Hacker News run. Preserve its [TEAM evidence](TEAM.md) and [module usage](../../workers/visual/README.md); its ARGUS/Ghost receiver checks remain pending. These are the visual workstream's recorded results, not checks rerun for HTML-1.
 
 ## Ghost API local module
 
