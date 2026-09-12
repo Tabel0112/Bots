@@ -1,0 +1,14 @@
+[run]
+branch = True
+data_file = ghsotapi/.coverage
+source = ghsotapi/demo
+omit =
+    ghsotapi/demo/test_*.py
+
+[report]
+show_missing = True
+skip_covered = True
+fail_under = 70
+
+[xml]
+output = ghsotapi/coverage-python.xml

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ghost · Workflow explorer</title>
+<style>
+:root{font-family:system-ui,sans-serif;font-size:16px;color:#e8eef9;background:#0a101a}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit;color:inherit;background:#172438;border:1px solid #3b506d;border-radius:7px;padding:10px 13px}button{cursor:pointer}button:hover{background:#253b53}button:disabled{opacity:.4;cursor:default}:focus-visible{outline:3px solid #80eab8;outline-offset:3px}header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:22px 3vw;border-bottom:1px solid #28384b}h1{font-size:23px;margin:0;letter-spacing:.04em}h1 span{font-weight:400;color:#91a6bf}h2{font-size:17px;margin:0 0 14px}
+.badge{font-size:13px;color:#ffd397;background:#332718;padding:7px 10px;border-radius:6px}main{padding:22px 3vw}
+.form{display:flex;align-items:end;gap:14px;flex-wrap:wrap}label{display:grid;gap:7px;font-size:14px}input{width:190px}input[type=number]{width:140px}
+.primary{background:#87edbc;color:#08271b;font-weight:650;border-color:#87edbc}
+.error{min-height:26px;color:#ffb2aa;font-size:14px;padding-top:5px}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px}
+.panel{border:1px solid #2b3a50;border-radius:12px;background:#101a29;overflow:hidden}
+.toolbar{display:flex;align-items:center;gap:8px;padding:14px;border-bottom:1px solid #2b3a50;flex-wrap:wrap}
+.toolbar button{padding:7px 11px;font-size:14px}
+.toolbar strong{margin-right:auto;font-size:14px}
+.viewport{height:640px;overflow:auto;background-image:radial-gradient(#29394d 1px,transparent 1px);background-size:20px 20px;cursor:grab;touch-action:none;user-select:none;overscroll-behavior:contain}
+.viewport.dragging{cursor:grabbing}
+.viewport.dragging *{cursor:grabbing!important}
+.diagram{position:relative;width:880px;height:1120px;transform-origin:top left}
+.graphnode{position:absolute;width:190px;height:64px;text-align:left;padding:10px 15px;box-shadow:0 5px 15px #0003;z-index:1;background:#142135;border-color:#3e5473}
+.graphnode strong{display:block;font-size:14px}
+.graphnode small{display:block;color:#98adc5;font-size:12px;margin-top:4px}
+.graphnode[data-state=done]{border-color:#57be92;background:#173629}
+.graphnode[data-state=active]{border:2px solid #9bffcf;background:#21503b;box-shadow:0 0 22px #63e9aa30}
+.graphnode[data-state=failed]{border-color:#ff8c83;background:#49292b}
+.graphnode[aria-pressed=true]{outline:3px solid #8dbbff;outline-offset:4px}
+.graphnode.decision{border-radius:24px}
+.graphnode.terminal{border-radius:32px;text-align:center}
+.wires{position:absolute;inset:0;width:880px;height:1120px;overflow:visible}
+.wire{fill:none;stroke:#415672;stroke-width:2}
+.wire.traversed{stroke:#73dfa9;stroke-width:3}
+.wire.live{stroke-dasharray:7 6;animation:flow 1s linear infinite}
+.wires text{fill:#b7c7da;font-size:13px}
+.legend{display:flex;gap:15px;font-size:12px;padding:12px 15px;color:#aebdd0}
+.legend span::before{content:'';display:inline-block;width:8px;height:8px;background:var(--dot);border-radius:50%;margin-right:6px}
+.playback{padding:14px;border-top:1px solid #2b3a50;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.playback input{flex:1;min-width:120px}
+.playback button{font-size:14px}
+.muted{color:#a8bad1;font-size:14px;line-height:1.6}
+.side{padding:21px}
+.stage{color:#8feec0;font-size:13px;text-transform:uppercase;letter-spacing:.08em}
+.detail{font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.empty{color:#94a9c3}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#0a1320;padding:12px;border-radius:6px;max-height:260px;overflow:auto}
+.observation{border-top:1px solid #314157;margin-top:18px;padding-top:18px}
+.product{padding:9px 0;border-bottom:1px solid #304056;font-size:14px;display:flex;justify-content:space-between;gap:8px}
+.check{font-size:13px;color:#8feec0;margin:8px 0}
+.check.bad{color:#ffaba3}#runs{min-width:155px;max-width:320px}#registry{font-size:13px;line-height:1.7;color:#afc1d7}details{margin-top:18px}summary{cursor:pointer;font-size:14px}
+.notice{font-size:13px;color:#93a8c3;margin-bottom:0}@keyframes flow{to{stroke-dashoffset:-26}}@media(prefers-reduced-motion:reduce){.wire.live{animation:none}}@media(max-width:950px){.workspace{grid-template-columns:1fr}
+.viewport{height:570px}
+.side{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.observation{border:0;margin:0;padding:0}}@media(max-width:550px){header{align-items:start;flex-direction:column}
+.form label,.form input,.form select,.form button{width:100%}
+.side{display:block}
+.observation{margin-top:22px}
+.viewport{height:500px}main{padding:15px}}
+</style></head><body>
+<header><h1>GHOST <span>/ Workflow explorer</span></h1><span class="badge">Simulated browser · real execution events</span></header>
+<main><form id="task" class="form"><label>Search query<input id="query" value="headphones" required maxlength="200"></label><label>Budget · CAD<input id="price" type="number" value="150" min="0" max="1000000" step="0.01" required></label><label>Workflow selection<select id="mode"><option value="auto">Find or create</option><option value="explore">Force discovery</option></select></label><button id="submit" class="primary">Run workflow</button><label>Inspect a run<select id="runs"><option value="">No runs yet</option></select></label></form>
+<div id="error" class="error" role="alert"></div>
+<div class="workspace"><section class="panel"><div class="toolbar"><strong id="status" aria-live="polite">Ready to run</strong><button id="zoomout" type="button" aria-label="Zoom out">−</button><span id="zoomlabel" class="muted">100%</span><button id="zoomin" type="button" aria-label="Zoom in">+</button><button id="fit" type="button">Fit chart</button><button id="follow" type="button">Follow live</button></div>
+<div id="viewport" class="viewport"><div id="scaled"><div id="diagram" class="diagram"><svg id="wires" class="wires" aria-hidden="true"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#6886a8"/></marker></defs></svg></div></div></div>
+<div class="legend"><span style="--dot:#415672">Not visited</span><span style="--dot:#9bffcf">Current</span><span style="--dot:#57be92">Visited</span><span style="--dot:#ff8c83">Failed</span></div>
+<div class="playback"><button id="previous" type="button" aria-label="Previous event">← Step</button><input id="scrub" type="range" min="0" max="0" value="0" aria-label="Inspect event history"><button id="next" type="button" aria-label="Next event">Step →</button><span id="position" class="muted">No events</span></div></section>
+<aside class="panel side"><div><h2 id="detailtitle">Click a workflow node</h2><span id="detailstate" class="stage">Explore the graph</span><p id="detail" class="detail empty">Select any node to see its role. Run a task to follow the path, then scrub through its execution history.</p><pre id="payload" hidden></pre><details><summary>Saved workflow versions</summary><div id="registry">Loading…</div></details></div><div class="observation"><h2>Catalog observation</h2><div id="fields" class="muted">No browser steps executed yet.</div><div id="products"></div><div id="checks"></div><details><summary>Final result and evidence</summary><pre id="result">No result yet.</pre></details></div></aside></div>
+<p class="notice">Drag the empty chart canvas to move around. Click nodes to inspect. Use Step or the slider to revisit events; Follow live returns to current execution. Inspection does not pause the task. Additional runs queue. Browser/catalog are simulated; execution is paced for visibility.</p>
+</main><script src="/flowchart.js"></script><script>
+const $=id=>document.getElementById(id);
+const definitions=[
+ ['task','Task received',345,25,'Queue a validated task for the worker.','terminal'],
+ ['match','Find a workflow?',345,125,'Look for a qualified workflow compatible with the site, operation, inputs, outputs, and permitted actions.','decision'],
+ ['reuse','Reuse saved workflow',100,235,'Load the selected qualified version and bind this request’s values.'],
+ ['discover','Discover procedure',590,235,'The fixture discovery adapter supplies a new candidate procedure. Real agent discovery is not connected yet.'],
+ ['navigate','Open catalog',345,350,'Execute navigation to the simulated catalog.'],
+ ['query','Enter search query',345,440,'Bind the query parameter to the Search products field.'],
+ ['price','Set maximum price',345,530,'Bind max_price to the Maximum price field.'],
+ ['search','Search products',345,620,'Execute the search using the current bound input values.'],
+ ['extract','Extract results',345,710,'Extract fresh fixture records from this execution.'],
+ ['validate','Verify results',345,800,'Check applied inputs, expected records, duplicates, price, currency, and an explicit empty result.','decision'],
+ ['save','Stage candidate',590,895,'Stage a versioned candidate linked to this run. It commits after qualification in the current demo.'],
+ ['qualify','Qualify workflow',590,990,'Run three isolated fixture checks before marking the version qualified.'],
+ ['complete','Complete & commit',100,990,'Commit the run and any new workflow. Reuse takes this branch without creating a candidate.','terminal']
+];
+const byId=Object.fromEntries(definitions.map(d=>[d[0],d]));const buttons={},paths={};
+const edges=[['task','match'],['match','reuse','Match'],['match','discover','No match / forced'],['reuse','navigate'],['discover','navigate'],['navigate','query'],['query','price'],['price','search'],['search','extract'],['extract','validate'],['validate','save','New procedure'],['validate','complete','Reused'],['save','qualify'],['qualify','complete']];
+const svgNS='http://www.w3.org/2000/svg';
+for(const [id,title,x,y,description,kind] of definitions){const b=document.createElement('button');b.type='button';b.className='graphnode '+(kind||'');b.style.left=x+'px';b.style.top=y+'px';b.dataset.state='pending';b.setAttribute('aria-pressed','false');b.append(make('strong',title),make('small','Not visited'));b.onclick=()=>selectNode(id);$('diagram').append(b);buttons[id]=b}
+for(const [from,to,label] of edges){const a=byId[from],b=byId[to],x=a[2]+95,y=a[3]+64,bx=b[2]+95,by=b[3];let d;if(from==='qualify')d=`M${a[2]},${a[3]+32} H${b[2]+190}`;else if(from==='validate'&&to==='complete')d=`M${a[2]},${a[3]+32} H${bx} V${by}`;else d=`M${x},${y} V${(y+by)/2} H${bx} V${by}`;const p=document.createElementNS(svgNS,'path');p.setAttribute('d',d);p.setAttribute('class','wire');p.setAttribute('marker-end','url(#arrow)');$('wires').append(p);paths[from+'-'+to]=p;if(label){const t=document.createElementNS(svgNS,'text');t.setAttribute('x',from==='validate'?(to==='save'?590:120):(x+bx)/2);t.setAttribute('y',from==='validate'?880:(y+by)/2-8);t.setAttribute('text-anchor','middle');t.textContent=label;$('wires').append(t)}}
+let selected=null,job=null,cursor=0,following=true,chosen=null,scale=1,runsSignature='',registrySignature='',renderSignature='';
+function make(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e}
+function eventNode(e){if(e.stage==='step'){const s=e.data.step;if(s.action==='fill')return s.target==='Search products'?'query':'price';return {navigate:'navigate',click:'search',extract:'extract'}[s.action]||'navigate'}return {queued:'task',matching:'match',exploring:'discover',replaying:'reuse',validating:'validate',validated:'validate',compiling:'save',qualifying:'qualify',qualified:'qualify',completed:'complete',failed:'complete'}[e.stage]||'task'}
+async function api(path,options){const r=await fetch(path,options),data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data}
+function selectNode(id){chosen=id;if(job){const indices=job.events.map((e,i)=>eventNode(e)===id?i:-1).filter(i=>i>=0);if(indices.length){cursor=indices[indices.length-1];following=false}}render(true)}
+function render(force=false){const events=job?job.events:[];if(following&&events.length)cursor=events.length-1;cursor=Math.min(cursor,Math.max(0,events.length-1));const signature=[selected,events.length,cursor,following,chosen].join(':');if(!force&&signature===renderSignature)return;renderSignature=signature;const visible=events.slice(0,cursor+1),current=visible[visible.length-1],active=current?eventNode(current):null,visited=new Set(visible.map(eventNode));
+ for(const [id,b] of Object.entries(buttons)){const state=id===active?(current.stage==='failed'?'failed':current.stage==='completed'?'done':'active'):visited.has(id)?'done':'pending';b.dataset.state=state;b.lastChild.textContent={pending:'Not visited',active:'Current event',done:'Visited',failed:'Failed'}[state];b.setAttribute('aria-pressed',String(id===(chosen||active)))}
+ for(const [key,p] of Object.entries(paths)){const [a,b]=key.split('-');const taken=visited.has(a)&&visited.has(b)&&!(key==='validate-complete'&&visited.has('save'));p.setAttribute('class','wire'+(taken?' traversed':'')+(taken&&b===active&&current.stage!=='completed'?' live':''))}
+ $('status').textContent=job?((following?'Live · ':'Inspecting · ')+(current?current.stage:'queued')):'Ready to run';$('follow').classList.toggle('primary',following);$('scrub').max=Math.max(0,events.length-1);$('scrub').value=cursor;$('scrub').disabled=!events.length;$('previous').disabled=!events.length||cursor===0;$('next').disabled=!events.length||cursor>=events.length-1;$('position').textContent=events.length?`${cursor+1} / ${events.length}`:'No events';
+ const id=chosen||active;if(id){$('detailtitle').textContent=byId[id][1];const matches=visible.filter(e=>eventNode(e)===id),event=matches[matches.length-1];$('detailstate').textContent=event?event.stage:'Not visited at this point';$('detail').textContent=event?event.message:byId[id][4];$('payload').hidden=!event;$('payload').textContent=event?JSON.stringify({sequence:event.sequence,timestamp:event.timestamp,...event.data},null,2):''}
+ let fields={},items=null,validation=null;for(const e of visible){if(e.data.fields)fields=e.data.fields;if(Array.isArray(e.data.items))items=e.data.items;if(e.data.validation)validation=e.data.validation}
+ $('fields').replaceChildren();if(!Object.keys(fields).length)$('fields').textContent='No input fields filled yet.';for(const [key,value] of Object.entries(fields))$('fields').append(make('div',key+': '+value));$('products').replaceChildren();if(items!==null){if(!items.length)$('products').append(make('p','No matching products.','muted'));for(const item of items){const row=make('div','','product');row.append(make('span',item.title),make('strong','CAD '+item.price.toFixed(2)));$('products').append(row)}}$('checks').replaceChildren();if(validation)for(const [key,passed] of Object.entries(validation.checks))$('checks').append(make('div',(passed?'✓ ':'✕ ')+key.replaceAll('_',' '),'check'+(passed?'':' bad')));
+ const terminal=visible.find(e=>e.data.result);$('result').textContent=terminal?JSON.stringify(terminal.data.result,null,2):'No final result at this point.';
+ if(following&&active)buttons[active].scrollIntoView({block:'nearest',inline:'nearest',behavior:'auto'});
+}
+function zoom(value){scale=Math.max(.35,Math.min(1.6,value));$('diagram').style.transform=`scale(${scale})`;$('scaled').style.width=880*scale+'px';$('scaled').style.height=1120*scale+'px';$('zoomlabel').textContent=Math.round(scale*100)+'%'}
+GhostFlow.bindPanning($('viewport'),()=>{following=false;render(true)});
+$('zoomin').onclick=()=>zoom(scale+.1);$('zoomout').onclick=()=>zoom(scale-.1);$('fit').onclick=()=>zoom(Math.min(1,($('viewport').clientWidth-20)/880));$('follow').onclick=()=>{following=true;chosen=null;render(true)};$('scrub').oninput=()=>{cursor=Number($('scrub').value);following=false;chosen=null;render(true)};$('previous').onclick=()=>{cursor--;following=false;chosen=null;render(true)};$('next').onclick=()=>{cursor++;following=false;chosen=null;render(true)};
+$('runs').onchange=()=>{selected=$('runs').value;job=null;chosen=null;following=true;renderSignature='';refresh()};
+let refreshing=false;async function refresh(){if(refreshing)return;refreshing=true;try{const [runs,workflows]=await Promise.all([api('/api/live/runs'),api('/api/live/workflows')]);const sig=JSON.stringify(runs);if(sig!==runsSignature){runsSignature=sig;$('runs').replaceChildren();if(!runs.length)$('runs').append(make('option','No runs yet'));for(const r of runs){const o=make('option',r.query+' · '+r.status);o.value=r.job_id;$('runs').append(o)}if(!selected&&runs.length)selected=runs[0].job_id;$('runs').value=selected||''}const ws=JSON.stringify(workflows);if(ws!==registrySignature){registrySignature=ws;$('registry').replaceChildren();if(!workflows.length)$('registry').textContent='No saved workflows.';for(const w of workflows)$('registry').append(make('div','v'+w.version+' · '+w.status))}if(selected){const id=selected,next=await api('/api/live/runs/'+id);if(id===selected){job=next;render()}}$('error').textContent=''}catch(e){$('error').textContent='Connection problem: '+e.message}finally{refreshing=false}}
+$('task').onsubmit=async e=>{e.preventDefault();$('submit').disabled=true;try{const task={schema_version:'0.1',request_id:crypto.randomUUID(),site_id:'demo-catalog',operation:'search_products',parameters:{query:$('query').value,max_price:Number($('price').value)},mode:$('mode').value};const r=await api('/api/live/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(task)});selected=r.job_id;job=null;chosen=null;following=true;renderSignature='';await refresh();$('runs').value=selected}catch(e){$('error').textContent=e.message}finally{$('submit').disabled=false}};
+async function poll(){await refresh();setTimeout(poll,350)}zoom(Math.min(1,($('viewport').clientWidth-20)/880));poll();
+</script></body></html>

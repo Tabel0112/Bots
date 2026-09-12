@@ -1,0 +1,74 @@
+name: Ghost API tests and coverage
+
+on:
+  push:
+    paths:
+      - hackathon-team/ghsotapi/**
+      - .github/workflows/ghost-codecov.yml
+      - codecov.yml
+  pull_request:
+    paths:
+      - hackathon-team/ghsotapi/**
+      - .github/workflows/ghost-codecov.yml
+      - codecov.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: hackathon-team/ghsotapi/requirements-dev.txt
+
+      - name: Install Python coverage tool
+        run: python -m pip install -r hackathon-team/ghsotapi/requirements-dev.txt
+
+      - name: Run Python tests with coverage
+        run: |
+          python -m coverage run --branch --source=hackathon-team/ghsotapi/demo --omit='hackathon-team/ghsotapi/demo/test_*.py' --data-file=hackathon-team/ghsotapi/.coverage -m unittest discover -s hackathon-team/ghsotapi/demo -p 'test_*.py' -v
+          python -m coverage xml --data-file=hackathon-team/ghsotapi/.coverage --fail-under=70 -o hackathon-team/ghsotapi/coverage-python.xml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Run flowchart tests with coverage
+        run: >-
+          node --test --experimental-test-coverage
+          --test-coverage-include='hackathon-team/ghsotapi/demo/flowchart.js'
+          --test-coverage-exclude='**/test_*.js'
+          --test-reporter=spec
+          --test-reporter-destination=stdout
+          --test-reporter=lcov
+          --test-reporter-destination=hackathon-team/ghsotapi/coverage-flowchart.lcov
+          hackathon-team/ghsotapi/demo/test_flowchart.js
+
+      - name: Upload Python coverage
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: hackathon-team/ghsotapi/coverage-python.xml
+          flags: ghost-python
+          disable_search: true
+          fail_ci_if_error: true
+
+      - name: Upload flowchart coverage
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: hackathon-team/ghsotapi/coverage-flowchart.lcov
+          flags: ghost-flowchart
+          disable_search: true
+          fail_ci_if_error: true

@@ -2,6 +2,8 @@
 
 Owner: C. Contract baseline: 0.1. All assignments are provisional until names are entered.
 
+Ghost-specific development details and current demo status are in the [development guide](ghsotapi/DEVELOPMENT.md). This shared plan retains cross-team dependencies and live integration gates.
+
 ## Outcome and scope
 
 Demonstrate one real browser workflow being explored, compiled into a candidate skill, and reused with changed inputs to retrieve fresh results. Demonstrate one supported site-change repair on an explicitly labeled controlled website. Display evidence and measured behavior.
@@ -17,7 +19,7 @@ ARGUS interprets the request, chooses exploration or reuse, coordinates validati
 | Role | Name | Owned implementation paths | Dependencies and shared-file rule |
 | --- | --- | --- | --- |
 | A | TBD | `backend/browser/`, `tests/browser/` | Implements C's shared types; gives B a real action trace |
-| B | TBD | `backend/ghost/`, `tests/ghost/` | Uses A's execution interface and C's storage interface |
+| B | TBD | `ghsotapi/` (demo/docs now; modules/tests planned) | Uses A's execution interface and C's storage interface |
 | C | TBD | `backend/argus/`, `backend/contracts/`, `backend/storage/`, `backend/api/`, `tests/integration/`, root setup/config | Owns backend dependencies, shared schemas, fixture messages, cross-component integration |
 | D | TBD | `frontend/`, `demo-site/`, `docs/demo/` | Uses versioned API examples first; C wires integration with D through reviewed changes |
 

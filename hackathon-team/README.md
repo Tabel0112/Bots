@@ -1,10 +1,29 @@
 # ARGUS + Ghost API — team working pack
 
+## Live workflow demo
+
+From the repository root:
+
+```sh
+python3 ghsotapi/demo/live_demo.py
+```
+
+Open [the local viewer](http://127.0.0.1:8765) to watch matching, executed steps, results, and qualification while the task runs. Additional tasks queue while the viewer remains responsive. The browser/catalog are simulated; events and database writes come from the running demo. Stop the server with Ctrl+C.
+
+
 Updated: 2026-09-12. Planning baseline: 24 productive hours, four people.
 
 ARGUS is the deliberation, orchestration, and verification brain. Ghost API is the procedural-memory/tooling layer that compiles successful browser interactions into reusable, parameterized, self-validating capabilities.
 
-These documents describe intended implementation. They do not claim the code exists or that checks have passed. Initial status for every workstream is **not started / not yet reported**.
+The team plan describes intended live implementation. A working, simulated Ghost terminal demo is available in [ghsotapi/](ghsotapi/README.md); its fixture tests do not establish live browser readiness. Workstream logs retain their planning status unless an owner has reported integration progress.
+
+## Ghost API
+
+All Ghost-specific documentation and the runnable demo are in [ghsotapi/](ghsotapi/README.md). Start with the [development guide](ghsotapi/DEVELOPMENT.md). Shared ARGUS, browser, interface, and team evaluation documents remain at the root.
+
+```sh
+python3 ghsotapi/demo/ghost_demo.py
+```
 
 ## Start here
 
@@ -16,7 +35,7 @@ These documents describe intended implementation. They do not claim the code exi
 | Person | Work log | Main responsibility |
 | --- | --- | --- |
 | A — browser engineer | [Person A](people/A-browser.md) | Explore websites, capture actions, replay steps, manage browser sessions |
-| B — Ghost engineer | [Person B](people/B-ghost.md) | Compile skills, match requests, bind inputs, validate, repair |
+| B — Ghost engineer | [Person B](ghsotapi/B-ghost.md) | Compile skills, match requests, bind inputs, validate, repair |
 | C — integration lead | [Person C](people/C-argus.md) | Shared contracts, ARGUS controller, API, storage, integration |
 | D — interface and demo builder | [Person D](people/D-experience.md) | Dashboard, controlled demo site, manual acceptance checks, pitch/video |
 

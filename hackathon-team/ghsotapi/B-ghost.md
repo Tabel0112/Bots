@@ -2,11 +2,15 @@
 
 Name: TBD  
 Branch/worktree: `feat/ghost` (proposed; not created)  
-Owned paths: `backend/ghost/`, `tests/ghost/`  
+Owned paths: `ghsotapi/` (shared contracts and storage changes remain coordinated by C)
 Current status: not started / not yet reported  
 Last updated by owner: not yet  
 Next checkpoint: compile a sample trace into a strict candidate skill  
 Blocked by: final operation/check definitions; real trace arrives from A by hour 4
+
+## Current local demo
+
+A simulated terminal demo now exists in [demo/](demo/README.md), with SQLite persistence and five fixture lifecycle tests. The implementation map, limitations, and next work are documented in [DEVELOPMENT.md](DEVELOPMENT.md). The task board below is the original live-integration plan; its unreported statuses do not describe the local fixture demo.
 
 ## Mission
 

@@ -1,6 +1,6 @@
 # Evaluation and demo checklist
 
-Owner: D, with technical results supplied by A/B/C. Status: planned checks; none has been run.
+Owner: D, with technical results supplied by A/B/C. Status: planned live-system checks; none has been reported as run. The separate [Ghost fixture demo checks](ghsotapi/DEVELOPMENT.md#validation) cover local logic only.
 
 ## What the demo must prove
 

@@ -1,0 +1,26 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 80%
+
+flags:
+  ghost-python:
+    paths:
+      - hackathon-team/ghsotapi/demo/*.py
+  ghost-flowchart:
+    paths:
+      - hackathon-team/ghsotapi/demo/flowchart.js
+
+ignore:
+  - hackathon-team/ghsotapi/demo/test_*.py
+  - hackathon-team/ghsotapi/demo/test_*.js
+
+comment:
+  layout: reach, diff, flags, files
+  behavior: default
+  require_changes: false
