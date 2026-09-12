@@ -18,13 +18,26 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | ID | Deliverable | Responsible | Status | Dependency / next step | Evidence / branch |
 | --- | --- | --- | --- | --- | --- |
 | INT-1 | Shared example and interface agreement | All four; Abel coordinates ARGUS inputs/outputs | Planned | Walk through one request and agree the checklist below | Not reported |
-| GHOST-1 | Ghost lifecycle and callable boundary | Sting | Researching | Draft using shared samples; real compilation needs worker traces | Not reported |
+| GHOST-1 | Ghost lifecycle and callable boundary | Sting | Building | Connect the fixture boundary to a real worker trace; local demo remains simulated | `ghostapi/` on `feat/ghost-api-interactive-demo`; 12 Python and 5 JavaScript tests passed |
 | VLM-1 | Visual worker example and evidence report | Thomas | Ready to connect | Abel/Sting run the connection check against `workers/visual/examples/hn-top-story/`; align report shape at INT-1 | `workers/visual/`; see update below |
 | HTML-1 | HTML/code worker example and evidence report | Tianqi | Researching | Define available code sources; prove structure → action/result; align with INT-1 | Not reported |
 | ARGUS-1 | Task plan, routing and moderator walkthrough | Abel | Researching | Define worker inputs/outputs using INT-1; use samples while workers develop | Not reported |
 | INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
 | DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Needs owner | Allocate remaining deliverables; use evaluation checklist | Not run |
+
+### GHOST-1 update — 2026-09-12
+
+```text
+Task ID / date / status: GHOST-1 / 2026-09-12 / Building
+Artifact, branch/revision or local files: ghostapi/ on feat/ghost-api-interactive-demo
+Module README / usage instructions: ghostapi/README.md and ghostapi/DEVELOPMENT.md
+Entry point + environment names: python3 ghostapi/demo/live_demo.py; no environment variables for the fixture demo
+Contract version + input/output/failure examples: simplified 0.1 fixture; demo-catalog search task, structured result, typed unsupported-discovery failure
+Checks run + result: 12 Python tests passed; 5 JavaScript pointer/flowchart tests passed; Python coverage 72%; flowchart line coverage 97.18% and branch coverage 91.30%
+Open issue / needed from / next action: discovery and replay are simulated; consume a real normalized browser trace and execute through the agreed worker boundary
+Receiver + connection check/result: Abel/Thomas/Tianqi connection check pending
+```
 
 ### VLM-1 update — 2026-09-12
 

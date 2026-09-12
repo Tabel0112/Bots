@@ -9,6 +9,7 @@ Project for the Battle of the Schools Web Agents hackathon. ARGUS plans tasks, c
 - [AI/project context](docs/ai/README.md): short reading guide for teammates and coding assistants.
 - [Team tasks and project tracking](docs/ai/TEAM.md): Sting — Ghost API; Thomas — visual interpretation; Tianqi — HTML/code interpretation; Abel — ARGUS.
 - [Architecture](docs/ai/ARCHITECTURE.md): request → subtasks → browser workers → moderator → final result, plus Ghost's lifecycle.
+- [Ghost API module](ghostapi/README.md): workflow structure, development guide, interactive flowchart demo, tests, and Codecov setup.
 - [Decisions](docs/ai/DECISIONS.md): confirmed choices and unresolved questions.
 - [Research](docs/hackathon/RESEARCH.md): Steel, canvas, vision and the proposed feasibility experiment.
 - [Provisional contract](docs/hackathon/CONTRACTS.md) and [evaluation checklist](docs/hackathon/EVALUATION.md): component examples and the evidence the MVP must produce.
@@ -23,4 +24,4 @@ Each coding task should leave current module usage instructions, a concise chang
 
 One read-only search/filter/extraction workflow, one public website and one controlled website with two UI versions. Demonstrate actual exploration, trace compilation, fresh qualification, changed-input reuse, independent validation and bounded repair with honest failure handling.
 
-The [frontend](frontend/README.md), [controlled site](demo-site/README.md) and [demo materials](docs/demo/README.md) directories currently hold planning placeholders. These areas still need owners. Public-site choice, agent framework/model and several shared interface decisions remain open. There is no shared runnable application or installed dependency set in this documentation checkpoint.
+The [frontend](frontend/README.md), [controlled site](demo-site/README.md) and [demo materials](docs/demo/README.md) directories currently hold planning placeholders. These areas still need owners. Public-site choice, agent framework/model and several shared interface decisions remain open. There is no integrated live application or installed project-wide dependency set in this checkpoint. The Ghost API module includes a standard-library fixture demo for its local workflow lifecycle and interactive viewer.
