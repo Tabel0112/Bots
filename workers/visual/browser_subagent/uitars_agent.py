@@ -36,7 +36,7 @@ wait() #Sleep for 5s and take a screenshot to check for any changes.
 finished(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format.
 
 ## Note
-- Use English in `Thought` part and in `finished(content=...)`.
+- Use English in `Thought` part.
 - Write a small plan and finally summarize your next action (with its target element) in one sentence in `Thought` part.
 
 ## User Instruction
@@ -173,7 +173,6 @@ class UITarsSubagent:
         result = {"success": False, "summary": "did not complete", "data": None}
         step = 0
         errors_in_a_row = 0
-        action_failures_in_a_row = 0
         self._model_calls = 0
         self._last_obs = None
         t0 = time.time()
@@ -187,17 +186,14 @@ class UITarsSubagent:
 
             if start_url:
                 nav = browser.navigate(start_url)
-                shot = browser.screenshot_b64()
                 self._log({"type": "step", "index": step, "action": {"name": "open_url", "input": {"url": start_url}},
-                           "url": nav["url"], "title": nav["title"],
-                           "screenshot": self._save_screenshot(shot, step)})
+                           "url": nav["url"], "title": nav["title"]})
                 step += 1
-            else:
-                shot = browser.screenshot_b64()
-                self._save_screenshot(shot, step)
-            instruction = f"{subtask.rstrip()} Write the finished() content in English."
+
+            shot = browser.screenshot_b64()
+            self._save_screenshot(shot, step)
             messages = [{"role": "user", "content": [
-                {"type": "text", "text": PROMPT_TEMPLATE.format(instruction=instruction)},
+                {"type": "text", "text": PROMPT_TEMPLATE.format(instruction=subtask)},
                 self._img_content(shot),
             ]}]
 
@@ -284,19 +280,6 @@ class UITarsSubagent:
                 except Exception as e:
                     entry["error"] = str(e)
                     feedback.append(f"action failed: {e}")
-                    action_failures_in_a_row += 1
-                    err_l = str(e).lower()
-                    if "session" in err_l and ("404" in err_l or "not found" in err_l or "expired" in err_l):
-                        self._log(entry)
-                        result = {"success": False, "summary": f"aborted: browser session lost ({e})", "data": None}
-                        break
-                    if action_failures_in_a_row >= 3:
-                        self._log(entry)
-                        result = {"success": False,
-                                  "summary": f"aborted: 3 consecutive action failures (last: {e})", "data": None}
-                        break
-                else:
-                    action_failures_in_a_row = 0
 
                 if shot:
                     entry["screenshot"] = self._save_screenshot(shot, step)
