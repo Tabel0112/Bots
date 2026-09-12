@@ -220,3 +220,6 @@ __marimo__/
 # ARGUS visual worker
 workers/visual/runs/
 *.gguf
+
+# ARGUS local run store
+argus-runs/

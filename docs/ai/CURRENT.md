@@ -36,6 +36,8 @@ Earlier documentation-only checkpoints and the local synthetic backend experimen
 3. Configure an OpenAI key and a reachable read-only site for the remaining live GPT + configured Steel task test. The independent Steel lifecycle check is already verified.
 4. Record receiver revisions/results in TEAM; HTML-1 remains Building and INT-1/INT-2 remain unintegrated.
 
+The ARGUS controller base now exists as an uncommitted `argus/` package in the working tree: interpretation, gate, planner, controller state machine, JSON store, fakes and a `python3 -m argus` CLI, with 230 tests passing on Python 3.13.5 and one offline end-to-end run written to a JSON store. Everything outside the controller is still a fake — no Steel session, no moderator model call and no Ghost service — so its records, screenshots and skills are synthetic and prove plumbing, not answer quality. Details, limitations and the handoff are in [argus/README.md](../../argus/README.md) and the ARGUS-1 block in [TEAM.md](TEAM.md); Abel still has to review and commit it.
+
 ## Visual worker module
 
 `workers/visual/` is merged on main. VLM-1 is Ready to connect, with reported parser, live Steel smoke, grounding calibration and a successful one-step Hacker News run. Preserve its [TEAM evidence](TEAM.md) and [module usage](../../workers/visual/README.md); its ARGUS/Ghost receiver checks remain pending. These are the visual workstream's recorded results, not checks rerun for HTML-1.

@@ -19,6 +19,7 @@ Purpose: allow a new AI session to continue ARGUS + Ghost API without replaying 
 | Run or change the DOM browser worker | [Worker README](../../browser_worker/README.md), [TEAM.md](TEAM.md) HTML-1; inspect `browser_worker/` and its tests |
 | Work on UI/API examples | JSON examples in [CONTRACTS.md](../hackathon/CONTRACTS.md); the experimental generated fixtures are not in this documentation commit |
 | Plan evidence or the demonstration | [Evaluation checklist](../hackathon/EVALUATION.md) |
+| Work on ARGUS (controller, interpreter, gate, planner) | [ARGUS design and moderator boundary](../hackathon/ARGUS.md), then [ARGUS implementation plan and prompts](../hackathon/ARGUS-IMPLEMENTATION.md); code and tests under `argus/` |
 
 ## Resolve conflicts
 

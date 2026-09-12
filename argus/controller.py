@@ -1,0 +1,1108 @@
+"""The ARGUS controller: one run from request text to one terminal result.
+
+The controller is the single owner of run state, budgets, browser sessions,
+the event stream and the terminal result (docs/hackathon/ARGUS.md).  It drives
+the stages in order and calls out through the protocols in
+:mod:`argus.interfaces`; the moderator and Ghost only return decisions, the
+controller executes them and keeps every cap.
+
+Stage state machine (``TRANSITIONS``)::
+
+    created -> interpreting -> gating -> planning -> matching -> dispatching
+      -> [reconciling] -> validating -> synthesizing -> publishing -> completed
+
+``dispatching`` covers stages 5 to 7 (dispatch, monitor, report intake), which
+run per subtask inside a thread pool.  The terminal states ``completed``,
+``failed``, ``cancelled`` and ``needs_input`` are reached only through
+:meth:`_RunState.finish`, which writes the result and the terminal event
+together, exactly once.
+
+Concurrency: subtasks whose ``depends_on`` are all accepted start together,
+bounded by ``max_concurrency`` and by one running subtask per
+``concurrency_group``.  Sessions are opened by the controller before a subtask
+runs and closed in a ``finally`` block at run end, never by subagents.
+
+Nothing that a provider or a worker said verbatim reaches events or results:
+unexpected exceptions become ``EXTRACTION_FAILED`` carrying only the exception
+class name, and session handles are stripped from every report that is
+persisted.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import importlib
+import threading
+import time
+import uuid
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from datetime import datetime, timezone
+from typing import Any, Callable
+
+from argus import interfaces, planner
+from argus.contracts import (
+    Budget,
+    Claim,
+    ContractError,
+    Event,
+    FinalAnswer,
+    GateDecision,
+    InterpretedRequest,
+    ModeratorDecision,
+    Plan,
+    RunResult,
+    Subtask,
+    SubtaskInput,
+    TypedError,
+    WorkerReport,
+)
+
+__all__ = [
+    "STAGES",
+    "TERMINAL",
+    "TRANSITIONS",
+    "TERMINAL_STATE_FOR_STATUS",
+    "Controller",
+]
+
+#: Non-terminal stages, in the order a successful run passes through them.
+STAGES = (
+    "created",
+    "interpreting",
+    "gating",
+    "planning",
+    "matching",
+    "dispatching",
+    "reconciling",
+    "validating",
+    "synthesizing",
+    "publishing",
+)
+
+#: Terminal states.  Reached only through ``_RunState.finish``.
+TERMINAL = frozenset({"completed", "failed", "cancelled", "needs_input"})
+
+#: Legal forward transitions between non-terminal stages.
+TRANSITIONS: dict[str, frozenset[str]] = {
+    "created": frozenset({"interpreting"}),
+    "interpreting": frozenset({"gating"}),
+    "gating": frozenset({"planning"}),
+    "planning": frozenset({"matching"}),
+    "matching": frozenset({"dispatching"}),
+    "dispatching": frozenset({"reconciling", "validating"}),
+    "reconciling": frozenset({"validating"}),
+    "validating": frozenset({"synthesizing"}),
+    "synthesizing": frozenset({"publishing"}),
+    "publishing": frozenset(),
+}
+
+#: RunResult.status -> terminal stage.
+TERMINAL_STATE_FOR_STATUS = {
+    "succeeded": "completed",
+    "failed": "failed",
+    "cancelled": "cancelled",
+    "needs_input": "needs_input",
+}
+
+#: Subtask statuses inside ``dispatching``.
+_PENDING, _RUNNING, _ACCEPTED, _FAILED, _CANCELLED = (
+    "pending", "running", "accepted", "failed", "cancelled",
+)
+
+_OTHER_TOOL = {"dom": "vision", "vision": "dom"}
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _unexpected(exc: BaseException, where: str, step_id: str | None = None) -> TypedError:
+    """Map an unexpected exception to a typed failure that names only its class."""
+    return TypedError(
+        code="EXTRACTION_FAILED",
+        message=f"{where}: unexpected {type(exc).__name__}",
+        retryable=False,
+        step_id=step_id,
+    )
+
+
+def _strip_handle(report: WorkerReport) -> WorkerReport:
+    """A copy of the report without its session handle, for anything persisted."""
+    if report.session_handle is None:
+        return report
+    return dataclasses.replace(report, session_handle=None)
+
+
+def _records_of(report: WorkerReport) -> list[Any]:
+    """Records a report carries.  ``findings`` is worker-owned: a list is taken
+    as records, an object with a ``records`` list likewise, anything else is no
+    records."""
+    findings = report.findings
+    if isinstance(findings, list):
+        return list(findings)
+    if isinstance(findings, dict) and isinstance(findings.get("records"), list):
+        return list(findings["records"])
+    return []
+
+
+def _evidence_of(report: WorkerReport) -> list[str]:
+    """Observation IDs a report cites: its screenshots plus any verification."""
+    refs: list[str] = []
+    evidence = report.evidence if isinstance(report.evidence, dict) else {}
+    for shot in evidence.get("screenshots") or []:
+        if isinstance(shot, str) and shot not in refs:
+            refs.append(shot)
+    for verification in evidence.get("verifications") or []:
+        obs = verification.get("observation_id") if isinstance(verification, dict) else None
+        if isinstance(obs, str) and obs not in refs:
+            refs.append(obs)
+    return refs
+
+
+class _RunState:
+    """Run state, event sequence and the single terminal result for one run.
+
+    Ported from ``backend/argus/state.py``: transitions are checked against
+    ``TRANSITIONS``, terminal states are only entered by :meth:`finish`, which
+    stores the result and appends the terminal event under one lock, and no
+    event may be emitted after that.
+    """
+
+    def __init__(self, run_id: str, request_id: str, store: interfaces.Store) -> None:
+        self.run_id = run_id
+        self.request_id = request_id
+        self.store = store
+        self.state = "created"
+        self.sequence = 0
+        self.result: RunResult | None = None
+        self.started = time.monotonic()
+        self.lock = threading.RLock()
+        self.cancel_requested = threading.Event()
+        self.events: list[Event] = []
+        self.sessions: dict[str, str] = {}  # handle -> subtask_id, in open order
+        self.interpreted: InterpretedRequest | None = None
+        self.gate: GateDecision | None = None
+        self.plan: Plan | None = None
+        self.validation: dict[str, Any] | None = None
+        self.answer: FinalAnswer | None = None
+        self.moderator_calls = 0
+        self.subtasks: dict[str, _SubtaskState] = {}
+
+    def elapsed(self) -> float:
+        return time.monotonic() - self.started
+
+    def emit(self, type: str, message: str, data: dict[str, Any] | None = None) -> Event:
+        with self.lock:
+            if self.result is not None:
+                raise RuntimeError(f"run {self.run_id}: cannot emit after the terminal event")
+            self.sequence += 1
+            event = Event(
+                run_id=self.run_id,
+                sequence=self.sequence,
+                timestamp=_utc_now(),
+                type=type,
+                stage=self.state,
+                message=message,
+                data=dict(data or {}),
+            )
+            self.events.append(event)
+            self.store.append_event(self.run_id, event)
+            return event
+
+    def transition(self, state: str) -> None:
+        with self.lock:
+            if self.result is not None or state not in TRANSITIONS.get(self.state, ()):
+                raise RuntimeError(f"run {self.run_id}: illegal transition {self.state} -> {state}")
+            self.state = state
+            self.emit("stage_changed", state)
+            self.store.save_snapshot(self.run_id, self.snapshot())
+
+    def snapshot(self) -> dict[str, Any]:
+        """In-progress view of the run.  Not a RunResult: those carry only
+        terminal statuses, so the snapshot uses ``"running"`` and the stage."""
+        with self.lock:
+            return {
+                "run_id": self.run_id,
+                "request_id": self.request_id,
+                "status": "running",
+                "stage": self.state,
+                "sequence": self.sequence,
+                "elapsed_seconds": round(self.elapsed(), 3),
+                "subtasks": {sid: st.status for sid, st in self.subtasks.items()},
+            }
+
+    def finish(self, result: RunResult) -> RunResult:
+        """Write the terminal result and its event together, exactly once."""
+        with self.lock:
+            if self.result is not None:
+                raise RuntimeError(f"run {self.run_id}: already finished")
+            if result.run_id != self.run_id:
+                raise RuntimeError("result belongs to another run")
+            terminal = TERMINAL_STATE_FOR_STATUS[result.status]
+            if terminal == "completed" and self.state != "publishing":
+                raise RuntimeError(f"run {self.run_id}: success is only legal from publishing")
+            self.state = terminal
+            summary = {
+                "status": result.status,
+                "error": result.error.to_dict() if result.error else None,
+                "claims": len(result.answer.claims) if result.answer else 0,
+            }
+            self.emit(f"run_{terminal}", f"run {result.status}", summary)
+            self.result = result
+            self.store.save_snapshot(self.run_id, result.to_dict())
+            return result
+
+
+@dataclasses.dataclass
+class _SubtaskState:
+    subtask: Subtask
+    mode: str = "explore"
+    bound_procedure: dict[str, Any] | None = None
+    status: str = _PENDING
+    handle: str | None = None
+    report: WorkerReport | None = None
+    failure: TypedError | None = None
+    verify_used: bool = False
+    retry_used: bool = False
+    force_verify: bool = False
+    stop_requested: str | None = None
+    actions_used: int = 0
+    started: float | None = None
+
+    @property
+    def subtask_id(self) -> str:
+        return self.subtask.subtask_id
+
+
+class Controller:
+    """Drive one request through every stage and publish one result.
+
+    All collaborators are injected through the protocols in
+    :mod:`argus.interfaces`.  ``interpret``, ``gate`` and ``plan`` may be
+    injected too; when they are not, ``argus.interpreter.interpret``,
+    ``argus.gate.gate`` and :func:`argus.planner.plan` are imported lazily at
+    the stage that needs them.
+    """
+
+    def __init__(
+        self,
+        toolbox: interfaces.Toolbox,
+        moderator: interfaces.Moderator,
+        ghost: interfaces.Ghost,
+        store: interfaces.Store,
+        max_actions: int = 30,
+        max_seconds: float = 120,
+        max_concurrency: int = 2,
+        *,
+        interpret: Callable[[str, str], InterpretedRequest] | None = None,
+        gate: Callable[[InterpretedRequest], GateDecision] | None = None,
+        plan: Callable[[InterpretedRequest, str], Plan] | None = None,
+    ) -> None:
+        if max_actions < 1 or max_seconds <= 0 or max_concurrency < 1:
+            raise ValueError("max_actions, max_seconds and max_concurrency must be positive")
+        self.toolbox = toolbox
+        self.moderator = moderator
+        self.ghost = ghost
+        self.store = store
+        self.max_actions = int(max_actions)
+        self.max_seconds = float(max_seconds)
+        self.max_concurrency = int(max_concurrency)
+        self._interpret = interpret
+        self._gate = gate
+        self._plan = plan
+        self._observer = moderator if isinstance(moderator, interfaces.ProgressObserver) else None
+        self._runs: dict[str, _RunState] = {}
+
+    # ------------------------------------------------------------------ public
+
+    def run(
+        self,
+        text_or_interpreted: str | InterpretedRequest,
+        request_id: str,
+        run_id: str | None = None,
+    ) -> RunResult:
+        """Run one request to its single terminal result.
+
+        Every session the run opened is closed before the terminal event, even
+        when a stage raises.  The returned result is also the last snapshot in
+        the store.
+        """
+        run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
+        state = _RunState(run_id, request_id, self.store)
+        self._runs[run_id] = state
+        self.store.create_run(run_id, request_id, state.snapshot())
+        state.emit("run_created", "run created", {"request_id": request_id})
+        result: RunResult | None = None
+        try:
+            result = self._drive(state, text_or_interpreted, request_id)
+        except _Finished as done:
+            result = done.result
+        except ContractError as exc:
+            result = self._failed(state, exc.typed_error)
+        except Exception as exc:  # noqa: BLE001 - every failure must become typed
+            result = self._failed(state, _unexpected(exc, f"stage {state.state}"))
+        finally:
+            self._close_sessions(state)
+        return state.finish(result)
+
+    def cancel(self, run_id: str) -> None:
+        """Ask a running run to stop; it ends ``cancelled`` at the next check."""
+        state = self._runs.get(run_id)
+        if state is not None:
+            state.cancel_requested.set()
+
+    # ------------------------------------------------------------------ stages
+
+    def _drive(
+        self,
+        state: _RunState,
+        text_or_interpreted: str | InterpretedRequest,
+        request_id: str,
+    ) -> RunResult:
+        # 1. interpret
+        state.transition("interpreting")
+        state.interpreted = self._stage_interpret(state, text_or_interpreted, request_id)
+        state.emit("interpreted", f"{len(state.interpreted.intents)} intent(s)", {
+            "intents": len(state.interpreted.intents),
+            "missing_required": len(state.interpreted.missing_required),
+            "ambiguities": len(state.interpreted.ambiguities),
+        })
+        self._check_run_limits(state)
+
+        # 2. gate
+        state.transition("gating")
+        gate = self._gate or self._import("argus.gate", "gate")
+        state.gate = gate(state.interpreted)
+        if not isinstance(state.gate, GateDecision):
+            state.gate = GateDecision.from_dict(state.gate)
+        state.emit("gate_decided", state.gate.decision, {
+            "rule_id": state.gate.rule_id, "reason": state.gate.reason,
+            "questions": list(state.gate.questions),
+        })
+        if state.gate.decision == "clarify":
+            return self._result(state, "needs_input", error=TypedError(
+                code="NEEDS_INPUT", message=state.gate.reason, retryable=True,
+            ), answer=FinalAnswer(
+                text=" ".join(state.gate.questions) or state.gate.reason,
+                unverified=list(state.gate.questions),
+            ))
+        if state.gate.decision == "reject":
+            return self._result(state, "failed", error=TypedError(
+                code="INVALID_INPUT", message=f"{state.gate.rule_id}: {state.gate.reason}",
+                retryable=False,
+            ))
+        self._check_run_limits(state)
+
+        # 3. plan
+        state.transition("planning")
+        plan_fn = self._plan or planner.plan
+        state.plan = plan_fn(state.interpreted, f"plan-{state.run_id}")
+        if not isinstance(state.plan, Plan):
+            state.plan = Plan.from_dict(state.plan)
+        planner.validate_plan(state.plan)
+        state.subtasks = {s.subtask_id: _SubtaskState(subtask=s) for s in state.plan.subtasks}
+        state.emit("plan_created", f"{len(state.plan.subtasks)} subtask(s)", {
+            "plan_id": state.plan.plan_id,
+            "subtasks": [
+                {"subtask_id": s.subtask_id, "operation": s.operation,
+                 "depends_on": list(s.depends_on), "concurrency_group": s.concurrency_group}
+                for s in state.plan.subtasks
+            ],
+        })
+        self._check_run_limits(state)
+
+        # 4. match
+        state.transition("matching")
+        self._stage_match(state)
+        self._check_run_limits(state)
+
+        # 5-7. dispatch, monitor, intake
+        state.transition("dispatching")
+        self._stage_dispatch(state)
+        self._check_run_limits(state)
+
+        accepted = [st for st in state.subtasks.values() if st.status == _ACCEPTED]
+        failures = [st.failure for st in state.subtasks.values() if st.failure is not None]
+        records: list[Any] = []
+        evidence: list[str] = []
+        unverified: list[str] = []
+        for st in accepted:
+            assert st.report is not None
+            records.extend(_records_of(st.report))
+            for ref in _evidence_of(st.report):
+                if ref not in evidence:
+                    evidence.append(ref)
+
+        # 8. reconcile, multi-subtask runs only
+        if len(state.plan.subtasks) > 1 and accepted:
+            state.transition("reconciling")
+            records, unverified = self._stage_reconcile(state, accepted, records)
+            self._check_run_limits(state)
+
+        # 9. validate
+        state.transition("validating")
+        state.validation = self._stage_validate(state, accepted, evidence)
+        self._check_run_limits(state)
+
+        # 10. synthesize
+        state.transition("synthesizing")
+        state.answer = self._stage_synthesize(state, records, evidence, failures, unverified)
+        self._check_run_limits(state)
+
+        # 11. publish
+        state.transition("publishing")
+        if not accepted:
+            # nothing came back: the first subtask failure is the run's failure
+            return self._result(state, "failed", error=failures[0] if failures else TypedError(
+                code="EXTRACTION_FAILED", message="no subtask produced a report",
+                retryable=False,
+            ))
+        if state.validation["status"] != "passed":
+            return self._result(state, "failed", error=TypedError(
+                code="VALIDATION_FAILED",
+                message=f"validation {state.validation['status']}",
+                retryable=state.validation["status"] == "inconclusive",
+                evidence_refs=list(evidence),
+            ))
+        if failures:
+            return self._result(state, "failed", error=failures[0])
+        self._stage_compile(state, accepted)
+        return self._result(state, "succeeded")
+
+    def _stage_interpret(
+        self, state: _RunState, text_or_interpreted: str | InterpretedRequest, request_id: str
+    ) -> InterpretedRequest:
+        if isinstance(text_or_interpreted, InterpretedRequest):
+            return text_or_interpreted
+        if isinstance(text_or_interpreted, dict):
+            return InterpretedRequest.from_dict(text_or_interpreted)
+        if not isinstance(text_or_interpreted, str) or not text_or_interpreted.strip():
+            raise ContractError("request text must be a non-empty string")
+        interpret = self._interpret or self._import("argus.interpreter", "interpret")
+        interpreted = interpret(text_or_interpreted, request_id)
+        if not isinstance(interpreted, InterpretedRequest):
+            interpreted = InterpretedRequest.from_dict(interpreted)
+        return interpreted
+
+    def _stage_match(self, state: _RunState) -> None:
+        try:
+            skills = list(self.store.skills())
+        except Exception as exc:  # noqa: BLE001
+            state.emit("skills_unavailable", f"store.skills raised {type(exc).__name__}")
+            skills = []
+        for st in state.subtasks.values():
+            decision, reason, skill = "explore", "", None
+            try:
+                match = self.ghost.match(st.subtask, skills) or {}
+                decision = match.get("decision", "explore")
+                reason = str(match.get("reason", ""))
+                skill = match.get("skill")
+            except Exception as exc:  # noqa: BLE001
+                reason = f"ghost.match raised {type(exc).__name__}"
+            if decision == "reuse" and isinstance(skill, dict):
+                st.mode, st.bound_procedure = "reuse", dict(skill)
+            else:
+                st.mode, st.bound_procedure = "explore", None
+                if decision == "reuse":
+                    reason = reason or "reuse without a skill falls back to explore"
+            state.emit("match_decided", f"{st.subtask_id}: {st.mode}", {
+                "subtask_id": st.subtask_id, "mode": st.mode, "reason": reason,
+                "skill_id": (st.bound_procedure or {}).get("skill_id"),
+            })
+
+    # ---------------------------------------------------------------- dispatch
+
+    def _stage_dispatch(self, state: _RunState) -> None:
+        """Stages 5 to 7 for every subtask, bounded by the concurrency limits."""
+        pending = [st for st in state.subtasks.values()]
+        running: dict[Future, _SubtaskState] = {}
+        budget_breached = False
+        with ThreadPoolExecutor(max_workers=self.max_concurrency) as pool:
+            while pending or running:
+                if state.cancel_requested.is_set() or budget_breached:
+                    reason = "run budget exceeded" if budget_breached else "run cancelled"
+                    for st in pending:
+                        self._cancel_subtask(state, st, reason)
+                    pending = []
+                    if not running:
+                        break
+
+                # cancel dependents of failed or cancelled subtasks
+                for st in list(pending):
+                    blocked = [
+                        dep for dep in st.subtask.depends_on
+                        if state.subtasks[dep].status in (_FAILED, _CANCELLED)
+                    ]
+                    if blocked:
+                        pending.remove(st)
+                        self._cancel_subtask(state, st, f"dependency {blocked[0]} did not succeed")
+
+                # start everything that is ready, within the caps
+                busy_groups = {st.subtask.concurrency_group for st in running.values()}
+                for st in list(pending):
+                    if len(running) >= self.max_concurrency:
+                        break
+                    deps_ok = all(state.subtasks[d].status == _ACCEPTED for d in st.subtask.depends_on)
+                    if not deps_ok or st.subtask.concurrency_group in busy_groups:
+                        continue
+                    pending.remove(st)
+                    st.status = _RUNNING
+                    st.started = time.monotonic()
+                    busy_groups.add(st.subtask.concurrency_group)
+                    running[pool.submit(self._execute_subtask, state, st)] = st
+
+                if not running:
+                    if pending:  # nothing ready and nothing running: unschedulable
+                        for st in pending:
+                            self._cancel_subtask(state, st, "no schedulable path to this subtask")
+                        pending = []
+                    break
+
+                remaining = self.max_seconds - state.elapsed()
+                done, _ = wait(running, timeout=max(remaining, 0.0), return_when=FIRST_COMPLETED)
+                if not done:
+                    budget_breached = True
+                    state.emit("budget_exceeded", "run exceeded max_seconds", {
+                        "max_seconds": self.max_seconds, "elapsed_seconds": round(state.elapsed(), 3),
+                    })
+                    # Running subtasks cannot be interrupted; they are waited for
+                    # below and their reports are discarded.
+                    for future, st in running.items():
+                        future.result()
+                        self._discard_after_breach(state, st)
+                    running = {}
+                    continue
+                for future in done:
+                    st = running.pop(future)
+                    exc = future.exception()
+                    if exc is not None:
+                        self._fail_subtask(state, st, _unexpected(exc, st.subtask_id, st.subtask_id))
+                    elif st.status == _RUNNING:
+                        self._fail_subtask(state, st, TypedError(
+                            code="EXTRACTION_FAILED", message="subtask ended without a decision",
+                            retryable=False, step_id=st.subtask_id,
+                        ))
+        if budget_breached:
+            raise _Finished(self._result(state, "failed", error=TypedError(
+                code="BUDGET_EXCEEDED",
+                message=f"run exceeded max_seconds={self.max_seconds:g}",
+                retryable=False,
+            )))
+        if state.cancel_requested.is_set():
+            raise _Finished(self._result(state, "cancelled", error=TypedError(
+                code="CANCELLED", message="run cancelled", retryable=False,
+            )))
+
+    def _execute_subtask(self, state: _RunState, st: _SubtaskState) -> None:
+        """Open a session, run the subtask, take the report through intake.
+
+        Runs on a pool thread.  Never raises: every outcome is written to ``st``.
+        """
+        sid = st.subtask_id
+        try:
+            self._observe(state, st, state.emit("subtask_started", sid, {
+                "subtask_id": sid, "mode": st.mode, "preferred_tool": st.subtask.preferred_tool,
+            }))
+            if st.stop_requested is not None:
+                self._fail_subtask(state, st, TypedError(
+                    code="CANCELLED", message=f"stopped by moderator: {st.stop_requested}",
+                    retryable=False, step_id=sid,
+                ))
+                return
+            handle = self.toolbox.open_session(st.subtask.site_id)
+            st.handle = handle
+            with state.lock:
+                state.sessions[handle] = sid
+            state.emit("session_opened", sid, {"subtask_id": sid})
+
+            report = self._run_worker(state, st, st.subtask)
+            if report is None:
+                return
+            self._intake(state, st, report)
+        except Exception as exc:  # noqa: BLE001 - the pool must not see it
+            self._fail_subtask(state, st, _unexpected(exc, sid, sid))
+
+    def _run_worker(self, state: _RunState, st: _SubtaskState, subtask: Subtask) -> WorkerReport | None:
+        """Run the worker once on the lent session; ``None`` when the subtask
+        failed (already recorded)."""
+        sid = st.subtask_id
+        remaining_actions = self.max_actions - st.actions_used
+        remaining_seconds = min(
+            self.max_seconds - (time.monotonic() - (st.started or time.monotonic())),
+            self.max_seconds - state.elapsed(),
+        )
+        if remaining_actions <= 0 or remaining_seconds <= 0:
+            self._fail_subtask(state, st, self._budget_error(st, "budget exhausted before start"))
+            return None
+        subtask_input = SubtaskInput(
+            run_id=state.run_id,
+            subtask=subtask,
+            session_handle=st.handle,
+            budget=Budget(max_actions=remaining_actions, max_seconds=remaining_seconds),
+            mode=st.mode,
+            bound_procedure=st.bound_procedure,
+        )
+        try:
+            raw = self.toolbox.run_subtask(subtask_input)
+        except Exception as exc:  # noqa: BLE001
+            self._fail_subtask(state, st, _unexpected(exc, f"{sid} run_subtask", sid))
+            return None
+
+        # schema check
+        try:
+            report = raw if isinstance(raw, WorkerReport) else WorkerReport.from_dict(raw)
+            if report.subtask_id != sid:
+                raise ContractError(f"report subtask_id {report.subtask_id!r} is not {sid!r}")
+        except ContractError as exc:
+            self._fail_subtask(state, st, TypedError(
+                code="EXTRACTION_FAILED", message=f"report failed schema check: {exc}",
+                retryable=False, step_id=sid,
+            ))
+            return None
+        if report.session_handle:
+            with state.lock:
+                state.sessions.setdefault(report.session_handle, sid)
+            st.handle = report.session_handle
+        st.report = report
+        self.store.save_report(state.run_id, _strip_handle(report))
+
+        # budgets (stage 6): actions from the report, wall clock from the controller
+        count = report.metrics.get("browser_action_count") if isinstance(report.metrics, dict) else None
+        if isinstance(count, int) and not isinstance(count, bool):
+            st.actions_used += max(count, 0)
+        elapsed = time.monotonic() - (st.started or time.monotonic())
+        self._observe(state, st, state.emit("subtask_report_received", sid, {
+            "subtask_id": sid, "outcome": report.outcome,
+            "browser_action_count": count, "elapsed_seconds": round(elapsed, 3),
+            "preferred_tool": subtask.preferred_tool,
+        }))
+        if st.actions_used > self.max_actions:
+            self._fail_subtask(state, st, self._budget_error(
+                st, f"{st.actions_used} browser actions exceed max_actions={self.max_actions}"))
+            return None
+        if elapsed > self.max_seconds:
+            self._fail_subtask(state, st, self._budget_error(
+                st, f"{elapsed:.1f}s exceed max_seconds={self.max_seconds:g}"))
+            return None
+        if st.stop_requested is not None:
+            self._fail_subtask(state, st, TypedError(
+                code="CANCELLED", message=f"stopped by moderator: {st.stop_requested}",
+                retryable=False, step_id=sid,
+            ))
+            return None
+        return report
+
+    def _budget_error(self, st: _SubtaskState, detail: str) -> TypedError:
+        return TypedError(
+            code="BUDGET_EXCEEDED", message=f"{st.subtask_id}: {detail}",
+            retryable=False, step_id=st.subtask_id,
+        )
+
+    # ------------------------------------------------------------------ intake
+
+    def _intake(self, state: _RunState, st: _SubtaskState, report: WorkerReport) -> None:
+        """Stage 7: assess, then execute the decision under the controller's caps.
+
+        Bounded: at most one verification and one retry per subtask, so the
+        loop runs at most four assessments.
+        """
+        sid = st.subtask_id
+        current = st.subtask
+        for _ in range(4):
+            if st.force_verify and not st.verify_used:
+                self._verify(state, st, report, None)
+            decision = self._assess(state, st, report)
+            if decision is None:
+                return
+            if decision.decision == "accept":
+                st.status = _ACCEPTED
+                state.emit("subtask_accepted", sid, {
+                    "subtask_id": sid, "reason": decision.reason,
+                    "evidence_refs": list(decision.evidence_refs),
+                })
+                return
+            if decision.decision == "verify":
+                if st.verify_used:
+                    self._fail_subtask(state, st, TypedError(
+                        code="EXTRACTION_FAILED",
+                        message=f"{sid}: verification cap reached; still unconfirmed: {decision.reason}",
+                        retryable=False, step_id=sid, evidence_refs=list(decision.evidence_refs),
+                    ))
+                    return
+                self._verify(state, st, report, decision)
+                continue
+            if decision.decision == "retry_other_path":
+                if st.retry_used:
+                    failure = self._carried_failure(report, sid, decision.reason, "retry cap reached")
+                    self._fail_subtask(state, st, failure)
+                    return
+                st.retry_used = True
+                current = dataclasses.replace(
+                    current, preferred_tool=_OTHER_TOOL[current.preferred_tool]
+                )
+                state.emit("subtask_retried", sid, {
+                    "subtask_id": sid, "preferred_tool": current.preferred_tool,
+                    "reason": decision.reason,
+                })
+                retried = self._run_worker(state, st, current)
+                if retried is None:
+                    return
+                report = retried
+                continue
+            # fail
+            self._fail_subtask(state, st, self._carried_failure(report, sid, decision.reason, "moderator failed the report"))
+            return
+        self._fail_subtask(state, st, TypedError(
+            code="EXTRACTION_FAILED", message=f"{sid}: intake did not converge",
+            retryable=False, step_id=sid,
+        ))
+
+    def _assess(self, state: _RunState, st: _SubtaskState, report: WorkerReport) -> ModeratorDecision | None:
+        sid = st.subtask_id
+        try:
+            with state.lock:
+                state.moderator_calls += 1
+            decision = self.moderator.assess_report(
+                st.subtask, report, list(st.subtask.success_conditions)
+            )
+            if not isinstance(decision, ModeratorDecision):
+                decision = ModeratorDecision.from_dict(decision)
+            if decision.stage != "assess":
+                raise ContractError(f"assess_report returned stage {decision.stage!r}")
+        except ContractError as exc:
+            self._fail_subtask(state, st, TypedError(
+                code="EXTRACTION_FAILED", message=f"{sid}: moderator decision invalid: {exc}",
+                retryable=False, step_id=sid,
+            ))
+            return None
+        except Exception as exc:  # noqa: BLE001
+            self._fail_subtask(state, st, _unexpected(exc, f"{sid} assess_report", sid))
+            return None
+        state.emit("report_assessed", f"{sid}: {decision.decision}", {
+            "subtask_id": sid, "decision": decision.decision, "reason": decision.reason,
+        })
+        return decision
+
+    def _verify(
+        self, state: _RunState, st: _SubtaskState, report: WorkerReport,
+        decision: ModeratorDecision | None,
+    ) -> None:
+        """One read-only verification on the lent session; its result is added
+        to the report's evidence so the next assessment can see it."""
+        sid = st.subtask_id
+        st.verify_used = True
+        st.force_verify = False
+        question = None
+        if decision is not None and isinstance(decision.next_action, dict):
+            question = decision.next_action.get("question")
+        if not isinstance(question, str) or not question.strip():
+            question = "Confirm each of the following on the current page: " + "; ".join(
+                st.subtask.success_conditions
+            )
+        tool = st.subtask.preferred_tool if not st.retry_used else _OTHER_TOOL[st.subtask.preferred_tool]
+        observation = self.toolbox.observe(st.handle)
+        interpret = self.toolbox.vision_interpret if tool == "vision" else self.toolbox.dom_interpret
+        answer = interpret(st.handle, question)
+        if not isinstance(report.evidence, dict):
+            report.evidence = {}
+        report.evidence.setdefault("verifications", []).append({
+            "observation_id": observation, "tool": tool, "question": question,
+            "answer": answer, "success_conditions": list(st.subtask.success_conditions),
+        })
+        self.store.save_report(state.run_id, _strip_handle(report))
+        state.emit("subtask_verified", sid, {
+            "subtask_id": sid, "observation_id": observation, "tool": tool,
+        })
+
+    @staticmethod
+    def _carried_failure(report: WorkerReport, sid: str, reason: str, fallback: str) -> TypedError:
+        """The report's own typed failure, unchanged; else one built from the reason."""
+        if report.typed_failures:
+            return report.typed_failures[0]
+        return TypedError(
+            code="EXTRACTION_FAILED", message=f"{sid}: {fallback}: {reason}",
+            retryable=False, step_id=sid,
+        )
+
+    def _fail_subtask(self, state: _RunState, st: _SubtaskState, failure: TypedError) -> None:
+        with state.lock:
+            if st.status in (_FAILED, _CANCELLED, _ACCEPTED):
+                return
+            st.status = _FAILED
+            st.failure = failure
+        state.emit("subtask_failed", f"{st.subtask_id}: {failure.code}", {
+            "subtask_id": st.subtask_id, "error": failure.to_dict(),
+        })
+
+    def _cancel_subtask(self, state: _RunState, st: _SubtaskState, reason: str) -> None:
+        with state.lock:
+            if st.status != _PENDING:
+                return
+            st.status = _CANCELLED
+            st.failure = TypedError(
+                code="CANCELLED", message=f"{st.subtask_id}: {reason}",
+                retryable=False, step_id=st.subtask_id,
+            )
+        state.emit("subtask_cancelled", st.subtask_id, {
+            "subtask_id": st.subtask_id, "reason": reason,
+        })
+
+    def _discard_after_breach(self, state: _RunState, st: _SubtaskState) -> None:
+        if st.status == _ACCEPTED:
+            return
+        with state.lock:
+            st.status = _FAILED
+            st.failure = self._budget_error(st, "run exceeded max_seconds")
+        state.emit("subtask_failed", f"{st.subtask_id}: BUDGET_EXCEEDED", {
+            "subtask_id": st.subtask_id, "error": st.failure.to_dict(),
+        })
+
+    def _observe(self, state: _RunState, st: _SubtaskState, event: Event) -> None:
+        """Optional live monitoring on selected events only."""
+        if self._observer is None:
+            return
+        try:
+            decision = self._observer.observe_progress(state.snapshot(), event)
+            if not isinstance(decision, ModeratorDecision):
+                decision = ModeratorDecision.from_dict(decision)
+            if decision.stage != "observe":
+                return
+        except Exception as exc:  # noqa: BLE001 - monitoring never breaks a run
+            state.emit("observer_failed", f"observe_progress raised {type(exc).__name__}")
+            return
+        if decision.decision == "flag":
+            st.force_verify = True
+        elif decision.decision == "stop_subtask":
+            st.stop_requested = decision.reason or "stop_subtask"
+        if decision.decision != "continue":
+            state.emit("observer_decided", f"{st.subtask_id}: {decision.decision}", {
+                "subtask_id": st.subtask_id, "decision": decision.decision, "reason": decision.reason,
+            })
+
+    # ------------------------------------------------------ reconcile onwards
+
+    def _stage_reconcile(
+        self, state: _RunState, accepted: list[_SubtaskState], records: list[Any]
+    ) -> tuple[list[Any], list[str]]:
+        assert state.plan is not None
+        reports = [st.report for st in accepted if st.report is not None]
+        with state.lock:
+            state.moderator_calls += 1
+        decision = self.moderator.reconcile(state.plan, reports)
+        if not isinstance(decision, ModeratorDecision):
+            decision = ModeratorDecision.from_dict(decision)
+        if decision.stage != "reconcile":
+            raise ContractError(f"reconcile returned stage {decision.stage!r}")
+        state.emit("reconciled", decision.decision, {
+            "decision": decision.decision, "reason": decision.reason,
+        })
+        if decision.decision == "fail":
+            raise _Finished(self._result(state, "failed", error=TypedError(
+                code="EXTRACTION_FAILED", message=f"reconcile failed: {decision.reason}",
+                retryable=False, evidence_refs=list(decision.evidence_refs),
+            )))
+        unverified: list[str] = []
+        if decision.decision == "verify":
+            # Post-intake verification is not executed in this phase; the gap is stated.
+            unverified.append(f"unresolved after reconcile: {decision.reason}")
+        action = decision.next_action if isinstance(decision.next_action, dict) else {}
+        merged = action.get("findings")
+        if isinstance(merged, list):
+            records = list(merged)
+        for key in ("gaps", "conflicts"):
+            for entry in action.get(key) or []:
+                if isinstance(entry, dict):
+                    tag = entry.get("resolution") or entry.get("action") or "report_as_gap"
+                    if tag == "resolve_from_evidence":
+                        continue
+                    text = entry.get("description") or entry.get("text") or str(entry)
+                else:
+                    text = str(entry)
+                unverified.append(f"{key[:-1]}: {text}")
+        return records, unverified
+
+    def _stage_validate(
+        self, state: _RunState, accepted: list[_SubtaskState], evidence: list[str]
+    ) -> dict[str, Any]:
+        if not accepted:
+            validation = {"status": "inconclusive", "checks": [], "reason": "no accepted reports",
+                          "subtasks": {}}
+            state.emit("validated", "inconclusive", {"status": "inconclusive"})
+            return validation
+        per_subtask: dict[str, Any] = {}
+        statuses: list[str] = []
+        for st in accepted:
+            assert st.report is not None
+            result = self.ghost.validate(st.subtask, _records_of(st.report), _evidence_of(st.report))
+            if not isinstance(result, dict) or result.get("status") not in ("passed", "failed", "inconclusive"):
+                raise ContractError(f"ghost.validate returned no status for {st.subtask_id}")
+            per_subtask[st.subtask_id] = result
+            statuses.append(result["status"])
+        if all(s == "passed" for s in statuses):
+            overall = "passed"
+        elif any(s == "failed" for s in statuses):
+            overall = "failed"
+        else:
+            overall = "inconclusive"
+        # Ghost owns the shape of "checks": a list of check objects, or a
+        # ``name -> passed`` mapping.  Iterating a mapping would keep only the
+        # names and silently drop whether each check passed, so a mapping is
+        # expanded into one entry per check instead.
+        checks: list[Any] = []
+        for subtask_id, result in per_subtask.items():
+            raw = result.get("checks")
+            if isinstance(raw, list):
+                checks.extend(raw)
+            elif isinstance(raw, dict):
+                checks.extend(
+                    {"subtask_id": subtask_id, "check": name, "passed": passed}
+                    for name, passed in raw.items()
+                )
+        validation = {"status": overall, "checks": checks, "subtasks": per_subtask,
+                      "evidence": list(evidence)}
+        state.emit("validated", overall, {"status": overall, "subtasks": {k: v["status"] for k, v in per_subtask.items()}})
+        return validation
+
+    def _stage_synthesize(
+        self, state: _RunState, records: list[Any], evidence: list[str],
+        failures: list[TypedError], unverified: list[str],
+    ) -> FinalAnswer:
+        assert state.interpreted is not None and state.validation is not None
+        with state.lock:
+            state.moderator_calls += 1
+        answer = self.moderator.synthesize(
+            state.interpreted, list(records), dict(state.validation), list(evidence), list(failures)
+        )
+        if not isinstance(answer, FinalAnswer):
+            answer = FinalAnswer.from_dict(answer)
+        # rule check: no claim without evidence
+        bare = [c.text for c in answer.claims if not isinstance(c, Claim) or not c.evidence_refs]
+        if bare:
+            raise ContractError(
+                f"{len(bare)} claim(s) carry no evidence reference: {bare[0][:80]!r}",
+                code="EXTRACTION_FAILED", evidence_refs=list(evidence),
+            )
+        # rule check: failures and gaps stated plainly
+        stated = {(f.code, f.message) for f in answer.failures}
+        for failure in failures:
+            if (failure.code, failure.message) not in stated:
+                answer.failures.append(failure)
+        for note in unverified:
+            if note not in answer.unverified:
+                answer.unverified.append(note)
+        if state.validation["status"] != "passed" and records:
+            note = f"validation {state.validation['status']}: records are not validated"
+            if note not in answer.unverified:
+                answer.unverified.append(note)
+        state.emit("synthesized", f"{len(answer.claims)} claim(s)", {
+            "claims": len(answer.claims), "records": len(answer.records),
+            "failures": len(answer.failures), "unverified": len(answer.unverified),
+        })
+        return answer
+
+    def _stage_compile(self, state: _RunState, accepted: list[_SubtaskState]) -> None:
+        """Candidate compilation; its failure never changes the task result."""
+        for st in accepted:
+            assert st.report is not None
+            try:
+                skill = self.ghost.compile(_strip_handle(st.report), st.subtask)
+                if skill is None:
+                    continue
+                skill = dict(skill)
+                skill.pop("session_handle", None)
+                self.store.save_skill(skill)
+                state.emit("skill_candidate_created", st.subtask_id, {
+                    "subtask_id": st.subtask_id, "skill_id": skill.get("skill_id"),
+                    "status": skill.get("status"),
+                })
+            except Exception as exc:  # noqa: BLE001
+                state.emit("compile_failed", f"{st.subtask_id}: {type(exc).__name__}", {
+                    "subtask_id": st.subtask_id, "exception": type(exc).__name__,
+                })
+
+    # ----------------------------------------------------------------- helpers
+
+    def _check_run_limits(self, state: _RunState) -> None:
+        if state.cancel_requested.is_set():
+            raise _Finished(self._result(state, "cancelled", error=TypedError(
+                code="CANCELLED", message="run cancelled", retryable=False,
+            )))
+        if state.elapsed() > self.max_seconds:
+            state.emit("budget_exceeded", "run exceeded max_seconds", {
+                "max_seconds": self.max_seconds, "elapsed_seconds": round(state.elapsed(), 3),
+            })
+            raise _Finished(self._result(state, "failed", error=TypedError(
+                code="BUDGET_EXCEEDED",
+                message=f"run exceeded max_seconds={self.max_seconds:g}",
+                retryable=False,
+            )))
+
+    def _result(
+        self, state: _RunState, status: str, *, error: TypedError | None = None,
+        answer: FinalAnswer | None = None,
+    ) -> RunResult:
+        reports = [
+            _strip_handle(st.report) for st in state.subtasks.values() if st.report is not None
+        ]
+        metrics = {
+            "elapsed_seconds": round(state.elapsed(), 3),
+            "browser_action_count": sum(st.actions_used for st in state.subtasks.values()),
+            "moderator_calls": state.moderator_calls,
+            "sessions_opened": len(state.sessions),
+            "subtasks": {sid: st.status for sid, st in state.subtasks.items()},
+            "max_actions": self.max_actions,
+            "max_seconds": self.max_seconds,
+        }
+        return RunResult(
+            run_id=state.run_id,
+            status=status,
+            interpreted=state.interpreted,
+            gate=state.gate,
+            plan=state.plan,
+            reports=reports,
+            validation=state.validation,
+            answer=answer if answer is not None else state.answer,
+            metrics=metrics,
+            error=error,
+        )
+
+    def _failed(self, state: _RunState, error: TypedError) -> RunResult:
+        state.emit("stage_failed", f"{state.state}: {error.code}", {
+            "stage": state.state, "error": error.to_dict(),
+        })
+        return self._result(state, "failed", error=error)
+
+    def _close_sessions(self, state: _RunState) -> None:
+        """Close every session this run opened.  Runs in ``finally``; never raises."""
+        with state.lock:
+            handles = list(state.sessions.items())
+            state.sessions.clear()
+        for handle, sid in handles:
+            try:
+                self.toolbox.close_session(handle)
+                state.emit("session_closed", sid, {"subtask_id": sid})
+            except Exception as exc:  # noqa: BLE001
+                try:
+                    state.emit("session_close_failed", f"{sid}: {type(exc).__name__}", {
+                        "subtask_id": sid, "exception": type(exc).__name__,
+                    })
+                except Exception:  # noqa: BLE001 - the store is already failing
+                    pass
+
+    @staticmethod
+    def _import(module: str, name: str) -> Callable[..., Any]:
+        try:
+            return getattr(importlib.import_module(module), name)
+        except (ImportError, AttributeError) as exc:
+            raise ContractError(
+                f"{module}.{name} is not available ({type(exc).__name__})",
+                code="EXTRACTION_FAILED",
+            ) from None
+
+
+class _Finished(Exception):
+    """Carries a terminal result out of a stage that ends the run early."""
+
+    def __init__(self, result: RunResult) -> None:
+        super().__init__(result.status)
+        self.result = result

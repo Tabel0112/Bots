@@ -13,6 +13,10 @@ Updated: 2026-09-12. Keep status explicit; a proposal is not an implementation c
 - **Continuity:** store compact project context in the repository so another AI can continue without the full chat.
 - **Ghost module location:** keep Ghost-specific code and documentation under the correctly spelled root `ghostapi/` folder.
 - **Ghost demo:** show workflow execution as an interactive flowchart that can be dragged with a mouse or other pointer while work proceeds.
+- **Backend language (2026-09-12):** Python. Thomas and Tianqi's Steel toolbox must be importable from ARGUS in-process; no HTTP layer between ARGUS and the toolbox.
+- **Storage (2026-09-12):** JSON files on disk for runs, events, evidence references, skills and metrics. Screenshots stored as files and referenced by observation ID. No database for the MVP.
+- **Execution shape (2026-09-12):** stages run sequentially; only subagents may run concurrently, and each subtask carries its dependencies and concurrency group at creation. A general task-graph engine is not needed.
+- **Product scope (2026-09-12, supersedes the one-workflow MVP constraint for ARGUS):** the final product must navigate any site and any read-only task, not a closed registry of operations. The registry becomes the set of *qualified* operations Ghost has proven; every other request runs in explore mode under hard safety rules. The one-workflow constraint still governs what the demo must prove, not what ARGUS may accept.
 - **Documentation sharing (2026-09-12):** user authorized commit and push of the shared planning/AI handoff docs. The provisional runtime remains a local experiment; publication of these docs does not imply a working shared backend.
 
 ## Existing MVP constraints
@@ -33,12 +37,12 @@ The PR #7 review reiterates no required HTTP layer between ARGUS and its toolbox
 
 | Question/proposal | Current position |
 | --- | --- |
-| Moderator implementation | Responsibilities agreed; separate model invocation versus controller role unresolved |
-| Subtask boundaries and parallelism | Define from one concrete example before choosing a general graph/framework |
+| Moderator implementation | User direction 2026-09-12: the moderator is a separate deliverable with its own owner, not Abel. The controller remains the single owner of run state and calls the moderator through three callables; proposed boundary in [ARGUS.md](../hackathon/ARGUS.md), not yet accepted by the moderator owner |
+| Subtask boundaries and parallelism | Settled for registered operations (one subtask per intent, deterministic planner, built 2026-09-12). Open-world requests need the model-planned decomposition with dependent chains; design in [ARGUS.md](../hackathon/ARGUS.md) open-world section |
 | Browser-agent framework and model | DOM worker uses direct async Python/Playwright and GPT-5.4; other reasoning/visual choices remain open |
 | Public website | Unselected; needs an access and workflow feasibility check |
 | Vision strategy | AI recommendation: page structure when adequate, bounded visual fallback; experiment not run |
-| Languages/dependencies | Python/FastAPI/Pydantic/OpenAI/Steel/Playwright are local DOM choices awaiting INT-1; project-wide stack stays open |
+| Languages/dependencies | Backend is Python (confirmed 2026-09-12). DOM worker locally uses FastAPI/Pydantic/OpenAI/Steel/Playwright, awaiting INT-1; agent loop, model and frontend remain open; React/TypeScript was an earlier frontend proposal |
 | Input/output semantics | Fake defaults are USD, five results and substring query/max-price filtering; confirm for the real site |
 | Contract | Historical 0.1 remains provisional; DOM worker 0.2 is implemented locally, awaiting INT-1 agreement and ARGUS/Ghost/visual receiver checks |
 | Validation/qualification details | Agree evidence, changed-input coverage, empty-state check and controlled truth set |

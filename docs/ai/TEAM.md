@@ -7,8 +7,8 @@ Updated: 2026-09-12. Four teammates cover the assignments below. HTML-1 has a lo
 | Sting | Ghost API | Reusable procedures, matching, binding, qualification and skill lifecycle | Example trace → candidate → qualification → changed-input replay walkthrough |
 | Thomas | VLM / subagent visual interpretation | Interpret screenshots, identify visual targets and verify visual outcomes | One Steel screenshot-to-action example with evidence and failure handling |
 | Tianqi | HTML/codebase interpretation for subagents | Interpret available page structure/code, identify semantic targets and extract structured information | One HTML/DOM-to-action/result example with evidence and failure handling |
-| Abel | ARGUS controller | Task interpretation, decomposition, routing and worker coordination | One complete task plan with worker inputs/outputs |
-| Thomas | Moderator | Monitor progress, aggregate evidence, reason over outputs and synthesize the final result | Moderator walkthrough against the shared worker report |
+| Abel | ARGUS controller | Task interpretation and language parsing, acceptance gate, decomposition, dispatch, run state, budgets and session ownership | One complete task plan with worker inputs/outputs and the controller-to-moderator boundary |
+| Thomas | Moderator | Report sufficiency, reconciliation across subtasks, final synthesis | Implement the three moderator callables proposed in [ARGUS.md](../hackathon/ARGUS.md) |
 
 All four are working on their assigned areas according to the user. Reported implementation evidence is recorded below; unreported checks remain pending. See [CURRENT.md](CURRENT.md) for the current checkout.
 
@@ -22,7 +22,8 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | GHOST-1 | Ghost lifecycle and callable boundary | Sting | Building | Connect the fixture boundary to a real worker trace; local demo remains simulated | `ghostapi/` on `feat/ghost-api-interactive-demo`; 12 Python and 5 JavaScript tests passed |
 | VLM-1 | Visual worker example and evidence report | Thomas | Ready to connect | Abel/Sting run the connection check against `workers/visual/examples/hn-top-story/`; align report shape at INT-1 | `workers/visual/`; see update below |
 | HTML-1 | HTML/code worker example and evidence report | Tianqi | Building | INT-1 agreement, live GPT/configured Steel task, then receiver checks | `browser_worker/`, tests; `codex/browser-worker-steel` rebased on `b4c9e76`; handoff below |
-| ARGUS-1 | Task plan, routing and moderator walkthrough | Abel | Researching | Define worker inputs/outputs using INT-1; use samples while workers develop | Not reported |
+| ARGUS-1 | Task plan, routing and controller boundary | Abel | Ready to connect | Abel reviews and commits `argus/`; Thomas and Sting implement the protocols in `argus/interfaces.py`; settle `ModeratorDecision` and success conditions at INT-1 | `argus/` on `feat/argus-controller-base`; 230 tests passed; see update below |
+| MOD-1 | Moderator callables: assess, reconcile, synthesize | Thomas | Planned | Review the boundary in ARGUS.md with Abel; agree `ModeratorDecision` shape in INT-1 | Not reported |
 | INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
 | DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Needs owner | Allocate remaining deliverables; use evaluation checklist | Not run |
@@ -65,6 +66,19 @@ Changes: preserve merged Ghost/visual docs, scope DOM choices, isolate pytest/Ru
 Checks run + result: 74 DOM tests passed (Python 3.12.14/Windows, 37.72s); Ruff lint/format and whitespace checks passed. Existing Ghost Python suite: 12 passed. Ghost/visual source and Ghost CI unchanged against main. Dedicated Linux CI added; remote result pending. Prior live Steel create/connect/observe/release sanity passed (Example Domain, 5.671s); not rerun for review. No live GPT/configured-site task verified.
 Open issue / needed from / next action: agree boundary and shared toolbox at INT-1; Thomas/Tianqi converge adapters and ownership, then test needs_visual compatibility; configure hosted read-only site and run real GPT task
 Receiver + connection check/result: Abel (ARGUS), Sting (Ghost traces), Thomas (moderator/visual) pending; HTML-1 is not Integrated
+```
+
+### ARGUS-1 update — 2026-09-12
+
+```text
+Task ID / date / status: ARGUS-1 / 2026-09-12 / Ready to connect
+Artifact, branch/revision or local files: argus/ — 11 package modules, 7 JSON fixtures in argus/examples/ and 9 test modules in argus/tests/, committed on branch feat/argus-controller-base from main 12aba7d. Phases 0-2 of docs/hackathon/ARGUS-IMPLEMENTATION.md; phase 2 added argus/__main__.py, argus/tests/test_end_to_end.py and argus/README.md.
+Module README / usage instructions: argus/README.md
+Entry point + environment names: python3 -m argus "<request text>" [--fake | --no-fake] [--store DIR] [--request-id ID] [--interpreted FILE]; ANTHROPIC_API_KEY and ARGUS_MODEL (interpretation only; --interpreted needs neither)
+Contract version + input/output/failure examples: contracts SCHEMA_VERSION 0.2-argus-draft, unchanged by this phase. Input argus/examples/interpreted_request.json; output the RunResult printed by the CLI run below (2 records, 2 claims each citing observation-000.png, validation passed); failures exercised end to end: AUTH_REQUIRED carried unchanged into a failed run, G4 clarify ending needs_input with the question and no session opened, VALIDATION_FAILED that the moderator's accept does not override, PRECONDITION_FAILED when live interpretation is attempted without the anthropic SDK. All evidence is synthetic: no browser, no model call, no Steel.
+Checks run + result: python3 -m unittest discover -s argus/tests -v — 230 tests, OK, Python 3.13.5 (was 205 before this phase; 25 new end-to-end and CLI tests). python3 -m argus --fake --interpreted argus/examples/interpreted_request.json --store /tmp/argus-demo — status succeeded, exit 0, and the store held index.json, runs/<run_id>/run.json, events.jsonl, reports/subtask-1.json and skills/demo-catalog.search-products/v1.json. python3 -m argus --no-fake "find headphones" — exit 3 with the "no real toolbox is connected" message. python3 -m argus "Find headphones under $150 in the demo catalog" — failed with PRECONDITION_FAILED (anthropic not installed here), as intended rather than crashing.
+Open issue / needed from / next action: two integration fixes made in this phase, both inside argus/ and with no contract change — StubModerator now counts the controller's own verification as evidence (previously a thin-evidence report was verified, assessed again, and failed on the verification cap), and the controller no longer flattens a mapping-shaped Ghost checks payload into bare names. Needed: Thomas's Moderator (and Toolbox with Tianqi) and Sting's Ghost implemented against argus/interfaces.py; SubtaskInput carries run_id but no request_id, which INT-1 should settle. Next action for Abel: review argus/README.md and this block, then commit on a branch and open a pull request (review gate 3 of the plan).
+Receiver + connection check/result: Thomas (implement Moderator against argus/interfaces.py and argus/examples/moderator_decision_accept.json; replace StubModerator), Sting (implement Ghost match/validate/compile; replace FakeGhost), Thomas/Tianqi (Toolbox) — connection checks pending, nothing is Integrated
 ```
 
 Status meanings: **Planned** = identified; **Researching** = approach under investigation; **Building** = implementation reported; **Ready to connect** = handoff checklist complete; **Integrated** = receiver has run the connection check; **Blocked** = named missing dependency; **Needs owner** = not assigned. Unreported checks remain pending. Record a blocker as “missing input — needed from whom — work that can continue.”
@@ -148,22 +162,26 @@ Handoff: provide an example worker report to Abel and a trace/evidence example t
 
 ## Abel — ARGUS controller
 
-- Interpret one user task into an overall request, subtasks, dependencies and success conditions.
-- Define routing to HTML/code interpretation, visual interpretation and qualified Ghost procedures.
-- Coordinate with Thomas's moderator on monitoring, evidence aggregation and final synthesis.
-- Agree shared worker reports, run state, budgets and failure/fallback behavior with the other workstreams.
+- Interpret one user task, including natural language, into an overall request with parameters tied to their text origins; gate it as accept, clarify or reject.
+- Decompose into subtasks with dependencies and concurrency groups; route to HTML/DOM interpretation, visual interpretation or qualified Ghost procedures.
+- Own run state, stage transitions, budgets, event stream, browser-session lifecycle and the single terminal result.
+- Call the moderator at fixed stages and execute its decisions; agree shared worker reports and failure/fallback behavior with the other workstreams.
 
-Handoff: provide one worked task example showing each worker's input, expected output, evidence and failure report. Agree the controller/moderator boundary with Thomas at INT-1.
+Handoff: provide one worked task example showing each worker's input, expected output, evidence and failure report, plus the controller-to-moderator boundary. Draft in [ARGUS.md](../hackathon/ARGUS.md).
 
-## Thomas — Moderator
+## Thomas — moderator
 
-Monitor subtask progress, gather worker evidence, handle gaps/conflicts and synthesize the final result. Coordinate inputs/outputs with Abel's controller; the PR review identifies this ownership, not a verified connection. Moderator implementation and receiver checks are not reported here.
+Assigned by the user on 2026-09-12. Whether Thomas also keeps the VLM-1 visual interpretation deliverable has not been confirmed; the row above is unchanged until it is.
+
+- Implement `assess_report`, `reconcile` and `synthesize` as proposed in [ARGUS.md](../hackathon/ARGUS.md), returning decisions from fixed sets.
+- Do not hold run state, sessions or budgets; the controller executes every decision.
+- Agree the `ModeratorDecision` shape and the retry/verification caps with Abel during INT-1.
 
 ## Shared boundaries and remaining ownership
 
 Use the same read-only search/filter/extraction example for all four deliverables. Agree one compatible worker-report shape containing subtask identity, outcome, findings, source evidence, observed actions/parameter origins, available measurements and failures. This is a planning requirement, not a new frozen schema.
 
-Thomas and Tianqi cover two interpretation paths and, per PR #7 review, one shared Steel toolbox. The separate local adapters need convergence; agree the shared adapter boundary, lifecycle ownership and file ownership before simultaneous edits. Sting consumes both kinds of evidence; Abel coordinates execution with Thomas's moderator.
+Thomas and Tianqi build the connection between subagents and Steel as one shared toolbox exposing browser actions, HTML/DOM interpretation and visual interpretation; sessions are opened, lent and closed by the ARGUS controller. Per the PR #7 review their separate local adapters (`workers/visual/`, `browser_worker/`) still need convergence; agree the shared adapter boundary, lifecycle ownership and file ownership before simultaneous edits. Sting consumes both kinds of evidence; Abel coordinates execution with Thomas's moderator.
 
 Dashboard, controlled-site construction, presentation/backup recording and release work have not been assigned explicitly. Allocate those separately; do not infer ownership from the removed A–D plans. Thomas/Tianqi still need to agree the concrete shared Steel session-lifecycle implementation.
 
