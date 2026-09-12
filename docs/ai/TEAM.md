@@ -19,7 +19,7 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | --- | --- | --- | --- | --- | --- |
 | INT-1 | Shared example and interface agreement | All four; Abel coordinates ARGUS inputs/outputs | Planned | Walk through one request and agree the checklist below | Not reported |
 | GHOST-1 | Ghost lifecycle and callable boundary | Sting | Researching | Draft using shared samples; real compilation needs worker traces | Not reported |
-| VLM-1 | Visual worker example and evidence report | Thomas | Ready to connect | Abel/Sting run the connection check against `workers/visual/examples/hn-top-story/`; align report shape at INT-1 | `workers/visual/`; see update below |
+| VLM-1 | Visual worker example and evidence report | Thomas | Building | Merge PR #1, then Abel/Sting check `workers/visual/examples/hn-top-story/`; align report shape at INT-1 | PR #1 (`vlm1-visual-worker-v2`); see update below |
 | HTML-1 | HTML/code worker example and evidence report | Tianqi | Researching | Define available code sources; prove structure → action/result; align with INT-1 | Not reported |
 | ARGUS-1 | Task plan, routing and moderator walkthrough | Abel | Researching | Define worker inputs/outputs using INT-1; use samples while workers develop | Not reported |
 | INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
@@ -29,8 +29,8 @@ Update this board in place. Detailed responsibilities are below; this table trac
 ### VLM-1 update — 2026-09-12
 
 ```text
-Task ID / date / status: VLM-1 / 2026-09-12 / Ready to connect
-Artifact, branch/revision or local files: workers/visual/ on main
+Task ID / date / status: VLM-1 / 2026-09-12 / Building
+Artifact, branch/revision or local files: workers/visual/ on branch vlm1-visual-worker-v2 (PR #1, pending review)
 Module README / usage instructions: workers/visual/README.md
 Entry point + environment names: python -m browser_subagent "<subtask>" --url <start>; STEEL_API_KEY (required), UITARS_BASE_URL (default http://127.0.0.1:8080/v1), ANTHROPIC_API_KEY (claude backend only)
 Contract version + input/output/failure examples: report.json is 0.1-provisional, aligned with CONTRACTS v0.1 ActionRecord/RunResult/metrics concepts. Real-browser example: workers/visual/examples/hn-top-story/ (report.json + observation-000.png). Failure handling proven live: a mid-run Steel session timeout produced typed action failures and an honest failed outcome (fast-abort now added); unparseable model output aborts after 3 attempts.
