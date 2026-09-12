@@ -1,6 +1,6 @@
 # Evaluation and demo checklist
 
-Owner: D, with technical results supplied by A/B/C. Status: planned checks; none has been run.
+Status: planned live-demo checks; none has been run. Current workstreams are assigned in [TEAM.md](../ai/TEAM.md); ownership of the overall demo/acceptance effort remains open. The synthetic scaffold's earlier checks are recorded separately in [CURRENT.md](../ai/CURRENT.md).
 
 ## What the demo must prove
 
@@ -16,18 +16,18 @@ Owner: D, with technical results supplied by A/B/C. Status: planned checks; none
 
 Freeze exact input values after selecting the public site. Do not tune them during judging unless the live site becomes unavailable.
 
-| ID | Scenario | Required observation | Owner |
-| --- | --- | --- | --- |
-| S1 | Public-site exploration with input set A | Fresh results and source evidence pass available checks; actual actions are recorded | A + C |
-| S2 | Candidate compilation from S1 | Candidate refers to request parameters; source run is linked; status is candidate | B |
-| S3 | Qualification replays with input sets B/C | Required qualification cases pass in fresh sessions; skill becomes qualified only then | A + B + C |
-| S4 | Compatible request with different input | Qualified skill is selected, new values appear on the page, fresh results pass checks | All |
-| S5 | Unsupported parameter or operation | Matcher explains incompatibility and explores or rejects; unsupported input is never ignored | B + C + D |
-| S6 | Deliberately invalid extracted record | Validator fails the price/currency/schema/source check and UI shows failure | B + D |
-| S7 | Controlled site v1 | Exploration and skill lifecycle complete for the controlled site's own skill | D + A + B |
-| S8 | Controlled site v2 with supported control change | Old version fails observably; one repair is proposed, replayed and qualified before use | A + B + C |
-| S9 | Controlled unsupported change | Run stops or falls back with a clear state; no false success | All |
-| S10 | Empty real result set | Explicit empty page is accepted as a valid result only when filters and empty state are evidenced | A + B |
+| ID | Scenario | Required observation |
+| --- | --- | --- |
+| S1 | Public-site exploration with initial input set | Fresh results and source evidence pass available checks; actual actions are recorded |
+| S2 | Candidate compilation from S1 | Candidate refers to request parameters; source run is linked; status is candidate |
+| S3 | Qualification replays with changed input sets | Required qualification cases pass in fresh sessions; skill becomes qualified only then |
+| S4 | Compatible request with different input | Qualified skill is selected, new values appear on the page, fresh results pass checks |
+| S5 | Unsupported parameter or operation | Matcher explains incompatibility and explores or rejects; unsupported input is never ignored |
+| S6 | Deliberately invalid extracted record | Validator fails the price/currency/schema/source check and UI shows failure |
+| S7 | Controlled site v1 | Exploration and skill lifecycle complete for the controlled site's own skill |
+| S8 | Controlled site v2 with supported control change | Old version fails observably; one repair is proposed, replayed and qualified before use |
+| S9 | Controlled unsupported change | Run stops or falls back with a clear state; no false success |
+| S10 | Empty real result set | Explicit empty page is accepted as a valid result only when filters and empty state are evidenced |
 
 ## Evidence to record for every run
 
