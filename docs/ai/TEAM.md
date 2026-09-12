@@ -19,12 +19,25 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | --- | --- | --- | --- | --- | --- |
 | INT-1 | Shared example and interface agreement | All four; Abel coordinates ARGUS inputs/outputs | Planned | Walk through one request and agree the checklist below | Not reported |
 | GHOST-1 | Ghost lifecycle and callable boundary | Sting | Researching | Draft using shared samples; real compilation needs worker traces | Not reported |
-| VLM-1 | Visual worker example and evidence report | Thomas | Researching | Prove screenshot → interpretation → action → observed outcome; align with INT-1 | Not reported |
+| VLM-1 | Visual worker example and evidence report | Thomas | Building | Local UI-TARS server setup, then one full screenshot→action→evidence run; align report shape at INT-1 | `workers/visual/` (local, uncommitted); see update below |
 | HTML-1 | HTML/code worker example and evidence report | Tianqi | Researching | Define available code sources; prove structure → action/result; align with INT-1 | Not reported |
 | ARGUS-1 | Task plan, routing and moderator walkthrough | Abel | Researching | Define worker inputs/outputs using INT-1; use samples while workers develop | Not reported |
 | INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
 | DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Needs owner | Allocate remaining deliverables; use evaluation checklist | Not run |
+
+### VLM-1 update — 2026-09-12
+
+```text
+Task ID / date / status: VLM-1 / 2026-09-12 / Building
+Artifact, branch/revision or local files: workers/visual/ (local working tree, not yet committed)
+Module README / usage instructions: workers/visual/README.md
+Entry point + environment names: python -m browser_subagent "<subtask>" --url <start>; STEEL_API_KEY (required), UITARS_BASE_URL (default http://127.0.0.1:8080/v1), ANTHROPIC_API_KEY (claude backend only)
+Contract version + input/output/failure examples: report.json is 0.1-provisional, aligned with CONTRACTS v0.1 ActionRecord/RunResult/metrics concepts; examples in workers/visual/README.md
+Checks run + result: test_parser.py passed (UI-TARS action parsing + coordinate rescale); smoke_test.py passed against a live Steel session (navigate, screenshot 1280x800, click/scroll/key, DOM element under cursor, network capture); worker-report builder unit check passed. End-to-end VLM run not yet executed.
+Open issue / needed from / next action: finish local llama.cpp + UI-TARS-1.5-7B setup (downloads in progress), then run one real subtask end to end and attach the run's report.json + trace as the VLM-1 evidence example
+Receiver + connection check/result: Abel (worker report shape), Sting (trace/evidence for compilation) — pending INT-1 review
+```
 
 Status meanings: **Planned** = identified; **Researching** = approach under investigation; **Building** = implementation reported; **Ready to connect** = handoff checklist complete; **Integrated** = receiver has run the connection check; **Blocked** = named missing dependency; **Needs owner** = not assigned. The four Researching states reflect the user's report, not independently verified progress. Record a blocker as “missing input — needed from whom — work that can continue.”
 
