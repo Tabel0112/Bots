@@ -1,0 +1,218 @@
+[
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "LG denies TV spying claims, says tracking and snoo",
+    "view": "full_page",
+    "expected": 212,
+    "got": 212,
+    "correct": true,
+    "raw": "212"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "LG denies TV spying claims, says tracking and snoo",
+    "view": "magnified",
+    "expected": 212,
+    "got": 212,
+    "correct": true,
+    "raw": "212"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Make your first edit to OpenStreetMap",
+    "view": "full_page",
+    "expected": 128,
+    "got": 188,
+    "correct": false,
+    "raw": "188"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Make your first edit to OpenStreetMap",
+    "view": "magnified",
+    "expected": 128,
+    "got": 128,
+    "correct": true,
+    "raw": "128"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Nvidia is the central bank of AI",
+    "view": "full_page",
+    "expected": 229,
+    "got": 228,
+    "correct": false,
+    "raw": "228"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Nvidia is the central bank of AI",
+    "view": "magnified",
+    "expected": 229,
+    "got": 229,
+    "correct": true,
+    "raw": "229"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Will There Be a 7G?",
+    "view": "full_page",
+    "expected": 45,
+    "got": 45,
+    "correct": true,
+    "raw": "45"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Will There Be a 7G?",
+    "view": "magnified",
+    "expected": 45,
+    "got": 45,
+    "correct": true,
+    "raw": "45"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "An open letter to Dario: if you mean it, open the ",
+    "view": "full_page",
+    "expected": 105,
+    "got": 105,
+    "correct": true,
+    "raw": "105"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "An open letter to Dario: if you mean it, open the ",
+    "view": "magnified",
+    "expected": 105,
+    "got": 105,
+    "correct": true,
+    "raw": "105"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Stabilizing Rust's Never Type",
+    "view": "full_page",
+    "expected": 21,
+    "got": 21,
+    "correct": true,
+    "raw": "21"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Stabilizing Rust's Never Type",
+    "view": "magnified",
+    "expected": 21,
+    "got": 21,
+    "correct": true,
+    "raw": "21"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "We must pace the frontier",
+    "view": "full_page",
+    "expected": 345,
+    "got": 345,
+    "correct": true,
+    "raw": "345"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "We must pace the frontier",
+    "view": "magnified",
+    "expected": 345,
+    "got": 345,
+    "correct": true,
+    "raw": "345"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Microcode in Intel's 8087 floating-point chip: the",
+    "view": "full_page",
+    "expected": 55,
+    "got": 56,
+    "correct": false,
+    "raw": "56"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "Microcode in Intel's 8087 floating-point chip: the",
+    "view": "magnified",
+    "expected": 55,
+    "got": 55,
+    "correct": true,
+    "raw": "55"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "IKEA made a mod for Skyrim [video]",
+    "view": "full_page",
+    "expected": 486,
+    "got": 496,
+    "correct": false,
+    "raw": "496"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "IKEA made a mod for Skyrim [video]",
+    "view": "magnified",
+    "expected": 486,
+    "got": 486,
+    "correct": true,
+    "raw": "486"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "google.com/goto: Google's anti-scraping update",
+    "view": "full_page",
+    "expected": 582,
+    "got": 482,
+    "correct": false,
+    "raw": "482"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "google.com/goto: Google's anti-scraping update",
+    "view": "magnified",
+    "expected": 582,
+    "got": 582,
+    "correct": true,
+    "raw": "582"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "I made a build visualizer to understand Bun's comp",
+    "view": "full_page",
+    "expected": 31,
+    "got": 31,
+    "correct": true,
+    "raw": "31"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "I made a build visualizer to understand Bun's comp",
+    "view": "magnified",
+    "expected": 31,
+    "got": 31,
+    "correct": true,
+    "raw": "31"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "A Mathematical Framework for Transformer Circuits ",
+    "view": "full_page",
+    "expected": 58,
+    "got": 88,
+    "correct": false,
+    "raw": "88"
+  },
+  {
+    "model": "ui-tars-7b-q4",
+    "title": "A Mathematical Framework for Transformer Circuits ",
+    "view": "magnified",
+    "expected": 58,
+    "got": 58,
+    "correct": true,
+    "raw": "58"
+  }
+]

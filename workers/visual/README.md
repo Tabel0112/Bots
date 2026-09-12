@@ -63,13 +63,13 @@ workstation running a larger model).
 ground-truth set** (the model never sees it), then asks the model to read each story's
 points from pixels alone — the canvas/WebGL situation where no DOM extraction exists.
 
-UI-TARS-1.5-7B-Q4, 12 stories, same page:
+Two 7B models at the same quant, scored on the **identical** captured page:
 
-| Condition | Correct |
-| --- | --- |
-| Full page, 100% browser zoom | 6/12 (50%) |
-| Full page, 150% browser zoom | 10/12 (83%) |
-| Magnified crop of the story's row | **12/12 (100%)** |
+| Condition | UI-TARS-1.5-7B-Q4 | Holo1.5-7B-Q4 |
+| --- | --- | --- |
+| Full page, 100% browser zoom | 6/12 (50%) | **10/12 (83%)** |
+| Full page, 150% browser zoom | 10/12 (83%) | not run |
+| Magnified crop of the story's row | **12/12 (100%)** | **12/12 (100%)** |
 
 Errors are pure small-scale OCR confusions (128→188, 582→482, 486→496, 58→88), not
 misunderstanding: the same model reads the same value perfectly once it is bigger. So
@@ -94,6 +94,28 @@ python eval_reading.py --label other --base-url http://127.0.0.1:8081/v1 \
 (Caveat: with `--page-zoom`, `getBoundingClientRect` returns unzoomed coordinates under
 `body.zoom`, so the *magnified* column of a zoomed run crops the wrong rows and its
 number is not meaningful. The full-page column is unaffected.)
+
+### Aggregate questions are not a VLM capability at this size
+
+Asked "which story has the HIGHEST number of points?" on the same page (true answer:
+"google.com/goto: Google's anti-scraping update", 582):
+
+- UI-TARS answered "Navier-Stokes Announcement, 267 points" — wrong story, wrong number.
+- Holo1.5 emitted malformed JSON (`{"website": ..., "path": "/newest/"}`) — it is tuned
+  for localization and screen QA, not free-form reasoning.
+
+This is the same failure the moderator harness hit when it reported the wrong
+most-commented story. Comparison and aggregation should not be asked of the model in
+one glance: read the individual values (reliable when magnified) and compute the
+maximum in code.
+
+### Division of labour that the measurements support
+
+- **Locating / acting** — UI-TARS (it has the action space; Holo1.5 has none, so it
+  cannot drive a session).
+- **Reading exact values** — magnify the region first; either model is then perfect,
+  and Holo1.5 is markedly better without magnification (83% vs 50%).
+- **Comparing / aggregating** — in Python, never in the model.
 
 ### Choosing a model
 
