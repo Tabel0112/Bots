@@ -4,7 +4,7 @@ Updated: 2026-09-12. Keep status explicit; a proposal is not an implementation c
 
 ## Confirmed user direction
 
-- **Phase:** planning/research. The previously generated scaffold was premature and remains provisional.
+- **Phase (updated 2026-09-12, later the same day):** build component frameworks first, connect later. Each workstream develops its own skeleton, module README and evidence; integration waits for INT-1/INT-2 in [TEAM.md](TEAM.md). The earlier local ARGUS scaffold remains provisional and is not the agreed architecture.
 - **Product:** ARGUS coordinates deliberation/orchestration/verification; Ghost supplies reusable procedural memory.
 - **Flow:** one user task becomes an overall request with subtasks; subagents execute; a moderator monitors, gathers, reasons over outputs and produces the final result.
 - **Browser infrastructure:** use Steel for browser subagents.
@@ -37,9 +37,10 @@ The retained provisional contract budgets at most one repair followed by at most
 | Contract | Version 0.1 describes the provisional narrow scaffold; moderator/subtask/visual target extensions need design work |
 | Validation/qualification details | Agree evidence, changed-input coverage, empty-state check and controlled truth set |
 | Schedule and remaining work | Four workstreams assigned in TEAM; deadlines and ownership of other deliverables remain open |
+| Framework pull requests before integration | User direction: component skeletons merge to `main` through pull requests with status **Building**; **Ready to connect** requires the TEAM handoff checklist. AI recommendation, not decided: CI running offline checks and branch protection requiring one review from someone other than the author |
 
 ## Corrections that must survive a tool switch
 
-The user clarified the phase after code was generated; a later AI should not resume implementation solely because code or checklists exist. Steel was subsequently selected, so older “browser provider unselected” wording is superseded for the provider choice. Agent framework and model remain open. The moderator proposal is more explicit than the old single-controller scaffold. The user later supplied the four workstream assignments in TEAM, superseding the earlier decision to postpone personnel allocation. These assignments do not prove implementation progress or authorize this AI to start coding automatically.
+The user first clarified (2026-09-12) that the generated ARGUS scaffold was premature. Later the same day the user directed that workstreams build their frameworks before connecting them. A later AI should treat workstream code as expected, review it for framework correctness and honest labeling, and not treat “not integrated” as a defect. It still must not connect components, mark a connection Integrated or claim end-to-end behavior without the INT checkpoints. Steel was subsequently selected, so older “browser provider unselected” wording is superseded for the provider choice. Agent framework and model remain open. The moderator proposal is more explicit than the old single-controller scaffold. The user later supplied the four workstream assignments in TEAM, superseding the earlier decision to postpone personnel allocation. These assignments do not prove implementation progress or authorize this AI to start coding automatically.
 
 When a decision changes, update its entry with the date, rationale and affected contract/research links. Avoid maintaining another copy of runtime status here; use [CURRENT.md](CURRENT.md).
