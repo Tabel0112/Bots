@@ -35,3 +35,9 @@ Prior local experiment validation on 2026-09-12: **24 tests passed** on Python 3
 Prepared the planning docs, team progress board, root AI entry points and coding-task completion rule for sharing. Coding agents must maintain module READMEs, record changes and actual checks in TEAM, and update project context when appropriate. No runtime implementation changes are part of this publication.
 
 Next planning checkpoint is INT-1 in TEAM: walk through one concrete request and agree component inputs, outputs, evidence, failures and shared session responsibility. Each person can continue research with common samples; connect a working slice when its components are ready. Public-site choice, agent framework/model, remaining ownership and precise experiments are open.
+
+## Ghost API local module
+
+`ghostapi/` now contains a simulated workflow registry and interactive flowchart viewer. It demonstrates exact workflow lookup, no-match discovery, SQLite candidate/version/run storage, parameter binding, replay, validation, qualification, and concurrent UI observation while queued work executes. The chart supports pointer dragging, zoom, history navigation, live following, and evidence inspection. The browser/catalog and discovery procedure remain fixtures; this is not evidence of Steel integration or automatic trace compilation.
+
+Focused validation at this checkpoint: 12 Python tests passed and 5 JavaScript tests passed. Coverage reports measured 72% Python coverage and 97.18% line / 91.30% branch coverage for the flowchart module. Root CI and Codecov configuration cover the module. The feature changes are maintained on `feat/ghost-api-interactive-demo`.

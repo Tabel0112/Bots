@@ -1,0 +1,8 @@
+{
+  "schema_version": "0.1",
+  "request_id": "demo-task-1",
+  "site_id": "demo-catalog",
+  "operation": "search_products",
+  "parameters": {"query": "headphones", "max_price": 150},
+  "mode": "auto"
+}

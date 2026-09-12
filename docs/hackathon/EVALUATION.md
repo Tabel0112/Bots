@@ -1,6 +1,6 @@
 # Evaluation and demo checklist
 
-Status: planned live-demo checks; none has been run. Current workstreams are assigned in [TEAM.md](../ai/TEAM.md); ownership of the overall demo/acceptance effort remains open. The synthetic scaffold's earlier checks are recorded separately in [CURRENT.md](../ai/CURRENT.md).
+Status: planned live-demo checks; none has been run. Current workstreams are assigned in [TEAM.md](../ai/TEAM.md); ownership of the overall demo/acceptance effort remains open. The synthetic scaffold's earlier checks are recorded separately in [CURRENT.md](../ai/CURRENT.md). The [Ghost fixture demo](../../ghostapi/DEVELOPMENT.md#validation) has separate local checks and does not establish live browser readiness.
 
 ## What the demo must prove
 

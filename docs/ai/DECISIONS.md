@@ -11,6 +11,8 @@ Updated: 2026-09-12. Keep status explicit; a proposal is not an implementation c
 - **Vision direction:** support visual interpretation in the browser worker when the workflow needs it; every agent does not need vision. Actual integration/model selection remains open.
 - **People:** the user confirmed four current workstream assignments on 2026-09-12. [TEAM.md](TEAM.md) is the source of truth for names, tasks and handoffs; other areas remain unassigned.
 - **Continuity:** store compact project context in the repository so another AI can continue without the full chat.
+- **Ghost module location:** keep Ghost-specific code and documentation under the correctly spelled root `ghostapi/` folder.
+- **Ghost demo:** show workflow execution as an interactive flowchart that can be dragged with a mouse or other pointer while work proceeds.
 - **Documentation sharing (2026-09-12):** user authorized commit and push of the shared planning/AI handoff docs. The provisional runtime remains a local experiment; publication of these docs does not imply a working shared backend.
 
 ## Existing MVP constraints

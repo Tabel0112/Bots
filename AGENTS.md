@@ -11,3 +11,9 @@ Follow the user's current request. Preserve unrelated work and distinguish propo
 - Create or update the affected module's `README.md`: purpose, entry point, setup/environment-variable names, input/output/failure examples, run/test commands, dependencies and known limitations. Document actual behavior; label unfinished features.
 - Update the relevant task in TEAM with what changed, files and branch/revision, checks actually run and their results, remaining issues and the next handoff. Link the module README. Research/documentation tasks record findings and checks without inventing module usage or test results.
 - Update CURRENT for project-wide changes and DECISIONS for agreed choices. Keep module usage current and task records concise. Never mark a connection Integrated without the receiver's verification.
+
+## Authorship
+
+- Preserve the user's human Git identity and repository authorship.
+- Never add an AI system, assistant, tool, vendor, or model as an author, co-author, contributor, sign-off identity, generated-by credit, or commit trailer.
+- This repository preference persists unless the user explicitly changes it.

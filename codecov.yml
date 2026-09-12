@@ -1,0 +1,26 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 80%
+
+flags:
+  ghost-python:
+    paths:
+      - ghostapi/demo/*.py
+  ghost-flowchart:
+    paths:
+      - ghostapi/demo/flowchart.js
+
+ignore:
+  - ghostapi/demo/test_*.py
+  - ghostapi/demo/test_*.js
+
+comment:
+  layout: reach, diff, flags, files
+  behavior: default
+  require_changes: false

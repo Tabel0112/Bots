@@ -42,53 +42,9 @@ The browser adapter owns browser mechanics and the exploratory model loop. Ghost
 
 Allowed initial actions: navigate to configured site path, fill field, select option, click control, wait for expected state, extract records. No arbitrary generated shell/JavaScript execution in skill data.
 
-## Skill schema — Ghost produces, shared storage persists
+## Ghost workflow schema and interface
 
-```json
-{
-  "schema_version": "0.1",
-  "skill_id": "demo-catalog.search-products",
-  "version": 1,
-  "status": "candidate",
-  "site_id": "demo-catalog",
-  "operation": "search_products",
-  "inputs": {
-    "query": {"type": "string", "required": true},
-    "max_price": {"type": "number", "minimum": 0, "required": true}
-  },
-  "preconditions": ["catalog search form is present"],
-  "steps": [
-    {
-      "step_id": "set-query",
-      "action": "fill",
-      "target": {"role": "textbox", "label": "Search products"},
-      "value": {"parameter": "query"},
-      "expected_state": {"field_equals_parameter": "query"}
-    }
-  ],
-  "output_schema_id": "product-list.v1",
-  "validator_id": "catalog-search.v1",
-  "source_run_ids": ["run-example"],
-  "qualification": {"test_run_ids": [], "last_validated_at": null}
-}
-```
-
-This abbreviated example illustrates the schema; its single step is not a complete runnable skill. Real compilation must include price binding, submission, result readiness, extraction, and checks. Values distinguish literals from named parameter references. Stable semantic targets resolve against the current page; old page element indexes are invalid across sessions.
-
-Store `candidate → qualified → quarantined` as distinct states. One successful trace creates a candidate. Proposed demo qualification: replay in fresh sessions with two distinct changed input sets and one empty-result case where a real empty state can be verified; all required checks pass. If that coverage cannot be obtained, keep candidate status and report the missing coverage. These few trials demonstrate supported examples, not general reliability.
-
-Repair creates a new candidate version with references to the old version, failure, and changed steps. Retain old version history. Quarantine the failing version for the affected scope; do not overwrite it or automatically promote an untested repair. Versions and run records need durable storage for the demo; the existing scaffold only has memory storage. No concurrent promotion is needed.
-
-## Ghost interface — consumed by ARGUS
-
-- `match(request, skills) -> MatchDecision`: compatible qualified skill or `explore`, with reason.
-- `compile(trace, request, checks) -> CandidateSkill`: parameterize supported values; reject missing evidence or unsupported action shapes.
-- `bind(skill, parameters) -> BoundProcedure`: strict required/type/scope checks; no silent unknown fields.
-- `validate(request, items, evidence, checks) -> ValidationReport`.
-- `qualify(candidate, replay_reports) -> QualificationReport`.
-- `propose_repair(skill, failure, observation) -> RepairProposal`: uses the browser adapter's target proposal if needed; cannot broaden task authority or edit the validator to pass.
-
-ARGUS orchestrates these functions. Ghost uses the shared run controller and browser execution interface; it does not create competing controllers or browser backends.
+The authoritative workflow schema, version lifecycle, matching, binding, compilation, validation, qualification, and repair interfaces live in [the Ghost API contract](../../ghostapi/CONTRACTS.md). ARGUS remains the run controller, the browser adapter executes steps, and shared storage persists versions and run records.
 
 ## Result and validation
 

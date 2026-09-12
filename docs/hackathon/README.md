@@ -9,3 +9,5 @@ Read these details when relevant:
 - [EVALUATION.md](EVALUATION.md): planned proof scenarios, evidence requirements and demo checklist; live scenarios have not run.
 
 The obsolete schedule/person plans and duplicate pack were consolidated into the [current checkpoint](../ai/CURRENT.md), [architecture](../ai/ARCHITECTURE.md) and [decisions](../ai/DECISIONS.md). Original tracked documents remain recoverable from Git at `25f061c`.
+
+Ghost-specific workflow design, development notes, and the runnable fixture viewer live in the [Ghost API module](../../ghostapi/README.md).
