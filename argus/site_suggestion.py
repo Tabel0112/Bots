@@ -57,6 +57,12 @@ def suggest_sites(
 ) -> InterpretedRequest:
     """Return a copy with allowed model-suggested domains filled where possible."""
     result = copy.deepcopy(interpreted)
+    if registry.sites_carrying(result.raw_text):
+        # The request asks for a product a configured site carries. The
+        # interpreter already tried to map it to that site; suggesting a public
+        # retailer here would send the run somewhere the worker cannot serve it,
+        # so leave the intent unresolved and let the gate ask.
+        return result
     unresolved = [
         index
         for index, intent in enumerate(result.intents)

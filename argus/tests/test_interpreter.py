@@ -657,6 +657,177 @@ class InterpreterTest(unittest.TestCase):
         self.assertEqual(only.expected_record_shape, [])
         self.assertEqual(interpreted.ambiguities, [])
 
+    # -- unnamed requests for a carried product ---------------------------- #
+
+    UNNAMED = "Find headphones under $150 and show the five cheapest"
+
+    def _unnamed_open(self):
+        return payload(
+            intents=[
+                open_intent(
+                    site_id="",
+                    operation="search_products",
+                    target_domain=None,
+                    goal="Find headphones",
+                    criteria=(criterion("under $150", "filter", span=(16, 26)),),
+                    expected_record_shape=("title", "price", "url"),
+                )
+            ],
+            ambiguities=["Which website should be searched?"],
+        )
+
+    def _catalog_registry(self):
+        return payload(
+            intents=[
+                intent(
+                    [
+                        parameter("query", "headphones", span=(5, 15)),
+                        parameter("max_price", 150, span=(23, 26)),
+                    ]
+                )
+            ]
+        )
+
+    def test_unnamed_request_for_a_carried_product_is_reasked_with_a_registry_hint(
+        self,
+    ):
+        # First reading: an open intent with no site. The request mentions
+        # headphones, which demo-catalog carries, so the module asks once more
+        # with the mapping spelled out and takes the registry reading.
+        client = FakeModelClient(
+            [
+                ModelResult(status="ok", parsed=self._unnamed_open(), model=MODEL),
+                ModelResult(status="ok", parsed=self._catalog_registry(), model=MODEL),
+            ]
+        )
+        interpreted = interpret(self.UNNAMED, "request-test-1", client=client)
+
+        self.assertEqual(len(client.calls), 2)
+        self.assertNotIn("Registry mapping required", client.calls[0]["system"])
+        self.assertIn("Registry mapping required", client.calls[1]["system"])
+        self.assertIn("demo-catalog", client.calls[1]["system"])
+        self.assertIn("headphones", client.calls[1]["system"])
+        self.assertEqual(client.calls[1]["user"], self.UNNAMED)
+        only = interpreted.intents[0]
+        self.assertEqual(only.kind, "registry")
+        self.assertEqual(only.site_id, "demo-catalog")
+        self.assertEqual(only.operation, "search_products")
+        self.assertEqual(only.parameters["query"].value, "headphones")
+        self.assertEqual(only.parameters["max_price"].value, 150)
+        self.assertEqual(interpreted.ambiguities, [])
+
+    def test_reask_that_still_returns_open_keeps_the_first_reading(self):
+        client = FakeModelClient(
+            [
+                ModelResult(status="ok", parsed=self._unnamed_open(), model=MODEL),
+                ModelResult(status="ok", parsed=self._unnamed_open(), model=MODEL),
+            ]
+        )
+        interpreted = interpret(self.UNNAMED, "request-test-1", client=client)
+
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(interpreted.intents[0].kind, "open")
+        self.assertIsNone(interpreted.intents[0].target_domain)
+        self.assertIn("Which website should be searched?", interpreted.ambiguities)
+
+    def test_reask_failure_keeps_the_first_reading(self):
+        client = FakeModelClient(
+            [
+                ModelResult(status="ok", parsed=self._unnamed_open(), model=MODEL),
+                ModelResult(status="refusal", model=MODEL),
+            ]
+        )
+        interpreted = interpret(self.UNNAMED, "request-test-1", client=client)
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(interpreted.intents[0].kind, "open")
+
+    def test_every_open_reading_is_reasked_to_the_registry(self):
+        # Runs are served by the configured sites only. An open reading is asked
+        # once more with the mapping spelled out, whether or not it names a site.
+        condos = payload(
+            intents=[
+                open_intent(
+                    site_id="",
+                    operation="search_real_estate",
+                    target_domain=None,
+                    goal="Find condos in Toronto",
+                )
+            ]
+        )
+        mapped = payload(
+            intents=[intent([parameter("query", "condos", span=(12, 18))])]
+        )
+        client = FakeModelClient(
+            [
+                ModelResult(status="ok", parsed=condos, model=MODEL),
+                ModelResult(status="ok", parsed=mapped, model=MODEL),
+            ]
+        )
+        interpreted = interpret("Give me the condos in Toronto", "r", client=client)
+        self.assertEqual(len(client.calls), 2)
+        self.assertIn("Ignore any website named", client.calls[1]["system"])
+        self.assertEqual(interpreted.intents[0].kind, "registry")
+        self.assertEqual(interpreted.intents[0].parameters["query"].value, "condos")
+
+        named = payload(
+            intents=[
+                open_intent(
+                    target_domain="en.wikipedia.org", site_id="en.wikipedia.org"
+                )
+            ]
+        )
+        towers = payload(
+            intents=[intent([parameter("query", "Toronto towers", span=(28, 42))])]
+        )
+        client = FakeModelClient(
+            [
+                ModelResult(status="ok", parsed=named, model=MODEL),
+                ModelResult(status="ok", parsed=towers, model=MODEL),
+            ]
+        )
+        interpreted = interpret(
+            "On en.wikipedia.org, search for Toronto towers", "r", client=client
+        )
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(interpreted.intents[0].kind, "registry")
+        self.assertEqual(interpreted.intents[0].site_id, "demo-catalog")
+        self.assertIsNone(interpreted.intents[0].target_domain)
+
+    def test_sites_carrying_matches_whole_words_and_plurals(self):
+        self.assertEqual(
+            registry.sites_carrying("Find headphones and keyboards under 100 USD"),
+            [
+                {
+                    "site_id": "demo-catalog",
+                    "operations": ["search_products"],
+                    "subjects": ["headphones", "keyboard"],
+                }
+            ],
+        )
+        self.assertEqual(
+            registry.sites_carrying("Best Keyboard for coding?")[0]["subjects"],
+            ["keyboard"],
+        )
+        self.assertEqual(
+            registry.sites_carrying("a keyboardist and a headphone stand"), []
+        )
+        self.assertEqual(
+            registry.sites_carrying("Give me the best condos in Toronto"), []
+        )
+
+    def test_prompt_maps_unnamed_requests_for_catalog_products_to_the_registry(self):
+        # A shopping request that names no site used to become an open intent,
+        # and the connected runtime then aimed it at a public retailer. The
+        # prompt now tells the model what each site carries and that such a
+        # request fits the registry without naming the site.
+        prompt = system_prompt()
+        for site in registry.SITES.values():
+            for subject in site.get("subjects", []):
+                self.assertIn(subject, prompt)
+        self.assertIn("carries: headphones, keyboard", prompt)
+        self.assertIn("even when the request names no site", prompt)
+        self.assertIn("matching the site's spelling", prompt)
+
     def test_open_context_on_a_registry_intent_is_dropped_with_a_note(self):
         parsed = payload(
             intents=[
