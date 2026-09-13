@@ -23,7 +23,8 @@ they resolve to `https://tabel0112.github.io/products/<id>`; the patterns allow
 that. Use it with `WORKER_SITES_FILE=demo-site/sites.hosted.json` and
 `WORKER_BROWSER=steel`.
 
-Status: the config validates with the worker's own `validate_request`. The first
-Steel run on 2026-09-13 failed before navigation with HTTP 401 from Steel
-("Invalid Steel API key"); the key in the local `.env` must be replaced before the
-Steel path can be verified. No two-UI-version site exists yet.
+Status: verified on 2026-09-13 — after the Steel key was replaced, a connected
+Mission Control run on this hosted catalog succeeded (run-5b5d9ce59c: 20 checks
+passed, worker on a Steel session, candidate saved). The Steel account allows one
+concurrent session; a session left live by an earlier run blocks the next one, so
+release stale sessions before a demo. No two-UI-version site exists yet.

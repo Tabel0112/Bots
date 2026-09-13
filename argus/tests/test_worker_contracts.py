@@ -510,3 +510,22 @@ class ToWorkerReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GhostSummaryTests(unittest.TestCase):
+    def test_ghost_block_is_summarised_into_evidence(self):
+        summary = wc.ghost_summary(
+            {
+                "mode": "exploration",
+                "candidate": None,
+                "candidate_skipped": "The run has no observations.",
+                "errors": ["GHOST_UNAVAILABLE"],
+                "visual_used": False,
+                "secret": "never copied",
+            }
+        )
+        self.assertEqual(summary["mode"], "exploration")
+        self.assertEqual(summary["candidate_skipped"], "The run has no observations.")
+        self.assertEqual(summary["errors"], ["GHOST_UNAVAILABLE"])
+        self.assertNotIn("secret", summary)
+        self.assertEqual(wc.ghost_summary(None), {})

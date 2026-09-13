@@ -1,6 +1,6 @@
 # ARGUS-3 — connecting the real components (plan)
 
-Date: 2026-09-13. Status: **packages 1, 2, 3, 4, 5 implemented on `feat/argus-3`; INT-2 and the qualify/reuse slice passed locally the same night with the real moderator (see TEAM); P3-SESSION and the P3-LEARN route landed later (not yet wired/verified live); the Steel run is blocked on a valid STEEL_API_KEY.** Written by Abel from the
+Date: 2026-09-13. Status: **packages 1, 2, 3, 4, 5 implemented on `feat/argus-3`; INT-2 and the qualify/reuse slice passed locally the same night with the real moderator (see TEAM); P3-SESSION and the P3-LEARN route landed later (not yet wired/verified live); the Steel run passed once on the hosted catalog after the key was replaced (see TEAM).** Written by Abel from the
 source on `fix/main-stabilize` (main `7e28641` plus the stabilization fix). It
 supersedes the prompts in [ARGUS-HANDOFF-3.md](ARGUS-HANDOFF-3.md) where they
 conflict and turns [END-TO-END-PLAN.md](END-TO-END-PLAN.md) into ordered packages.
