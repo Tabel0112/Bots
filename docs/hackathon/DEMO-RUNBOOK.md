@@ -6,8 +6,10 @@ answer with evidence; a successful run becomes a Ghost skill; a qualified skill 
 reused with zero worker model calls; an open-world request on a site ARGUS chooses
 returns provenance-backed results; requests ARGUS cannot serve end honestly.
 
-Everything below was run on 2026-09-13 (run ids in the ARGUS-3 and OW-1 blocks of
-[TEAM.md](../ai/TEAM.md)). Nothing else is claimed.
+Everything below was run on 2026-09-13 and dry-run again from these exact commands on
+the morning of 2026-09-14 (explore 43 s, reuse 34 s with 0 worker model calls, two
+categories 49 s with 40 checks, Wikipedia 101 s with five correct articles). Run ids
+are in the ARGUS-3 and OW-1 blocks of [TEAM.md](../ai/TEAM.md). Nothing else is claimed.
 
 ## Before the demo (20 minutes, one person)
 
@@ -19,9 +21,13 @@ Everything below was run on 2026-09-13 (run ids in the ARGUS-3 and OW-1 blocks o
    wins; both suites pass with it).
 3. Steel: open https://app.steel.dev and confirm **no live session**. The plan allows
    one; a leftover blocks every run. Release anything live.
-4. Registry: use the demo database that already holds the qualified skill
-   (`ghostapi/ghost-demo.sqlite3`, copied from the 2026-09-13 Steel runs). If it is
-   missing, run step "Recreate the qualified skill" below.
+4. Registry: use the demo database `ghostapi/ghost-demo.sqlite3`. On the morning
+   dry run (2026-09-14) it holds `demo-catalog.search_extract` **v3 qualified** on
+   the current code. A skill is only reusable when it was qualified on the same
+   worker code and site config: the open-world change on 2026-09-13 orphaned the
+   earlier v1, and the reuse prompt explored instead of replaying until v3 was
+   qualified. After any worker or `sites.hosted.json` change, or if the database
+   is missing, run "Recreate the qualified skill" below before the demo.
 5. Start three terminals from the repository root:
 
 ```bash
