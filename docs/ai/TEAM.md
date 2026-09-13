@@ -22,9 +22,10 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | GHOST-1 | Ghost lifecycle and callable boundary | Sting | Building | Connect the fixture boundary to a real worker trace; local demo remains simulated | `ghostapi/` on `feat/ghost-api-interactive-demo`; 12 Python and 5 JavaScript tests passed |
 | VLM-1 | Visual worker example and evidence report | Thomas | Building | Record an interaction-step example (click/type/scroll with semantic targets) that Ghost can compile; align report shape at INT-1 | `workers/visual/` on main (merged as eb3095b); see update below |
 | HTML-1 | HTML/code worker example and evidence report | Tianqi | Building | INT-1 agreement, live GPT/configured Steel task, then receiver checks | `browser_worker/`, tests; `codex/browser-worker-steel` rebased on `b4c9e76`; handoff below |
-| ARGUS-1 | Task plan, routing and controller boundary | Abel | Ready to connect | Abel reviews and commits the uncommitted phase 1b work; then Thomas/Tianqi/Sting run their connection checks. Live VLM slot arbitration across runs, address/action enforcement and real sessions still need toolbox integration | `feat/argus-controller-base` at `7641f87` + local changes; 419 offline tests passed; see the phase 1b update below |
-| MOD-1 | Moderator callables: assess, reconcile, synthesize | Thomas | Planned | Review the boundary in ARGUS.md with Abel; agree `ModeratorDecision` shape in INT-1 | Not reported |
-| INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
+| ARGUS-1 | Task plan, routing and controller boundary | Abel | Ready to connect | Committed and pushed on `feat/argus-controller-base` (PR #10). ARGUS side of the read-only workflow is complete; nothing more to build until INT-2 surfaces mismatches. Live interpretation checked against gpt-5.6-sol (12 requests, spans exact, S4/S5 correct after two fixes) | PR #10 at `57244d8`+; 425 offline tests passed; `python3 -m argus.live_check` run 2026-09-12 |
+| ARGUS-3 | Phase 3 connections: session manager, DOM adapter, Ghost adapter, moderator adapter, visual adapter, first connected run | Sting (assigned by Abel 2026-09-12) | Planned | Prompts, order and owner questions in [ARGUS-HANDOFF-3.md](../hackathon/ARGUS-HANDOFF-3.md); P3-SESSION, P3-GHOST and P3-MOD have no dependencies; P3-VISUAL waits for Thomas's session change; currency (CAD vs USD) is Sting's own decision | Not started |
+| MOD-1 | Moderator callables: assess, reconcile, synthesize | Thomas (module) / Sting (adapter, under ARGUS-3) | Building | `moderator/` merged (PR #8) is a run harness, not an `argus.interfaces.Moderator`; P3-MOD reuses its synthesis prompt behind the interface and retires its dispatch. Thomas to confirm that boundary | `moderator/` on main at `eaed4c7`; harness check on Hacker News reported values wrong vs screenshots (see its README) |
+| INT-2 | First connected request with verified result | Sting runs it; Abel reviews | Planned | ARGUS-3 P3-SESSION + P3-DOM + P3-GHOST + P3-MOD, then P3-INT2 with STEEL_API_KEY, OPENAI_API_KEY, ARGUS_MODEL. Read-only decision workflow is finished at this point; execution and boundary handoff (DECISIONS) come after | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
 | DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Needs owner | Allocate remaining deliverables; use evaluation checklist | Not run |
 
@@ -168,6 +169,10 @@ Choose one person to integrate branches for each checkpoint; that Git/release ro
 - Define versioning, quarantine and bounded repair acceptance; preserve the original checks and previous versions.
 
 Handoff: tell Thomas and Tianqi what action/observation evidence compilation requires. Give Abel match decisions, candidate/qualification outcomes and failure reasons. Use the [provisional contract](../hackathon/CONTRACTS.md) as a starting reference, with changes discussed explicitly.
+
+### Sting — phase 3 connections (ARGUS-3, assigned 2026-09-12)
+
+Owns connecting the real components to the ARGUS controller through `argus/interfaces.py`, using the prompts in [ARGUS-HANDOFF-3.md](../hackathon/ARGUS-HANDOFF-3.md) and the gaps in [ARGUS-CONNECTION-AUDIT.md](../hackathon/ARGUS-CONNECTION-AUDIT.md). Rules: adapters live under `argus/adapters/`; no edits to `workers/`, `browser_worker/` or `moderator/` without their owner; offline tests with fakes; Abel reviews and commits. Decide CAD vs USD before P3-GHOST. Ask Thomas for the visual worker's session-injection change and for agreement on the moderator boundary. Target: INT-2, the first connected read-only run with a validated answer.
 
 ## Thomas — VLM / visual interpretation
 
