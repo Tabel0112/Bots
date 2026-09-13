@@ -1,6 +1,6 @@
 # Team tasks and project tracking
 
-Updated: 2026-09-13. Four teammates cover the assignments below. HTML-1 has a local implementation handoff; the merged GHOST-1 and VLM-1 status/evidence is preserved. ARGUS PR #10 has a local semantic-provenance correction awaiting commit and re-review.
+Updated: 2026-09-13. Four teammates cover the assignments below. HTML-1 has a local implementation handoff; the merged GHOST-1 and VLM-1 status/evidence is preserved. ARGUS PR #10 includes the semantic-provenance correction and awaits CI and re-review.
 
 | Person | Assigned workstream | Main responsibility | Next useful deliverable |
 | --- | --- | --- | --- |
@@ -22,7 +22,7 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | GHOST-1 | Ghost lifecycle and callable boundary | Sting | Building | Connect the fixture boundary to a real worker trace; local demo remains simulated | `ghostapi/` on `feat/ghost-api-interactive-demo`; 12 Python and 5 JavaScript tests passed |
 | VLM-1 | Visual worker example and evidence report | Thomas | Building | Record an interaction-step example (click/type/scroll with semantic targets) that Ghost can compile; align report shape at INT-1 | `workers/visual/` on main (merged as eb3095b); see update below |
 | HTML-1 | HTML/code worker example and evidence report | Tianqi | Building | INT-1 agreement, live GPT/configured Steel task, then receiver checks | `browser_worker/`, tests; `codex/browser-worker-steel` rebased on `b4c9e76`; handoff below |
-| ARGUS-1 | Task plan, routing and controller boundary | Abel | Building (local review correction) | Tianqi's remaining finding showed that evidence-bound model prose could still make unsupported claims. Contract 0.5 removes moderator prose: the moderator selects validated records and fields, and the controller renders the answer. Commit/push, wait for CI, then request Tianqi's re-review | PR #10 remote head `65f093a`; local uncommitted correction; 453 offline tests, Ruff and format checks pass |
+| ARGUS-1 | Task plan, routing and controller boundary | Abel | Building (re-review requested) | Tianqi's remaining finding showed that evidence-bound model prose could still make unsupported claims. Contract 0.5 removes moderator prose: the moderator selects validated records and fields, and the controller renders the answer. Wait for CI, then request Tianqi's re-review | PR #10; implementation commit `388764e`; 453 offline tests, Ruff and format checks pass |
 | ARGUS-3 | Phase 3 connections: session manager, DOM adapter, Ghost adapter, moderator adapter, visual adapter, first connected run | Sting (assigned by Abel 2026-09-12) | Planned | Prompts, order and owner questions in [ARGUS-HANDOFF-3.md](../hackathon/ARGUS-HANDOFF-3.md); P3-SESSION, P3-GHOST and P3-MOD have no dependencies; P3-VISUAL waits for Thomas's session change; currency (CAD vs USD) is Sting's own decision | Not started |
 | MOD-1 | Moderator callables: assess, reconcile, synthesize | Thomas (module) / Sting (adapter, under ARGUS-3) | Building | `moderator/` merged (PR #8) is a run harness, not an `argus.interfaces.Moderator`; P3-MOD may reuse its selection logic but must return `AnswerSelection`, never publish its prose or dispatch work. Thomas to confirm the structured boundary | `moderator/` on main at `eaed4c7`; harness check on Hacker News reported values wrong vs screenshots (see its README) |
 | INT-2 | First connected request with verified result | Sting runs it; Abel reviews | Planned | ARGUS-3 P3-SESSION + P3-DOM + P3-GHOST + P3-MOD, then P3-INT2 with STEEL_API_KEY, OPENAI_API_KEY, ARGUS_MODEL. Read-only decision workflow is finished at this point; execution and boundary handoff (DECISIONS) come after | Not run |
@@ -72,14 +72,14 @@ Receiver + connection check/result: Abel (ARGUS), Sting (Ghost traces), Thomas (
 ### ARGUS-1 contract 0.5 review correction — 2026-09-13
 
 ```text
-Task ID / date / status: ARGUS-1 / 2026-09-13 / Building (local review correction; remote PR unchanged)
-Artifact, branch/revision or local files: feat/argus-controller-base; PR #10 remote head 65f093a plus uncommitted changes in argus/, its workflow and ARGUS/AI docs. Nothing is staged or committed.
+Task ID / date / status: ARGUS-1 / 2026-09-13 / Building (review correction pushed; CI and re-review pending)
+Artifact, branch/revision or local files: feat/argus-controller-base; implementation commit 388764e on PR #10 plus this documentation checkpoint.
 Module README / usage instructions: argus/README.md
 Entry point + environment names: python3 -m argus "<request text>" [--fake | --no-fake] [--store DIR] [--request-id ID] [--interpreted FILE] [--plan-fixture FILE]; OPENAI_API_KEY, OPENAI_BASE_URL and ARGUS_MODEL apply only to live model use.
 Contract version + input/output/failure examples: 0.5-argus-draft. Moderator.synthesize returns AnswerSelection(record_indices, Claim(record_index, fields), Note(kind, subject)); FinalAnswer contains only controller-rendered lines plus controller-derived records, structured claims, failures and notes. argus/examples/answer_selection.json and final_answer.json show the boundary. Invalid indices, fields or note subjects fail closed; moderator prose is discarded and only discarded field paths are logged.
 Changes: removed moderator-authored user-facing prose; bound every claim to selected validated-record fields; require selected records to retain evidence from the current run; render lines deterministically in the controller; added the exact hostile phrase regression; cleared the ARGUS Ruff baseline and made the workflow lint job blocking. Reconciliation remains record selection only.
 Checks run + result: python3 -m unittest discover -s argus/tests -v — 453 tests in 1.249s, OK, Python 3.13.5. ruff check argus, ruff format --check argus and git diff --check passed. Offline registry and salary-chain CLI runs succeeded; vague open request ended needs_input at S4 with no session. No live model, browser, Steel, VLM, DNS or Ghost check was run.
-Open issue / needed from / next action: Abel reviews and commits/pushes this local correction, waits for the four-platform PR matrix and blocking lint, then replies to Tianqi with the hostile-prose and contract test names. Run a live interpretation/toolbox check when credentials and the connected adapters are available.
+Open issue / needed from / next action: wait for the four-platform PR matrix and blocking lint, then reply to Tianqi with the hostile-prose and contract test names. Run a live interpretation/toolbox check when credentials and the connected adapters are available.
 Receiver + connection check/result: Thomas/Sting must implement the structured AnswerSelection boundary; Tianqi re-review pending; nothing is Integrated.
 ```
 
