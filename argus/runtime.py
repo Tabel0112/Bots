@@ -129,7 +129,10 @@ def build_moderator(model_client=None):
         from argus.model_client import OpenAICompatibleClient
 
         client = OpenAICompatibleClient(model=os.environ["ARGUS_MODEL"])
-    return Moderator(client)
+    # Decision 4 (ARGUS-3): sessions are worker-owned and the DOM toolbox cannot
+    # observe or interpret a page, so the moderator must not ask the controller to
+    # verify; it defers to the independent validation stage instead.
+    return Moderator(client, verification_available=False)
 
 
 def build_connected_controller(

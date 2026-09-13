@@ -36,6 +36,8 @@ from argus.model_client import ModelClient
 __all__ = ["Moderator", "load_env"]
 
 _RETRY_CODES = frozenset({"TARGET_NOT_FOUND", "TARGET_AMBIGUOUS", "EXTRACTION_FAILED"})
+#: Fields the moderator may never drop from a claim: the record's source link.
+_SOURCE_FIELDS = ("url",)
 _INTERNAL_FIELDS = frozenset({"source_observation_id"})
 
 
@@ -166,6 +168,7 @@ class Moderator:
         *,
         max_tokens: int = 1200,
         stall_seconds: float = 120.0,
+        verification_available: bool = True,
     ) -> None:
         if (
             not isinstance(max_tokens, int)
@@ -180,6 +183,12 @@ class Moderator:
         ):
             raise ValueError("stall_seconds must be a non-negative number")
         self.client = client
+        #: False when the controller's toolbox cannot observe/interpret a page
+        #: (worker-owned sessions, ARGUS-3 decision 4).  A model "verify" is then
+        #: recorded as a deferred verification and the report is accepted for the
+        #: independent validation stage instead of failing the subtask on a
+        #: verification the controller cannot perform.
+        self.verification_available = bool(verification_available)
         self.max_tokens = max_tokens
         self.stall_seconds = float(stall_seconds)
         self.calls: list[tuple[Any, ...]] = []
@@ -270,14 +279,51 @@ class Moderator:
                 evidence_refs,
             )
 
+        actions = [
+            {
+                "action": (a.get("action") or {}).get("name")
+                if isinstance(a.get("action"), dict)
+                else a.get("action"),
+                "target": a.get("semantic_target"),
+                "url": a.get("url"),
+                "outcome": a.get("outcome"),
+            }
+            for a in (report.actions or [])
+            if isinstance(a, dict)
+        ]
+        parameters = dict(subtask.parameters or {})
+        # max_results is applied by the controller's limit criterion after
+        # selection (ARGUS-3 decision: never a worker obligation), so the model
+        # must not judge the worker by it.
+        result_limit = parameters.pop("max_results", None)
         prompt = {
+            "request": {
+                "site_id": subtask.site_id,
+                "operation": subtask.operation,
+                "parameters": parameters,
+                "goal": subtask.goal,
+                "result_limit_applied_later_by_controller": result_limit,
+            },
             "success_conditions": list(success_conditions),
+            "worker_summary": report.summary,
+            "actions": actions,
+            "evidence": {
+                key: value
+                for key, value in (report.evidence or {}).items()
+                if key in ("final_url", "observations", "screenshots")
+            },
             "records": records,
             "evidence_refs": evidence_refs,
             "metrics": report.metrics,
         }
         result = self._call_model(
-            "Judge whether the evidenced worker report meets every success condition. "
+            "Judge whether the evidenced worker report is sufficient for the request: "
+            "the worker applied the request parameters (see request.parameters and the "
+            "recorded actions), the records match the success conditions, and evidence "
+            "exists. An independent validator re-checks every record against the page "
+            "afterwards, so judge sufficiency, not correctness of every value. The worker "
+            "may return more records than the final result limit; the controller trims "
+            "and ranks them later, so a record count above that limit is not a failure. "
             "Return only the requested structured assessment. Do not write an answer.",
             _safe_json(prompt),
             AssessOutput,
@@ -300,6 +346,19 @@ class Moderator:
             question = output.verification_question
             if not isinstance(question, str) or not question.strip():
                 return self._assessment_fallback(None, evidence_refs)
+            if not self.verification_available:
+                return self._decision(
+                    "assess",
+                    "accept",
+                    "Moderator asked to verify but controller verification is "
+                    "unavailable in this runtime; accepted for the independent "
+                    f"validation stage. Model reason: {output.reason}",
+                    evidence_refs,
+                    {
+                        "deferred_verification": question,
+                        "unmet_conditions": list(output.unmet_conditions),
+                    },
+                )
             next_action = {
                 "question": question,
                 "unmet_conditions": list(output.unmet_conditions),
@@ -760,7 +819,13 @@ class Moderator:
                 for field in item.fields
             ):
                 return None
-            claims.append(Claim(selected_index, list(item.fields)))
+            fields = list(item.fields)
+            # Source provenance is never optional: a record's url (its source link)
+            # is always stated when the record carries one.
+            for required in _SOURCE_FIELDS:
+                if required in record and required not in fields:
+                    fields.append(required)
+            claims.append(Claim(selected_index, fields))
         return AnswerSelection(proposed, claims, list(notes))
 
     @staticmethod

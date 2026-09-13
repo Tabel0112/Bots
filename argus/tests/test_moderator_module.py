@@ -441,3 +441,62 @@ class EndToEndTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeferredVerificationTests(unittest.TestCase):
+    def test_model_verify_is_deferred_when_controller_cannot_verify(self):
+        client = FakeModelClient(
+            ModelResult(
+                "ok",
+                {
+                    "decision": "verify",
+                    "reason": "query not visibly applied",
+                    "unmet_conditions": ["query visibly applied"],
+                    "verification_question": "Is the query applied?",
+                },
+            )
+        )
+        decision = Moderator(client, verification_available=False).assess_report(
+            subtask(), report(), ["query visibly applied"]
+        )
+        self.assertEqual(decision.decision, "accept")
+        self.assertIn("verification is unavailable", decision.reason)
+        self.assertEqual(
+            decision.next_action["deferred_verification"], "Is the query applied?"
+        )
+        prompt = json.loads(client.calls[0]["user"])
+        self.assertIn("parameters", prompt["request"])
+        self.assertNotIn("max_results", prompt["request"]["parameters"])
+        self.assertIn("result_limit_applied_later_by_controller", prompt["request"])
+        self.assertIn("actions", prompt)
+
+    def test_refusal_still_verifies_even_without_controller_verification(self):
+        decision = Moderator(
+            FakeModelClient(ModelResult("refusal")), verification_available=False
+        ).assess_report(subtask(), report(), ["show results"])
+        self.assertEqual(decision.decision, "verify")
+
+
+class SourceFieldTests(unittest.TestCase):
+    def test_model_field_choice_cannot_drop_the_source_url(self):
+        records = [
+            {"title": "A", "price": 1.0, "currency": "USD", "url": "https://x/a"},
+            {"title": "B", "price": 2.0, "currency": "USD", "url": "https://x/b"},
+        ]
+        client = FakeModelClient(
+            ModelResult(
+                "ok",
+                {
+                    "records": [
+                        {"record_index": 0, "fields": ["title", "price"]},
+                        {"record_index": 1, "fields": ["title", "price"]},
+                    ]
+                },
+            )
+        )
+        interpreted = InterpretedRequest.from_dict(copy.deepcopy(REGISTRY))
+        selection = Moderator(client).synthesize(
+            interpreted, records, {"status": "passed"}, [], []
+        )
+        for claim in selection.claims:
+            self.assertIn("url", claim.fields)
