@@ -34,8 +34,7 @@ SALARY_TEXT = (
 )
 #: The clarification docs/hackathon/ARGUS.md approved, word for word.
 BEST_QUESTION = (
-    "What should 'best' mean? For example, highest salary, remote-only roles, "
-    "or closest match to your experience."
+    "What should 'best' mean? For example, lowest price, highest rating, or newest."
 )
 
 

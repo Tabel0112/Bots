@@ -576,8 +576,8 @@ class OpenVagueRankingTest(EndToEndCase):
     def test_the_question_offers_the_approved_examples(self):
         self.assertEqual(
             S4_QUESTION,
-            "What should 'best' mean? For example, highest salary, remote-only "
-            "roles, or closest match to your experience.",
+            "What should 'best' mean? For example, lowest price, highest rating, "
+            "or newest.",
         )
         self.assertEqual(self.result.gate.questions, [S4_QUESTION])
         self.assertIn(S4_QUESTION, self.result.answer.lines)

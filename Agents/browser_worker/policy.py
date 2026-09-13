@@ -153,7 +153,13 @@ def guard_url(url: str, site: SiteConfig, task: SubtaskRequest, resource: bool =
         ):
             raise ValueError()
         query = parse_qsl(parts.query, keep_blank_values=True)
-        if any(k not in site.allowed_query_keys or SENSITIVE.search(k) for k, _ in query):
+        # Open sites have no operator-declared query keys: any non-sensitive GET
+        # query is allowed on the allowed domain (site searches redirect to URLs
+        # such as /w/index.php?search=...). Configured sites keep their allowlist.
+        if any(
+            (not site.open_site and k not in site.allowed_query_keys) or SENSITIVE.search(k)
+            for k, _ in query
+        ):
             raise ValueError()
         if any(x in unquote(parts.path).split("/") for x in ("..", ".")):
             raise ValueError()

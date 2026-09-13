@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from Agents.browser_worker.demo.run import action, catalog_server
@@ -244,3 +247,25 @@ def test_open_search_rejects_off_domain_navigation():
     with pytest.raises(WorkerError) as caught:
         validate_action(decision, task, site, observation)
     assert caught.value.failure.code == "DOMAIN_NOT_ALLOWED"
+
+
+def test_open_site_allows_non_sensitive_query_keys_and_blocks_sensitive_ones():
+    from Agents.browser_worker import policy as policy_module
+    from Agents.browser_worker.schemas import WorkerError
+
+    raw = json.loads(
+        (
+            Path(__file__).resolve().parents[2] / "Agents/browser_worker/examples/open_search.json"
+        ).read_text()
+    )
+    task, site = policy_module.validate_request(raw, {})
+    host = site.allowed_domains[0]
+    policy_module.guard_url(
+        f"https://{host}/w/index.php?search=toronto&title=Special:Search", site, task
+    )
+    try:
+        policy_module.guard_url(f"https://{host}/w/index.php?token=abc", site, task)
+    except WorkerError:
+        pass
+    else:
+        raise AssertionError("sensitive query key must be rejected on open sites")

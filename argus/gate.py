@@ -75,8 +75,7 @@ CONFIDENCE_FLOOR = 0.6
 #: user's own ranking words in place of "best".  The examples are there to be
 #: chosen between; the gate never selects one as a default.
 RANK_QUESTION = (
-    "What should '{text}' mean? For example, highest salary, remote-only roles, "
-    "or closest match to your experience."
+    "What should '{text}' mean? For example, lowest price, highest rating, or newest."
 )
 
 #: Verb-plus-object phrases that ask for an action a read-only run never takes,

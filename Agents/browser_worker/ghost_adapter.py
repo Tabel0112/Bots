@@ -50,12 +50,17 @@ def compatibility_key(task, site):
     )
 
 
+def ghost_site_id(site_id: str) -> str:
+    """Registry-safe site id: Ghost ids allow [A-Za-z0-9._-], so ``open:host`` becomes ``open-host``."""
+    return site_id.replace(":", "-")
+
+
 def lookup_request(task, site, agent_id):
     return {
         "schema_version": "0.2",
         "task_id": f"{task.run_id}/{task.subtask_id}",
         "agent_id": agent_id,
-        "site_id": task.site_id,
+        "site_id": ghost_site_id(task.site_id),
         "operation": task.operation,
         "parameters": task.parameters,
         "required_outputs": sorted(site.record_schema["properties"]),
