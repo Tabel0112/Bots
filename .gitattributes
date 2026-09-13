@@ -1,3 +1,6 @@
 # Shell scripts run on Linux nodes; CRLF makes bash fail with
 # "set: pipefail: invalid option name". Keep them LF even on Windows checkouts.
 *.sh text eol=lf
+
+# The SLURM job script also runs on Linux nodes.
+*.sbatch text eol=lf

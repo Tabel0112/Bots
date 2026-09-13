@@ -55,6 +55,19 @@ Open issue / needed from / next action: record an interaction-step example (clic
 Receiver + connection check/result: Abel (consume examples/hn-top-story/report.json as the worker-report sample), Sting (needs the upcoming interaction-step trace for compilation) — connection checks pending
 ```
 
+### DEMO-1 UX prototype update — 2026-09-12
+
+```text
+Task ID / date / status: DEMO-1 / 2026-09-12 / Building
+Artifact, branch/revision or local files: frontend/dist/{index.html,styles.css,app.js}, frontend/README.md; local UX review update on codex/browser-worker-steel; Sites source d651d058e1f677c99e6ee3e5519716ef84bd21c7; owner-private Sites version 4 at https://argus-mission-control.sunyihan666.chatgpt.site
+Module README / usage instructions: frontend/README.md
+Entry point + environment names: frontend/dist/index.html; no environment variables
+Contract version + input/output/failure examples: simulated dashboard data only; no runtime contract connected
+Checks run + result: JavaScript syntax and whitespace passed; browser checks passed for the proof-decision pass route (12 events), failed proof routing into visual recovery and fresh DOM verification (16 events), browser-unavailable retry (13 events), five results, responsive horizontal/vertical graph modes, and 390/820/1100/1440px body bounds. Prior synchronized history/evidence, before/after, pause/resume/cancel, run reopening, proof-link, Paper/Midnight, and keyboard-tab checks remain applicable. Browser console error log empty. Owner-private Sites version 4 deployment succeeded.
+Open issue / needed from / next action: assign a dashboard owner; connect the prototype to agreed ARGUS run events and real evidence without changing its explicit demo/live distinction
+Receiver + connection check/result: no runtime receiver check has run
+```
+
 ### HTML-1 update — 2026-09-12, PR #7 review
 
 ```text
