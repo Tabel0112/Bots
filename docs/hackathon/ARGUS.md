@@ -122,6 +122,10 @@ Built and covered by the offline suite: the interpreter's second tier (open inte
 
 Not built and not claimed: live DNS/connection/redirect/rebinding and request enforcement, execution-time blocking of login, payment and submissions, shared four-slot VLM arbitration across runs and callers, real Steel sessions, Thomas's moderator in place of the stub, and Sting's verification of the Ghost boundary including the new `report_context` keyword, which he has not seen. No live model call has been made from ARGUS.
 
+## Execution mode (direction 2026-09-12, not designed yet)
+
+See the DECISIONS entry "Execution beyond read-only". Affects: `contracts.Subtask` (action class), `gate.py` (S5 becomes a classifier with a committing class), `controller.py` (a `needs_confirmation` terminal-or-paused state and a resume path), the toolbox (execution-time enforcement of the class, before/after evidence, request capture), the moderator (never accept a committing report without the confirmation record), Ghost (committing skills are never replayed automatically). Sequenced after INT-2.
+
 ## Open questions for review
 
 - Does `clarify` need a way to resume a run after the user answers, or is a new request enough for the MVP?
