@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -15,18 +16,31 @@ from pydantic import BaseModel, Field
 
 from .service import RunService
 
+_OBSERVATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_TERMINAL = {"succeeded", "failed", "cancelled", "needs_input"}
+
 
 class RunRequest(BaseModel):
     scenario: str | None = None
     text: str | None = Field(default=None, max_length=4000)
 
 
-def create_app(store_root: str | Path | None = None) -> FastAPI:
+class ClarificationRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=2000)
+
+
+def create_app(
+    store_root: str | Path | None = None, *, service: RunService | None = None
+) -> FastAPI:
+    """Build the API. ``service`` lets tests inject a service with fake components."""
     load_dotenv()
     root = Path(__file__).resolve().parents[2]
     frontend = root / "frontend" / "dist"
-    service = RunService(store_root or os.getenv("ARGUS_STORE", root / "argus-runs"))
-    app = FastAPI(title="ARGUS Mission Control", version="0.1-demo")
+    if service is None:
+        service = RunService(
+            store_root or os.getenv("ARGUS_STORE", root / "argus-runs")
+        )
+    app = FastAPI(title="ARGUS Mission Control", version="0.2-argus-3")
     app.state.run_service = service
 
     @app.get("/api/health")
@@ -34,14 +48,30 @@ def create_app(store_root: str | Path | None = None) -> FastAPI:
         return {
             "status": "ok",
             "runtime": service.runtime,
+            "problems": list(service.problems),
             "steel_configured": bool(os.getenv("STEEL_API_KEY")),
-            "scenarios": ["shopping", "travel", "jobs"],
+            "worker_browser": os.getenv("WORKER_BROWSER", "steel"),
+            "ghost_api_url": os.getenv("GHOST_API_URL"),
+            "argus_model": os.getenv("ARGUS_MODEL"),
+            "moderator": os.getenv("ARGUS_MODERATOR") or "module",
+            "scenarios": ["shopping", "travel", "jobs"]
+            if service.runtime != "connected"
+            else [],
         }
 
     @app.post("/api/runs", status_code=202)
     def submit(body: RunRequest):
         try:
             return service.submit(body.scenario, body.text)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/runs/{run_id}/clarifications", status_code=202)
+    def clarify(run_id: str, body: ClarificationRequest):
+        try:
+            return service.clarify(run_id, body.answer)
+        except (OSError, KeyError):
+            raise HTTPException(404, "run not found") from None
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 
@@ -53,7 +83,7 @@ def create_app(store_root: str | Path | None = None) -> FastAPI:
     def run(run_id: str):
         try:
             return service.get(run_id)
-        except (OSError, ValueError):
+        except (OSError, ValueError, KeyError):
             raise HTTPException(404, "run not found") from None
 
     @app.get("/api/runs/{run_id}/event-log")
@@ -61,8 +91,21 @@ def create_app(store_root: str | Path | None = None) -> FastAPI:
         try:
             service.get(run_id)
             return service.events(run_id)
-        except (OSError, ValueError):
+        except (OSError, ValueError, KeyError):
             raise HTTPException(404, "run not found") from None
+
+    @app.get("/api/runs/{run_id}/evidence/{observation_id}")
+    def evidence(run_id: str, observation_id: str):
+        if not _OBSERVATION_ID.match(observation_id):
+            raise HTTPException(404, "evidence not found")
+        try:
+            service.get(run_id)
+        except (OSError, ValueError, KeyError):
+            raise HTTPException(404, "run not found") from None
+        path = service.evidence_path(run_id, observation_id)
+        if path is None:
+            raise HTTPException(404, "evidence not found")
+        return FileResponse(path)
 
     @app.post("/api/runs/{run_id}/cancel", status_code=202)
     def cancel(run_id: str):
@@ -73,7 +116,7 @@ def create_app(store_root: str | Path | None = None) -> FastAPI:
     async def events(run_id: str, request: Request):
         try:
             service.get(run_id)
-        except (OSError, ValueError):
+        except (OSError, ValueError, KeyError):
             raise HTTPException(404, "run not found") from None
         last = int(
             request.headers.get("last-event-id")
@@ -96,13 +139,9 @@ def create_app(store_root: str | Path | None = None) -> FastAPI:
                     yield f"id: {cursor}\nevent: argus\ndata: {json.dumps(event)}\n\n"
                 try:
                     snapshot = service.get(run_id)
-                except (OSError, ValueError):
+                except (OSError, ValueError, KeyError):
                     break
-                if (
-                    snapshot.get("status")
-                    in {"succeeded", "failed", "cancelled", "needs_input"}
-                    and not available
-                ):
+                if snapshot.get("status") in _TERMINAL and not available:
                     break
                 if not available:
                     yield ": keepalive\n\n"

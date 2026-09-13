@@ -75,6 +75,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import importlib
+import inspect
 import json
 import logging
 import threading
@@ -323,6 +324,29 @@ def _bound_value(findings: Any, field: str, dependency: str) -> Any:
     raise ContractError(
         f"{dependency}'s findings are not a list or mapping, so field {field!r} cannot be read",
         code="PRECONDITION_FAILED",
+    )
+
+
+def _accepts_report_context(validate: Callable[..., Any]) -> bool:
+    """Whether a Ghost's ``validate`` takes the ``report_context`` keyword.
+
+    Every accepted report, registry or open, is validated with
+    ``report_context`` (ARGUS-3: the worker-backed bridge needs the run id to
+    find the worker's own checks).  A Ghost written to the original
+    three-argument form is still supported: the decision is made from the
+    signature (``report_context`` named, or ``**kwargs``), not by catching
+    ``TypeError``, because a ``TypeError`` raised *inside* a validator that
+    does accept the keyword would otherwise be retried without context and
+    its real cause hidden.  A callable whose signature cannot be inspected
+    is assumed to follow the protocol and receives the keyword.
+    """
+    try:
+        parameters = inspect.signature(validate).parameters
+    except (TypeError, ValueError):
+        return True
+    return "report_context" in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
     )
 
 
@@ -1753,7 +1777,7 @@ class Controller:
         for st in accepted:
             assert st.report is not None
             records, refs = _records_of(st.report), _evidence_of(st.report)
-            if st.subtask.kind == "open":
+            if _accepts_report_context(self.ghost.validate):
                 result = self.ghost.validate(
                     st.subtask,
                     records,

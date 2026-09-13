@@ -4,6 +4,17 @@ Updated: 2026-09-13. Keep status explicit; a proposal is not an implementation c
 
 ## Confirmed user direction
 
+- **ARGUS-3 integration choices (Abel, 2026-09-13, teammates challenge tomorrow):**
+  memory is worker-resolved (ARGUS previews the lookup through the Ghost API and
+  never writes to Ghost; the worker decides reuse/explore and saves candidates);
+  validation is the worker's independent verifier plus ARGUS binding checks;
+  sessions are worker-owned for the first connected slice; the DOM worker uses
+  `gpt-5.4`/medium and ARGUS uses `gpt-5.6-sol`; Ghost API on port 8766 beside the
+  catalog on 8765; the moderator is Thomas's module adapted to
+  `argus.interfaces.Moderator`; ARGUS keeps JSON runs and Ghost keeps SQLite
+  (agreed exception to the JSON-only rule); the first request is the registry
+  catalog task, public sites come later. Per-request result counts are never
+  worker success conditions, because those are part of Ghost's compatibility key.
 - **Ownership and merge rule (2026-09-13):** Abel owns and integrates all repository
   changes from this date. Changes reach `main` only through a reviewed pull request.
   The demo must never answer a request it did not understand: unsupported requests are

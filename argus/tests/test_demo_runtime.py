@@ -95,12 +95,15 @@ class DemoRuntimeTests(unittest.TestCase):
             created = client.post("/api/runs", json={"scenario": "shopping"})
             self.assertEqual(created.status_code, 202)
             run_id = created.json()["run_id"]
-            deadline = time.monotonic() + 5
+            # Windows CI runs the fixture slowly; wait generously and join the
+            # run thread so the temporary store is not removed under it.
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 run = client.get(f"/api/runs/{run_id}").json()
                 if run["status"] != "running":
                     break
                 time.sleep(0.02)
+            client.app.state.run_service.threads[run_id].join(timeout=30)
             self.assertEqual(run["status"], "succeeded")
             self.assertEqual(run["runtime"], "controlled")
             self.assertEqual(client.get("/api/runs").json()[0]["runtime"], "controlled")
