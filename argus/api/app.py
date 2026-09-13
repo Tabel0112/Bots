@@ -1,4 +1,4 @@
-"""FastAPI application serving ARGUS Mission Control and its run stream."""
+"""FastAPI application serving ORION (Mission Control) and its run stream."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def create_app(
         service = RunService(
             store_root or os.getenv("ARGUS_STORE", root / "argus-runs")
         )
-    app = FastAPI(title="ARGUS Mission Control", version="0.2-argus-3")
+    app = FastAPI(title="ORION", version="0.2-argus-3")
     app.state.run_service = service
     app.include_router(qualification_router)
 

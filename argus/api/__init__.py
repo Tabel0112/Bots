@@ -1,4 +1,4 @@
-"""Mission Control API."""
+"""ORION (Mission Control) API."""
 
 from .app import create_app
 
