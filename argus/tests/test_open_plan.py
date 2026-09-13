@@ -168,3 +168,22 @@ class OpenPlanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpenQueryFromFiltersTest(unittest.TestCase):
+    def test_query_comes_from_filter_criteria_not_the_goal(self):
+        from argus.contracts import Criterion
+        from argus.runtime import open_plan
+
+        filters = [
+            Criterion("condos", "filter", None, None, 0.99),
+            Criterion("for sale", "filter", None, None, 0.99),
+            Criterion("in Toronto", "filter", None, None, 0.99),
+        ]
+        rank = Criterion("best", "rank", None, None, 0.9)
+        plan = open_plan(
+            interpreted([open_intent(query=None, criteria=[*filters, rank])]), "plan-q"
+        )
+        self.assertEqual(
+            plan.subtasks[0].parameters["query"], "condos for sale in Toronto"
+        )

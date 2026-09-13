@@ -72,7 +72,16 @@ def _open_parameters(intent) -> dict:
         and isinstance(origin.value, (str, int, float))
     }
     if not isinstance(parameters.get("query"), str) or not parameters["query"].strip():
-        parameters["query"] = intent.goal
+        # The search terms are what the user asked FOR, i.e. the filter criteria
+        # ("condos", "for sale", "in Toronto"), never the goal sentence: typing the
+        # instruction into a site's search box returned articles about search
+        # engines on the first live open-world run (2026-09-13).
+        filters = [
+            criterion.text.strip()
+            for criterion in intent.criteria
+            if criterion.kind == "filter" and isinstance(criterion.text, str)
+        ]
+        parameters["query"] = " ".join(filters) if filters else intent.goal
     return parameters
 
 
