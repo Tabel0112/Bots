@@ -11,6 +11,8 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+!frontend/dist/
+!frontend/dist/**
 downloads/
 eggs/
 .eggs/
@@ -220,3 +222,6 @@ __marimo__/
 # ARGUS visual worker
 workers/visual/runs/
 *.gguf
+
+# moderator run artifacts
+moderator/runs/

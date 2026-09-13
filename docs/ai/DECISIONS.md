@@ -4,7 +4,6 @@ Updated: 2026-09-12. Keep status explicit; a proposal is not an implementation c
 
 ## Confirmed user direction
 
-- **Phase (updated 2026-09-12, later the same day):** build component frameworks first, connect later. Each workstream develops its own skeleton, module README and evidence; integration waits for INT-1/INT-2 in [TEAM.md](TEAM.md). The earlier local ARGUS scaffold remains provisional and is not the agreed architecture.
 - **Product:** ARGUS coordinates deliberation/orchestration/verification; Ghost supplies reusable procedural memory.
 - **Flow:** one user task becomes an overall request with subtasks; subagents execute; a moderator monitors, gathers, reasons over outputs and produces the final result.
 - **Browser infrastructure:** use Steel for browser subagents.
@@ -13,6 +12,7 @@ Updated: 2026-09-12. Keep status explicit; a proposal is not an implementation c
 - **Continuity:** store compact project context in the repository so another AI can continue without the full chat.
 - **Ghost module location:** keep Ghost-specific code and documentation under the correctly spelled root `ghostapi/` folder.
 - **Ghost demo:** show workflow execution as an interactive flowchart that can be dragged with a mouse or other pointer while work proceeds.
+- **Dashboard prototype (2026-09-12, UX review adopted):** preserve Paper/Midnight, the execution map, recorded activity, browser evidence, Runs, Ghost Library, and Evidence navigation. One pinned event selection governs graph state, checks, and before/after evidence. Show actual sample dependencies (Ghost feeds DOM; visual is optional fallback), not implied parallelism. The execution map uses Plan/Execute/Verify stages, a proof decision, a labeled visual-recovery branch, and a return to fresh DOM verification; successful and recovery paths must be visually distinct. Expose only recorded timeline events, keep history selected until explicit return to live, and provide failure/recovery/cancellation and complete five-record results. Use consistent navigation pages, responsive graph layouts, and small-screen panel tabs. Label sample data locally and do not claim live connectivity.
 - **Documentation sharing (2026-09-12):** user authorized commit and push of the shared planning/AI handoff docs. The provisional runtime remains a local experiment; publication of these docs does not imply a working shared backend.
 
 ## Existing MVP constraints
@@ -25,22 +25,28 @@ The retained provisional contract budgets at most one repair followed by at most
 
 ## Proposals and open decisions
 
+### HTML-1 local implementation choices — awaiting INT-1 agreement
+
+Python/Pydantic, Playwright/Steel, GPT-5.4 Responses with medium reasoning and optional FastAPI transport are implemented for the DOM worker only. `SubtaskRequest` / `SubtaskReport` 0.2 is its local boundary, not a settled shared contract; 0.1 remains provisional. See [module usage](../../browser_worker/README.md). Stack adoption, message compatibility and receiver verification remain pending INT-1.
+
+The PR #7 review reiterates no required HTTP layer between ARGUS and its toolbox: ARGUS calls `Worker.run` in-process, while FastAPI is optional for standalone clients. It also identifies Thomas and Tianqi as the shared Steel toolbox owners. Separate adapters currently exist in `workers/visual/` and `browser_worker/`; convergence, shared session ownership and `needs_visual` compatibility require their coordination, not unilateral adoption of either adapter. No shared-toolbox integration is claimed.
+
 | Question/proposal | Current position |
 | --- | --- |
 | Moderator implementation | Responsibilities agreed; separate model invocation versus controller role unresolved |
 | Subtask boundaries and parallelism | Define from one concrete example before choosing a general graph/framework |
-| Browser-agent framework and model | Unselected; research Steel compatibility, vision and action-trace access |
+| Browser-agent framework and model | DOM worker uses direct async Python/Playwright and GPT-5.4; other reasoning/visual choices remain open |
 | Public website | Unselected; needs an access and workflow feasibility check |
 | Vision strategy | AI recommendation: page structure when adequate, bounded visual fallback; experiment not run |
-| Languages/dependencies | Python scaffold exists; React/TypeScript and a browser-agent library were earlier proposals; final stack not frozen |
+| Languages/dependencies | Python/FastAPI/Pydantic/OpenAI/Steel/Playwright are local DOM choices awaiting INT-1; project-wide stack stays open |
 | Input/output semantics | Fake defaults are USD, five results and substring query/max-price filtering; confirm for the real site |
-| Contract | Version 0.1 describes the provisional narrow scaffold; moderator/subtask/visual target extensions need design work |
+| Contract | Historical 0.1 remains provisional; DOM worker 0.2 is implemented locally, awaiting INT-1 agreement and ARGUS/Ghost/visual receiver checks |
 | Validation/qualification details | Agree evidence, changed-input coverage, empty-state check and controlled truth set |
 | Schedule and remaining work | Four workstreams assigned in TEAM; deadlines and ownership of other deliverables remain open |
 | Framework pull requests before integration | User direction: component skeletons merge to `main` through pull requests with status **Building**; **Ready to connect** requires the TEAM handoff checklist. AI recommendation, not decided: CI running offline checks and branch protection requiring one review from someone other than the author |
 
 ## Corrections that must survive a tool switch
 
-The user first clarified (2026-09-12) that the generated ARGUS scaffold was premature. Later the same day the user directed that workstreams build their frameworks before connecting them. A later AI should treat workstream code as expected, review it for framework correctness and honest labeling, and not treat “not integrated” as a defect. It still must not connect components, mark a connection Integrated or claim end-to-end behavior without the INT checkpoints. Steel was subsequently selected, so older “browser provider unselected” wording is superseded for the provider choice. Agent framework and model remain open. The moderator proposal is more explicit than the old single-controller scaffold. The user later supplied the four workstream assignments in TEAM, superseding the earlier decision to postpone personnel allocation. These assignments do not prove implementation progress or authorize this AI to start coding automatically.
+
 
 When a decision changes, update its entry with the date, rationale and affected contract/research links. Avoid maintaining another copy of runtime status here; use [CURRENT.md](CURRENT.md).

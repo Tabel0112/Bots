@@ -1,6 +1,6 @@
 # Intended architecture
 
-Status: planning model, not a description of the running scaffold. Decision status is maintained in [DECISIONS.md](DECISIONS.md).
+Status: intended product architecture. The DOM browser-worker slice is now implemented under [browser_worker/](../../browser_worker/README.md), with locally tested browser behavior; other components and connections are not established by that implementation. Decision status is maintained in [DECISIONS.md](DECISIONS.md).
 
 ## Product purpose
 

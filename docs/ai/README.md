@@ -15,7 +15,8 @@ Purpose: allow a new AI session to continue ARGUS + Ghost API without replaying 
 | Decide scope or resolve conflicting assumptions | [DECISIONS.md](DECISIONS.md) |
 | Research Steel, canvas or vision | [Research notes](../hackathon/RESEARCH.md) |
 | Work on shared messages or component integration | [Provisional contract 0.1](../hackathon/CONTRACTS.md); inspect actual implementation files only if present in your checkout |
-| Understand the local-only scaffold | [CURRENT.md](CURRENT.md); its file map describes an unpublished experiment, not a shared runtime |
+| Understand the historical synthetic scaffold | [CURRENT.md](CURRENT.md); the old experiment is distinct from the new browser worker |
+| Run or change the DOM browser worker | [Worker README](../../browser_worker/README.md), [TEAM.md](TEAM.md) HTML-1; inspect `browser_worker/` and its tests |
 | Work on UI/API examples | JSON examples in [CONTRACTS.md](../hackathon/CONTRACTS.md); the experimental generated fixtures are not in this documentation commit |
 | Plan evidence or the demonstration | [Evaluation checklist](../hackathon/EVALUATION.md) |
 

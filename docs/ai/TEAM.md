@@ -1,15 +1,16 @@
 # Team tasks and project tracking
 
-Updated: 2026-09-12. The four workstream assignments below were confirmed by the user. The task breakdown translates them into concrete planning/research deliverables; it does not claim implementation or tests are complete.
+Updated: 2026-09-12. Four teammates cover the assignments below. HTML-1 has a local implementation handoff; the merged GHOST-1 and VLM-1 status/evidence is preserved. The PR #7 review clarifies the Abel/controller and Thomas/moderator split below; this is not new implementation evidence.
 
 | Person | Assigned workstream | Main responsibility | Next useful deliverable |
 | --- | --- | --- | --- |
 | Sting | Ghost API | Reusable procedures, matching, binding, qualification and skill lifecycle | Example trace → candidate → qualification → changed-input replay walkthrough |
 | Thomas | VLM / subagent visual interpretation | Interpret screenshots, identify visual targets and verify visual outcomes | One Steel screenshot-to-action example with evidence and failure handling |
 | Tianqi | HTML/codebase interpretation for subagents | Interpret available page structure/code, identify semantic targets and extract structured information | One HTML/DOM-to-action/result example with evidence and failure handling |
-| Abel | ARGUS | Task interpretation, decomposition, worker coordination, moderator behavior and final synthesis | One complete task plan with worker inputs/outputs and moderator decisions |
+| Abel | ARGUS controller | Task interpretation, decomposition, routing and worker coordination | One complete task plan with worker inputs/outputs |
+| Thomas | Moderator | Monitor progress, aggregate evidence, reason over outputs and synthesize the final result | Moderator walkthrough against the shared worker report |
 
-All four are working on their assigned areas according to the user. Implementation progress, branches, deadlines and validation evidence have not yet been reported. See [CURRENT.md](CURRENT.md) for what is known to exist in this checkout.
+All four are working on their assigned areas according to the user. Reported implementation evidence is recorded below; unreported checks remain pending. See [CURRENT.md](CURRENT.md) for the current checkout.
 
 ## Progress board
 
@@ -24,7 +25,7 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | ARGUS-1 | Task plan, routing and moderator walkthrough | Abel | Researching | Define worker inputs/outputs using INT-1; use samples while workers develop | Not reported |
 | INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
-| DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Needs owner | Allocate remaining deliverables; use evaluation checklist | Not run |
+| DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Building | Interactive dashboard prototype exists; assign an owner and connect it to agreed runtime events and the controlled site | `frontend/dist/`; owner-private Sites v4 deployed with decision-oriented flow chart; simulated data only |
 
 ### GHOST-1 update — 2026-09-12
 
@@ -44,19 +45,16 @@ Receiver + connection check/result: Abel/Thomas/Tianqi connection check pending
 ### VLM-1 update — 2026-09-12
 
 ```text
-Task ID / date / status: VLM-1 / 2026-09-12 / Ready to connect
-Artifact, branch/revision or local files: workers/visual/ on main
+Task ID / date / status: VLM-1 / 2026-09-12 / Building
+Artifact, branch/revision or local files: workers/visual/ on main (merged as eb3095b)
 Module README / usage instructions: workers/visual/README.md
 Entry point + environment names: python -m browser_subagent "<subtask>" --url <start>; STEEL_API_KEY (required), UITARS_BASE_URL (default http://127.0.0.1:8080/v1), ANTHROPIC_API_KEY (claude backend only)
-Contract version + input/output/failure examples: report.json is 0.1-provisional, aligned with CONTRACTS v0.1 ActionRecord/RunResult/metrics concepts. Real-browser example: workers/visual/examples/hn-top-story/ (report.json + observation-000.png). Failure handling proven live: a mid-run Steel session timeout produced typed action failures and an honest failed outcome (fast-abort now added); unparseable model output aborts after 3 attempts.
-Checks run + result: test_parser.py passed; smoke_test.py passed (live Steel: navigate, 1280x800 screenshot, click/scroll/key, DOM element under cursor, network capture); 3-point vision grounding calibration on UI-TARS-1.5-7B Q4 (2/3 within 11px, coords in original pixel space); end-to-end run succeeded on news.ycombinator.com — correct title + points verified against the run's own screenshot, 1 model call, 20s, session replay on Steel dashboard.
-Open issue / needed from / next action: local UI-TARS answers can drift to Chinese without an explicit English instruction (now added); Q4 grounding is ~10-40px on sparse synthetic images — F16 on the 36GB Mac (set UITARS_BASE_URL) is the upgrade path if precision limits real tasks. Next: multi-step task on the controlled site once it exists.
-Receiver + connection check/result: Abel (consume examples/hn-top-story/report.json as the worker-report sample), Sting (same run's actions/evidence as compilation input) — connection checks pending
+Contract version + input/output/failure examples: report.json is 0.1-provisional, aligned with CONTRACTS v0.1 ActionRecord/RunResult/metrics concepts. Real-browser observation-only example: workers/visual/examples/hn-top-story/ (navigate -> one model call -> finished(); no interaction steps, semantic_target/findings null, report.json hand-edited to relocate evidence paths). Failure handling proven live: a mid-run Steel session timeout produced typed action failures and an honest failed outcome (fast-abort now added); unparseable model output aborts after 3 attempts.
+Checks run + result: test_parser.py passed (offline, no steel-sdk needed); smoke_test.py passed (live Steel: navigate, 1280x800 screenshot, click/scroll/key, DOM element under cursor, network capture); 3-point vision grounding calibration on UI-TARS-1.5-7B Q4 (2/3 within 11px, coords in original pixel space — rescale removed accordingly); live mousemove probe measured Steel action space = full-window screenshot space at constant (4,87)px offset from page viewport — element_at/semantic_target now corrected by a per-session measured offset; end-to-end run succeeded on news.ycombinator.com — correct title + points verified against the run's own screenshot, 1 model call, 20s, session replay on Steel dashboard.
+Open issue / needed from / next action: record an interaction-step example (click/type/scroll with corrected semantic targets) that Ghost can compile; claude backend untested. Driver model settled: UI-TARS-72B on a GPU node (set UITARS_BASE_URL, tunnel if remote) - measured zoom_rate 12/12 vs the 7B's 2/12 and 83% vs 58% correct on exact-value reads, so the 7B is a laptop fallback only.
+Receiver + connection check/result: Abel (consume examples/hn-top-story/report.json as the worker-report sample), Sting (needs the upcoming interaction-step trace for compilation) — connection checks pending
 ```
 
-**Review note — 2026-09-12 (evening), AI review on the user's checkout; not a receiver connection check.** PR #1 merged as `eb3095b`. Verified offline: `test_parser.py` passes with the Steel SDK stubbed; the package compiles; `examples/hn-top-story/observation-000.png` shows the reported title and points. Not run: the live Steel/UI-TARS scripts. The example run contains no interaction step (`semantic_target` and `findings` are null), so Ghost has no compilation input yet. Thomas already set the status to **Building** in `8082c65` on branch `vlm1-visual-worker-v2`, but that commit was pushed three minutes after the merge and is not on `main`; the row above still says Ready to connect until a follow-up PR brings it in. Recommendation: keep Building, labeled observation-only, until an interaction example exists. Other follow-ups requested (posted on PR #1): README limitation text, `requirements.txt`, parser test importable without the Steel SDK, a screenshot-vs-viewport coordinate check for `element_at`, and one documented coordinate-rescale convention. Receiver connection checks remain pending.
-
-Status meanings: **Planned** = identified; **Researching** = approach under investigation; **Building** = implementation reported; **Ready to connect** = handoff checklist complete; **Integrated** = receiver has run the connection check; **Blocked** = named missing dependency; **Needs owner** = not assigned. The four Researching states reflect the user's report, not independently verified progress. Record a blocker as “missing input — needed from whom — work that can continue.”
 
 ## INT-1 — agree before connecting components
 
@@ -68,6 +66,8 @@ Use the [provisional contract](../hackathon/CONTRACTS.md) as a reference. Its ex
 - [ ] Browser-session lifecycle responsibility, time/action limits, retry/fallback limits, and one owner for each shared code/config file before concurrent edits.
 
 Record the agreed shapes in CONTRACTS and versioned examples when approved. Keep sample messages clearly labeled. Everyone can research and prototype against those examples without waiting for every component to finish. Record architectural choices in [DECISIONS.md](DECISIONS.md), rather than inventing separate contracts in each workstream.
+
+HTML-1's implemented local 0.2 boundary is an INT-1 proposal, not a competing shared contract. ARGUS uses `Worker.run` in-process; FastAPI is optional transport. Thomas and Tianqi must converge the currently separate DOM/visual adapters into the shared Steel toolbox, agree session ownership and verify `needs_visual` compatibility before claiming integration. Coordination and receiver verification remain pending.
 
 ## Handoff — ready to connect
 
@@ -124,6 +124,8 @@ Handoff: provide an example worker report to Abel and a trace/evidence example t
 
 ## Tianqi — HTML/codebase interpretation
 
+Current implementation and review evidence is in the HTML-1 update above; see [module usage](../../browser_worker/README.md) and [testing runbook](../../browser_worker/TESTING.md).
+
 - Define which HTML/DOM and available code sources the subagent consumes and how it interprets them.
 - Identify semantic controls, parameter fields, navigation context and result records.
 - Propose browser actions and extract structured outputs with source evidence and explicit limitations.
@@ -131,22 +133,26 @@ Handoff: provide an example worker report to Abel and a trace/evidence example t
 
 Handoff: provide an example worker report to Abel and a trace/evidence example to Sting. Coordinate semantic target descriptions and output fields with Thomas. Clarify whether “codebase interpretation” means rendered HTML/DOM, page-delivered scripts, or a repository explicitly available to the team; do not assume access to a public website's private source repository.
 
-## Abel — ARGUS
+## Abel — ARGUS controller
 
 - Interpret one user task into an overall request, subtasks, dependencies and success conditions.
 - Define routing to HTML/code interpretation, visual interpretation and qualified Ghost procedures.
-- Define moderator monitoring, evidence aggregation, handling of gaps/conflicts and final synthesis.
+- Coordinate with Thomas's moderator on monitoring, evidence aggregation and final synthesis.
 - Agree shared worker reports, run state, budgets and failure/fallback behavior with the other workstreams.
 
-Handoff: provide one worked task example showing each worker's input, expected output, evidence and failure report. Coordinate the moderator's implementation boundary; its separate-model versus controller-role decision remains open.
+Handoff: provide one worked task example showing each worker's input, expected output, evidence and failure report. Agree the controller/moderator boundary with Thomas at INT-1.
+
+## Thomas — Moderator
+
+Monitor subtask progress, gather worker evidence, handle gaps/conflicts and synthesize the final result. Coordinate inputs/outputs with Abel's controller; the PR review identifies this ownership, not a verified connection. Moderator implementation and receiver checks are not reported here.
 
 ## Shared boundaries and remaining ownership
 
 Use the same read-only search/filter/extraction example for all four deliverables. Agree one compatible worker-report shape containing subtask identity, outcome, findings, source evidence, observed actions/parameter origins, available measurements and failures. This is a planning requirement, not a new frozen schema.
 
-Thomas and Tianqi cover two interpretation paths that may share a browser worker/session adapter. Their assignments do not require separate runtime agents or competing browser backends. Agree the shared adapter boundary and file ownership before simultaneous edits. Sting consumes both kinds of evidence; Abel coordinates their use and final verification.
+Thomas and Tianqi cover two interpretation paths and, per PR #7 review, one shared Steel toolbox. The separate local adapters need convergence; agree the shared adapter boundary, lifecycle ownership and file ownership before simultaneous edits. Sting consumes both kinds of evidence; Abel coordinates execution with Thomas's moderator.
 
-Dashboard, controlled-site construction, presentation/backup recording, release work and shared Steel session-lifecycle implementation have not been assigned explicitly. Allocate those separately; do not infer ownership from the removed A–D plans.
+Dashboard, controlled-site construction, presentation/backup recording and release work have not been assigned explicitly. Allocate those separately; do not infer ownership from the removed A–D plans. Thomas/Tianqi still need to agree the concrete shared Steel session-lifecycle implementation.
 
 ## Updating this document
 

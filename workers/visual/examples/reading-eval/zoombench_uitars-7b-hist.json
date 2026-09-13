@@ -1,0 +1,170 @@
+{
+  "label": "uitars-7b-hist",
+  "image_sha256_16": "b14cd50b98539225",
+  "zoom_rate": "2/12",
+  "correct": "7/12",
+  "rows": [
+    {
+      "title": "Make your first edit to OpenStreetMap",
+      "expected": 128,
+      "zoomed": false,
+      "action": "finished",
+      "correct": true,
+      "turns": 1,
+      "path": [
+        "finished"
+      ],
+      "note": "finished"
+    },
+    {
+      "title": "LG denies TV spying claims about tracking",
+      "expected": 212,
+      "zoomed": false,
+      "action": "finished",
+      "correct": true,
+      "turns": 1,
+      "path": [
+        "finished"
+      ],
+      "note": "finished"
+    },
+    {
+      "title": "Nvidia is the central bank of AI",
+      "expected": 229,
+      "zoomed": true,
+      "action": "zoom",
+      "correct": true,
+      "turns": 2,
+      "path": [
+        "zoom",
+        "finished"
+      ],
+      "note": "zoom->finished"
+    },
+    {
+      "title": "Will There Be a 7G?",
+      "expected": 45,
+      "zoomed": false,
+      "action": "click",
+      "correct": false,
+      "turns": 6,
+      "path": [
+        "click",
+        "scroll",
+        "click",
+        "click",
+        "click",
+        "scroll"
+      ],
+      "note": "click->scroll->click->click->click->scroll"
+    },
+    {
+      "title": "An open letter to Dario on open weights",
+      "expected": 105,
+      "zoomed": false,
+      "action": "finished",
+      "correct": true,
+      "turns": 1,
+      "path": [
+        "finished"
+      ],
+      "note": "finished"
+    },
+    {
+      "title": "Stabilizing Rust's Never Type",
+      "expected": 21,
+      "zoomed": false,
+      "action": "finished",
+      "correct": false,
+      "turns": 1,
+      "path": [
+        "finished"
+      ],
+      "note": "finished"
+    },
+    {
+      "title": "We must pace the frontier",
+      "expected": 345,
+      "zoomed": false,
+      "action": "drag",
+      "correct": false,
+      "turns": 6,
+      "path": [
+        "drag",
+        "click",
+        "drag",
+        "drag",
+        "drag",
+        "drag"
+      ],
+      "note": "drag->click->drag->drag->drag->drag"
+    },
+    {
+      "title": "Microcode in Intel's 8087 floating-point chip",
+      "expected": 55,
+      "zoomed": false,
+      "action": "click",
+      "correct": false,
+      "turns": 6,
+      "path": [
+        "click",
+        "scroll",
+        "click",
+        "scroll",
+        "scroll",
+        "scroll"
+      ],
+      "note": "click->scroll->click->scroll->scroll->scroll"
+    },
+    {
+      "title": "IKEA made a mod for Skyrim",
+      "expected": 486,
+      "zoomed": true,
+      "action": "drag",
+      "correct": true,
+      "turns": 3,
+      "path": [
+        "drag",
+        "zoom",
+        "finished"
+      ],
+      "note": "drag->zoom->finished"
+    },
+    {
+      "title": "Google's anti-scraping update",
+      "expected": 582,
+      "zoomed": false,
+      "action": "finished",
+      "correct": false,
+      "turns": 1,
+      "path": [
+        "finished"
+      ],
+      "note": "finished"
+    },
+    {
+      "title": "A build visualizer for compile times",
+      "expected": 31,
+      "zoomed": false,
+      "action": "finished",
+      "correct": true,
+      "turns": 1,
+      "path": [
+        "finished"
+      ],
+      "note": "finished"
+    },
+    {
+      "title": "A Mathematical Framework for Transformers",
+      "expected": 58,
+      "zoomed": false,
+      "action": "finished",
+      "correct": true,
+      "turns": 1,
+      "path": [
+        "finished"
+      ],
+      "note": "finished"
+    }
+  ]
+}
