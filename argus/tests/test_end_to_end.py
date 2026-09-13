@@ -209,9 +209,9 @@ class RecordingToolbox(FakeToolbox):
 class RecordingGhost(FakeGhost):
     """A :class:`FakeGhost` that records how ``validate`` was called.
 
-    Open subtasks must be validated with the ``report_context`` keyword and
-    registry subtasks with the original three arguments; nothing else in the
-    run makes that visible.
+    Every subtask, open or registry, is validated with the ``report_context``
+    keyword (ARGUS-3: the worker-backed Ghost bridge needs the run id for
+    registry subtasks too); nothing else in the run makes that visible.
     """
 
     def __init__(self, **kwargs):
@@ -758,9 +758,15 @@ class RegistryPathUnchangedTest(EndToEndCase):
         self.assertIn('title: "Studio headphones"', self.result.answer.lines[1])
         self.assertEqual(self.result.answer.notes, [])
 
-    def test_registry_validation_keeps_the_three_argument_form(self):
+    def test_registry_validation_receives_the_report_context(self):
         self.assertEqual(self.result.validation["status"], "passed")
-        self.assertEqual(self.ghost.validate_kwargs, {"subtask-1": {}})
+        self.assertEqual(list(self.ghost.validate_kwargs), ["subtask-1"])
+        context = self.ghost.validate_kwargs["subtask-1"]["report_context"]
+        self.assertEqual(
+            set(context), {"run_id", "subtask_id", "evidence", "empty_state"}
+        )
+        self.assertEqual(context["run_id"], self.result.run_id)
+        self.assertEqual(context["subtask_id"], "subtask-1")
         self.assertEqual(
             self.result.validation["subtasks"]["subtask-1"]["failed_checks"], []
         )

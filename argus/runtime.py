@@ -1,0 +1,161 @@
+"""Composition of the connected ARGUS runtime (ARGUS-3, package 5).
+
+``build_connected_controller`` wires the real components to the controller:
+
+- toolbox: :class:`argus.adapters.dom_toolbox.DomToolbox` over Tianqi's DOM worker,
+  which itself runs inside Sting's ``GhostWorkflow`` when ``GHOST_API_URL`` is set
+  (lookup, replay or explore, visual continuation, validation, candidate save);
+- ghost: :class:`argus.adapters.ghost_bridge.GhostBridge` (lookup preview, binding
+  checks over the worker's verification, candidate reference; never writes);
+- moderator: :class:`moderator.moderator.Moderator` over the ARGUS model client;
+- interpreter, gate and planner: the real ones (``argus.interpreter``,
+  ``argus.gate``, ``argus.planner``), so raw request text goes to ``Controller.run``.
+
+``connected_environment_problems`` lists what is missing before the runtime starts.
+It is deliberately strict: a connected runtime that cannot reach its dependencies
+must refuse to start rather than fall back to fixtures.
+"""
+
+from __future__ import annotations
+
+import os
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from argus.controller import Controller
+from argus.store import JsonStore
+
+#: Environment variables every connected run needs, whatever the browser backend.
+REQUIRED_ENV = ("OPENAI_API_KEY", "ARGUS_MODEL", "GHOST_API_URL")
+
+RUNTIME_MODES = ("controlled", "connected", "scrape")
+
+
+def normalise_runtime(value: str | None) -> str:
+    """Map the ``ARGUS_RUNTIME`` value to one of :data:`RUNTIME_MODES`.
+
+    ``live`` is accepted as the historical name of the deprecated three-site
+    scraper and reported as ``scrape``.
+    """
+    mode = (value or "connected").strip().lower()
+    if mode == "live":
+        return "scrape"
+    if mode not in RUNTIME_MODES:
+        raise ValueError(
+            f"ARGUS_RUNTIME={value!r} is not one of {', '.join(RUNTIME_MODES)}"
+        )
+    return mode
+
+
+def ghost_api_healthy(base_url: str, timeout: float = 3.0) -> bool:
+    """True when the Ghost API answers ``GET /health`` with HTTP 200."""
+    url = base_url.rstrip("/") + "/health"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def connected_environment_problems(
+    *, check_ghost: bool = True, sites_loader=None
+) -> list[str]:
+    """Return human-readable problems that must be fixed before ``connected`` runs.
+
+    Empty list means the runtime may start. Nothing here opens a browser or calls a
+    model; it only checks configuration and the Ghost health endpoint.
+    """
+    problems = [f"{name} is not set" for name in REQUIRED_ENV if not os.getenv(name)]
+    browser = (os.getenv("WORKER_BROWSER") or "steel").lower()
+    if browser == "steel" and not os.getenv("STEEL_API_KEY"):
+        problems.append("STEEL_API_KEY is not set (WORKER_BROWSER=steel)")
+    if browser == "local" and not os.getenv("WORKER_BROWSER_EXECUTABLE"):
+        problems.append("WORKER_BROWSER_EXECUTABLE is not set (WORKER_BROWSER=local)")
+    try:
+        if sites_loader is None:
+            from Agents.browser_worker.config import load_sites as sites_loader
+        sites = sites_loader()
+        if not sites:
+            problems.append("no configured worker sites (WORKER_SITES_FILE)")
+    except Exception as exc:  # noqa: BLE001 - reported as a startup problem, never raised
+        problems.append(f"worker site config unavailable ({type(exc).__name__})")
+    try:
+        moderator_choice()
+    except ValueError as exc:
+        problems.append(str(exc))
+    if moderator_choice_safe() == "module":
+        try:
+            from moderator.moderator import Moderator  # noqa: F401 - availability check
+        except Exception as exc:  # noqa: BLE001 - reported, never raised
+            problems.append(
+                f"moderator module unavailable ({type(exc).__name__}); set ARGUS_MODERATOR=stub to run with the deterministic stub"
+            )
+    ghost_url = os.getenv("GHOST_API_URL")
+    if check_ghost and ghost_url and not ghost_api_healthy(ghost_url):
+        problems.append(f"Ghost API at {ghost_url} did not answer /health")
+    return problems
+
+
+def moderator_choice() -> str:
+    """``ARGUS_MODERATOR``: ``module`` (Thomas's adapted module, default) or ``stub``.
+
+    ``stub`` is the deterministic :class:`argus.fakes.StubModerator`; it exists so
+    the connected pipeline can be exercised before the module lands and is
+    reported by ``/api/health`` so a stub run is never mistaken for the real one.
+    """
+    choice = (os.getenv("ARGUS_MODERATOR") or "module").strip().lower()
+    if choice not in ("module", "stub"):
+        raise ValueError(f"ARGUS_MODERATOR={choice!r} is not 'module' or 'stub'")
+    return choice
+
+
+def moderator_choice_safe() -> str:
+    try:
+        return moderator_choice()
+    except ValueError:
+        return "invalid"
+
+
+def build_moderator(model_client=None):
+    if moderator_choice() == "stub":
+        from argus.fakes import StubModerator
+
+        return StubModerator()
+    from moderator.moderator import Moderator
+
+    client = model_client
+    if client is None:
+        from argus.model_client import OpenAICompatibleClient
+
+        client = OpenAICompatibleClient(model=os.environ["ARGUS_MODEL"])
+    return Moderator(client)
+
+
+def build_connected_controller(
+    store_root: str | Path,
+    *,
+    model_client=None,
+    toolbox=None,
+    ghost=None,
+    moderator=None,
+    max_concurrency: int = 2,
+) -> Controller:
+    """Compose the connected controller. Keyword arguments exist for tests."""
+    if toolbox is None:
+        from argus.adapters.dom_toolbox import DomToolbox
+
+        toolbox = DomToolbox()
+    if ghost is None:
+        from argus.adapters.ghost_bridge import GhostBridge
+
+        ghost = GhostBridge(toolbox)
+    if moderator is None:
+        moderator = build_moderator(model_client)
+    return Controller(
+        toolbox,
+        moderator,
+        ghost,
+        JsonStore(store_root),
+        max_concurrency=max_concurrency,
+    )

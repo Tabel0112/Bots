@@ -31,8 +31,12 @@ propagate to ARGUS. Unsupported request domains or shopping categories return HT
 422 with a clear message shown inline under the form; the request is never rerouted
 to a different task. Missing runs return 404.
 
-The sidebar label comes from `/api/health`: "Live Steel runtime" or "Controlled
-fixture runtime". Runs made in the controlled runtime carry a "Fixture data" badge
+The sidebar label comes from `/api/health`: "Connected runtime", "Controlled
+fixture runtime" or "Scrape runtime (deprecated)". In the connected runtime the
+example buttons are suggestions only; ARGUS interprets the text with its model, and
+a run that ends `needs_input` shows the gate's question with an answer box that
+starts a linked follow-up run. Records link to their evidence image when the run
+has one stored. Runs made in the controlled runtime carry a "Fixture data" badge
 in the run list and on the result panel, so sample data cannot be mistaken for a
 live result.
 

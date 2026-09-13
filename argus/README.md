@@ -33,7 +33,38 @@ python -m argus.api
 
 Install `argus/requirements.txt` first (FastAPI, Uvicorn, python-dotenv, httpx are
 included and pinned to the Ghost API range). Open `http://127.0.0.1:4173`.
-`STEEL_API_KEY` is required for the default live runtime. `ARGUS_STORE`
+
+`ARGUS_RUNTIME` selects the runtime (ARGUS-3, see
+[the plan](../docs/hackathon/ARGUS-3-PLAN.md)):
+
+| Mode | What runs | Needs |
+| --- | --- | --- |
+| `connected` (default) | Real interpreter, gate and planner; `argus/adapters/dom_toolbox.py` over the DOM worker (which runs Sting's Ghost workflow: lookup, explore or replay, visual continuation, validation, candidate save); `argus/adapters/ghost_bridge.py`; `moderator.Moderator` | `OPENAI_API_KEY`, `ARGUS_MODEL`, `GHOST_API_URL` (health-checked), a loadable worker site config; `STEEL_API_KEY` when `WORKER_BROWSER=steel`, `WORKER_BROWSER_EXECUTABLE` when `local` |
+| `controlled` | Offline fixture runtime with keyword routing; runs carry a "Fixture data" badge | nothing |
+| `scrape` (was `live`) | Deprecated hand-written three-site scraper in `argus/live_runtime.py`; not the product path | `STEEL_API_KEY` |
+
+The connected runtime refuses to start and names every missing piece; `/api/health`
+repeats the mode and the problems. Sessions are worker-owned in this first
+connected slice, so the controller's own observe/verify step is unavailable
+(`PRECONDITION_FAILED`) until the ARGUS Steel session manager lands.
+
+Local startup for a connected run against the bundled catalog (three terminals):
+
+```bash
+GHOST_DATABASE_PATH=ghostapi/ghostapi.sqlite3 python -m uvicorn ghostapi.api.app:app --port 8766
+```
+
+```bash
+python -m Agents.browser_worker.demo.run --serve-only
+```
+
+```bash
+ARGUS_RUNTIME=connected GHOST_API_URL=http://127.0.0.1:8766 WORKER_BROWSER=local python -m argus.api
+```
+
+`OPENAI_API_KEY`, `ARGUS_MODEL`, `OPENAI_MODEL=gpt-5.4`, `WORKER_BROWSER_EXECUTABLE`
+come from `.env`. The catalog server and the Ghost API both default to port 8765, so
+Ghost is started on 8766 here. `ARGUS_STORE`
 optionally selects the JSON run directory and `GHOST_DATABASE_PATH` selects the
 Ghost registry; defaults are `argus-runs/` and `ghostapi/ghostapi.sqlite3`.
 The API exposes run submission, history,
@@ -63,6 +94,14 @@ runs return 404. Stop the server with Ctrl+C.
 `/api/health` reports `runtime`, every run snapshot and list entry carries `runtime`
 (derived from the persisted `interpreted.model`), and Mission Control labels the
 sidebar and each fixture run accordingly.
+
+Connected-mode API additions: `POST /api/runs/{id}/clarifications` with `{"answer"}`
+starts a follow-up request for a run that ended `needs_input` (original text plus
+`Clarification: <answer>`; the response carries `parent_run_id`);
+`GET /api/runs/{id}/evidence/{observation_id}` serves only files stored under that
+run's evidence directory, and each snapshot lists them as `evidence_files`.
+Unsupported or unsafe requests end as `needs_input` or a typed rejection from the
+real gate, never as an answer to a different question.
 The live worker currently uses deterministic read-only DOM extraction and opens a
 fresh worker-owned Steel session per subtask. It does not yet invoke GPT/UI-TARS,
 replay a matched Ghost procedure, save a fully parameterized Ghost candidate, or
@@ -184,7 +223,7 @@ Stage 9 calls `Ghost.validate`. Which checks run depends on `subtask.kind`.
 
 | | Registry subtask | Open subtask |
 | --- | --- | --- |
-| Call shape | `validate(subtask, records, evidence)` | the same plus the keyword `report_context={"run_id", "subtask_id", "evidence", "empty_state"}`, where `evidence` is the report's evidence with any session handle removed |
+| Call shape | `validate(subtask, records, evidence)` plus, since ARGUS-3, the same `report_context` keyword when the Ghost accepts it | the same plus the keyword `report_context={"run_id", "subtask_id", "evidence", "empty_state"}`, where `evidence` is the report's evidence with any session handle removed |
 | Checks (`FakeGhost`) | `records_are_objects`, `title_present`, `price_present`, `currency_usd`, `url_on_site`, `price_within_max` | `records_are_objects`, `records_cite_observations`, `results_present_or_empty_state`, `query_visibly_applied`, `urls_on_target_domain` |
 | Completeness | judged by the operation's ground truth | reported as unverified: generic checks cannot tell whether every matching record was collected |
 

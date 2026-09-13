@@ -1158,11 +1158,46 @@ class OpenWorldDataFlowTests(ControllerTestCase):
         self.execute()
         self.assertIs(self.ghost.contexts["s"]["empty_state"], True)
 
-    def test_registry_validate_keeps_the_three_argument_form(self):
+    def test_registry_validate_receives_the_same_report_context(self):
+        # ARGUS-3: registry subtasks get report_context too, same shape as open.
         self.build()
         result = self.execute()
         self.assertEqual(result.status, "succeeded")
+        context = self.ghost.contexts["subtask-1"]
+        self.assertIsNot(context, NO_CONTEXT)
+        self.assertEqual(
+            set(context), {"run_id", "subtask_id", "evidence", "empty_state"}
+        )
+        self.assertEqual(context["run_id"], result.run_id)
+        self.assertEqual(context["subtask_id"], "subtask-1")
+        self.assertIs(context["empty_state"], False)
+        self.assertNotIn("session-1", json.dumps(context))
+
+    def test_validate_without_the_keyword_gets_the_three_argument_form(self):
+        class ThreeArgumentGhost(FakeGhost):
+            def validate(self, subtask, records, evidence):
+                self.validate_calls.append((subtask.subtask_id, records, evidence))
+                self.contexts[subtask.subtask_id] = NO_CONTEXT
+                return {"status": "passed", "checks": []}
+
+        self.build(ghost=ThreeArgumentGhost())
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
         self.assertIs(self.ghost.contexts["subtask-1"], NO_CONTEXT)
+        self.assertEqual(len(self.ghost.validate_calls), 1)
+
+    def test_validate_with_kwargs_receives_report_context(self):
+        class KwargsGhost(FakeGhost):
+            def validate(self, subtask, records, evidence, **kwargs):
+                self.contexts[subtask.subtask_id] = kwargs.get(
+                    "report_context", NO_CONTEXT
+                )
+                return {"status": "passed", "checks": []}
+
+        self.build(ghost=KwargsGhost())
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual(self.ghost.contexts["subtask-1"]["run_id"], result.run_id)
 
     def test_the_chain_respects_max_concurrency(self):
         barrier = threading.Barrier(2, timeout=2)

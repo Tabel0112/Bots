@@ -148,8 +148,9 @@ class Ghost(Protocol):
         Checks are defined independently of the procedure that produced the
         records, and the moderator cannot override a failure.
 
-        For ``kind == "open"`` subtasks only, the controller passes
-        ``report_context`` as a keyword: ``{"run_id", "subtask_id",
+        The controller passes ``report_context`` as a keyword to every Ghost
+        whose ``validate`` accepts it (registry and open subtasks alike since
+        ARGUS-3; a three-argument ``validate`` still works): ``{"run_id", "subtask_id",
         "evidence", "empty_state"}`` where ``evidence`` is the accepted
         report's evidence dict with any session handle removed and
         ``empty_state`` is a bool derived from the report (a succeeded report
@@ -157,8 +158,7 @@ class Ghost(Protocol):
         says so).  Generic checks read it: every record must cite an
         observation of this report, results must be present unless
         ``empty_state`` is true, the query or filter must be evidenced, and no
-        record may leave the target domain.  Registry calls keep the original
-        three-argument form and never pass the keyword.  This optional keyword
+        record may leave the target domain.  This optional keyword
         is a local ARGUS boundary addition awaiting live Ghost receiver
         verification.
         """
