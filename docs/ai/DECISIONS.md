@@ -4,7 +4,6 @@ Updated: 2026-09-13. Keep status explicit; a proposal is not an implementation c
 
 ## Confirmed user direction
 
-- **Phase (updated 2026-09-12):** the user explicitly requested the complete DOM browser worker implementation using a detailed runtime specification. This supersedes the planning-only restriction for HTML-1. Other workstreams remain at their reported state; the older synthetic scaffold remains provisional.
 - **Product:** ARGUS coordinates deliberation/orchestration/verification; Ghost supplies reusable procedural memory.
 - **Flow:** one user task becomes an overall request with subtasks; subagents execute; a moderator monitors, gathers, reasons over outputs and produces the final result.
 - **Browser infrastructure:** use Steel for browser subagents.
@@ -54,9 +53,10 @@ The PR #7 review reiterates no required HTTP layer between ARGUS and its toolbox
 | Contract | Historical 0.1 remains provisional; DOM worker 0.2 is implemented locally, awaiting INT-1 agreement and ARGUS/Ghost/visual receiver checks |
 | Validation/qualification details | Agree evidence, changed-input coverage, empty-state check and controlled truth set |
 | Schedule and remaining work | Four workstreams assigned in TEAM; deadlines and ownership of other deliverables remain open |
+| Framework pull requests before integration | User direction: component skeletons merge to `main` through pull requests with status **Building**; **Ready to connect** requires the TEAM handoff checklist. AI recommendation, not decided: CI running offline checks and branch protection requiring one review from someone other than the author |
 
 ## Corrections that must survive a tool switch
 
-The user initially clarified the planning phase after premature code generation. The later explicit build request authorized the DOM-worker runtime specification and its tests/documentation, not every backlog item or Ghost qualification. Steel is the shared provider choice; GPT-5.4 and the Python browser stack are HTML-1 local choices pending INT-1 agreement. TEAM records assignments and each workstream's reported evidence independently.
+
 
 When a decision changes, update its entry with the date, rationale and affected contract/research links. Avoid maintaining another copy of runtime status here; use [CURRENT.md](CURRENT.md).
