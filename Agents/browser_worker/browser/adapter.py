@@ -293,14 +293,23 @@ class BrowserAdapter:
 
     async def settle(self, decision: Decision, before: Observation):
         """Bounded wait for the proposed change; no networkidle or unbounded sleeps."""
-        deadline = asyncio.get_running_loop().time() + min(2, self.settings.browser_timeout_seconds)
+        expects_results = decision.arguments.expected_change == "results_ready"
+        # results_ready waits for the page's own ready signal, not merely for the
+        # content to change: over a remote (Steel) browser the first snapshot after a
+        # search click can catch the intermediate state where the results container
+        # has changed but data-ready is not yet set, and returning on that hash change
+        # made replays of empty-result cases fail their expected state (2026-09-13).
+        cap = 5 if expects_results else 2
+        deadline = asyncio.get_running_loop().time() + min(
+            cap, self.settings.browser_timeout_seconds
+        )
         while asyncio.get_running_loop().time() < deadline:
             data = await self._snapshot()
-            if (
-                decision.arguments.expected_change == "results_ready"
-                and data["signals"]["results_ready"]
-            ):
-                return
+            if expects_results:
+                if data["signals"]["results_ready"]:
+                    return
+                await asyncio.sleep(0.1)
+                continue
             if self._hash(data, self.page.url) != before.content_hash:
                 return
             if decision.arguments.expected_change in {"unchanged", "visible"}:

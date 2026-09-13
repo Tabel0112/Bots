@@ -23,8 +23,10 @@ they resolve to `https://tabel0112.github.io/products/<id>`; the patterns allow
 that. Use it with `WORKER_SITES_FILE=demo-site/sites.hosted.json` and
 `WORKER_BROWSER=steel`.
 
-Status: verified on 2026-09-13 — after the Steel key was replaced, a connected
-Mission Control run on this hosted catalog succeeded (run-5b5d9ce59c: 20 checks
-passed, worker on a Steel session, candidate saved). The Steel account allows one
+Status: verified on 2026-09-13 — connected Mission Control runs on this hosted
+catalog succeeded on Steel: exploration with candidate saved (run-5b5d9ce59c),
+qualification (three replays, 0 model calls) and reuse (run-f4ba558e00, 0 worker
+model calls). Known Steel quirk: replaying the "50 USD" price option fails its
+expected state; use 100/150/200 in Steel demos until fixed. The Steel account allows one
 concurrent session; a session left live by an earlier run blocks the next one, so
 release stale sessions before a demo. No two-UI-version site exists yet.
