@@ -12,6 +12,9 @@ def main():
     p.add_argument("--backend", choices=["uitars", "claude"], default="uitars")
     p.add_argument("--model", default=None)
     p.add_argument("--base-url", default=None, help="OpenAI-compatible endpoint for uitars backend")
+    p.add_argument("--reader-url", default=None,
+                   help="Optional second endpoint used to read exact values off magnified "
+                        "crops (e.g. a cluster-hosted Holo1.5-72B). Env: READER_BASE_URL")
     p.add_argument("--max-steps", type=int, default=40)
     p.add_argument("--log-dir", default=None)
     p.add_argument("--request-id", default=None)
@@ -22,7 +25,8 @@ def main():
     if args.backend == "uitars":
         from .uitars_agent import UITarsSubagent
         agent = UITarsSubagent(base_url=args.base_url, model=args.model or "ui-tars",
-                               max_steps=args.max_steps, log_dir=args.log_dir)
+                               max_steps=args.max_steps, log_dir=args.log_dir,
+                               reader_url=args.reader_url)
     else:
         from .vlm_agent import BrowserSubagent
         agent = BrowserSubagent(model=args.model or "claude-opus-5",

@@ -223,3 +223,6 @@ workers/visual/runs/
 
 # ARGUS local run store
 argus-runs/
+
+# moderator run artifacts
+moderator/runs/
