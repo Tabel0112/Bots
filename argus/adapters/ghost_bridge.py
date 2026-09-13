@@ -207,8 +207,17 @@ class GhostBridge:
         try:
             from ghostapi.api.service import lookup
 
-            request = self._lookup_request(subtask)
-            decision = lookup(self._workflow_store(), request)
+            try:
+                request = self._worker_lookup_request(subtask)
+            except Exception:  # noqa: BLE001 - fall back to the key-less preview
+                request = self._lookup_request(subtask)
+            api_url = os.getenv("GHOST_API_URL")
+            if api_url:
+                # The Ghost API process owns the registry; ask it rather than
+                # opening a SQLite file that may not be the one it serves.
+                decision = self._lookup_via_api(api_url, request)
+            else:
+                decision = lookup(self._workflow_store(), request)
         except Exception as exc:  # noqa: BLE001 - preview only, never a decision
             preview = f"lookup preview unavailable ({type(exc).__name__})"
             return {
@@ -220,7 +229,7 @@ class GhostBridge:
         if decision.get("decision") == "reuse" and isinstance(workflow, dict):
             preview = (
                 f"qualified workflow {workflow.get('skill_id')} "
-                f"v{workflow.get('version')} available"
+                f"v{workflow.get('version')} compatible; the worker will replay it"
             )
         else:
             preview = "no compatible qualified workflow"
@@ -229,6 +238,46 @@ class GhostBridge:
             "skill": None,
             "reason": _REASON_PREFIX + preview,
         }
+
+    @staticmethod
+    def _lookup_via_api(base_url: str, request, timeout: float = 3.0) -> dict[str, Any]:
+        """POST the lookup body to the Ghost API's ``/v1/workflows/lookup``."""
+        import json
+        import urllib.request
+
+        body = json.dumps(request.model_dump(mode="json")).encode("utf-8")
+        http_request = urllib.request.Request(
+            base_url.rstrip("/") + "/v1/workflows/lookup",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(http_request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    @staticmethod
+    def _worker_lookup_request(subtask: Subtask):
+        """The exact lookup body the DOM worker will send, compatibility key included.
+
+        Built by translating the subtask the way :mod:`argus.adapters.worker_contracts`
+        does and reusing the worker's own ``lookup_request``; this makes the stage 4
+        preview agree with the worker's later decision.  Any failure falls back to
+        the key-less preview in :meth:`match`.
+        """
+        from Agents.browser_worker.config import load_sites
+        from Agents.browser_worker.ghost_adapter import lookup_request
+        from argus.adapters.worker_contracts import to_subtask_request
+        from argus.contracts import Budget, SubtaskInput
+        from ghostapi.api.models import LookupRequest
+
+        sites = load_sites()
+        preview_input = SubtaskInput(
+            "preview", subtask, "preview", Budget(30, 120.0), "explore", None, "preview"
+        )
+        task = to_subtask_request(preview_input, sites)
+        return LookupRequest(
+            **lookup_request(task, sites[task.site_id], "argus-preview")
+        )
 
     # ---------------------------------------------------------------- validate
 

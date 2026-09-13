@@ -11,6 +11,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from argus import interfaces
 from argus.adapters import ghost_bridge as bridge_module
@@ -218,12 +219,20 @@ class MatchTest(BridgeTestCase):
                 "UPDATE workflow_versions SET status='qualified' WHERE skill_id=?",
                 (skill_id,),
             )
-        result = self.bridge().match(subtask(), [{"skill_id": "ignored"}])
+        # The key-less preview path: the worker-shaped request is unavailable here
+        # because the fixture candidate was saved without a compatibility key.
+        with patch.object(
+            bridge_module.GhostBridge,
+            "_worker_lookup_request",
+            side_effect=RuntimeError("no worker shape in this test"),
+        ):
+            result = self.bridge().match(subtask(), [{"skill_id": "ignored"}])
         self.assertEqual(result["decision"], "explore")
         self.assertIsNone(result["skill"])
         self.assertEqual(
             result["reason"],
-            f"worker-resolved: qualified workflow {skill_id} v{version} available",
+            f"worker-resolved: qualified workflow {skill_id} v{version} compatible; "
+            "the worker will replay it",
         )
         self.assertEqual(self.workflows.activity(), [])
 
@@ -556,3 +565,81 @@ class CompileTest(BridgeTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkerShapedPreviewTests(unittest.TestCase):
+    def test_worker_lookup_request_carries_the_compatibility_key(self):
+        import json
+        from pathlib import Path
+
+        from argus.contracts import Plan
+
+        plan = Plan.from_dict(
+            json.loads(
+                (
+                    Path(__file__).resolve().parents[1] / "examples" / "plan.json"
+                ).read_text()
+            )
+        )
+        request = GhostBridge._worker_lookup_request(plan.subtasks[0])
+        self.assertEqual(request.schema_version, "0.2")
+        self.assertEqual(request.site_id, "demo-catalog")
+        self.assertEqual(request.operation, "search_extract")
+        self.assertTrue(getattr(request, "compatibility_key", None))
+
+
+class ApiPreviewTests(unittest.TestCase):
+    def test_preview_uses_the_ghost_api_when_configured(self):
+        import io
+        import json
+        import os
+        from pathlib import Path
+
+        from argus.contracts import Plan
+
+        plan = Plan.from_dict(
+            json.loads(
+                (
+                    Path(__file__).resolve().parents[1] / "examples" / "plan.json"
+                ).read_text()
+            )
+        )
+        seen = {}
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fake_urlopen(http_request, timeout=0):
+            seen["url"] = http_request.full_url
+            seen["body"] = json.loads(http_request.data.decode("utf-8"))
+            return Response(
+                json.dumps(
+                    {
+                        "schema_version": "0.2",
+                        "decision": "reuse",
+                        "workflow": {
+                            "skill_id": "demo-catalog.search_extract",
+                            "version": 4,
+                        },
+                    }
+                ).encode("utf-8")
+            )
+
+        class Toolbox:
+            def context_for(self, run_id, subtask_id):
+                return None
+
+        with (
+            patch.dict(os.environ, {"GHOST_API_URL": "http://ghost.test:8766"}),
+            patch("urllib.request.urlopen", fake_urlopen),
+        ):
+            result = GhostBridge(Toolbox()).match(plan.subtasks[0], [])
+        self.assertEqual(seen["url"], "http://ghost.test:8766/v1/workflows/lookup")
+        self.assertEqual(seen["body"]["operation"], "search_extract")
+        self.assertTrue(seen["body"]["compatibility_key"])
+        self.assertEqual(result["decision"], "explore")
+        self.assertIn("v4 compatible; the worker will replay it", result["reason"])

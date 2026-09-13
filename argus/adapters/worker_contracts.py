@@ -162,16 +162,15 @@ def translate_success_conditions(
 
     max_results = parameters.get("max_results")
     if max_results is not None:
-        if (
-            isinstance(max_results, int)
-            and not isinstance(max_results, bool)
-            and max_results >= 0
-        ):
-            typed.append(SuccessCondition(kind="max_records", value=int(max_results)))
-        else:
-            limitations.append(
-                f"max_results={max_results!r} is not a nonnegative integer"
-            )
+        # Deliberately NOT a worker success condition: the worker's success
+        # conditions are part of Ghost's compatibility key, so a per-request
+        # result count would make every differently-sized request a different
+        # workflow and defeat reuse (observed on INT-2, 2026-09-13). The
+        # controller's limit criterion caps the published records instead.
+        limitations.append(
+            f"max_results={max_results!r} is applied by the controller's limit "
+            "criterion, not as a worker success condition"
+        )
     currency = parameters.get("currency")
     if currency is not None:
         if "currency" in fields and isinstance(currency, str) and currency:

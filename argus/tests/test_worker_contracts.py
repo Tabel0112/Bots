@@ -237,9 +237,10 @@ class ToSubtaskRequestTests(unittest.TestCase):
             (c.kind, c.field, c.parameter, c.value) for c in request.success_conditions
         ]
         self.assertIn(("field_lte", "price", "max_price", None), kinds)
-        self.assertIn(("max_records", None, None, 5), kinds)
+        self.assertNotIn("max_records", [kind[0] for kind in kinds])
         self.assertIn(("field_equals", "currency", None, "USD"), kinds)
-        self.assertEqual(len(limitations), 3)
+        self.assertEqual(len(limitations), 4)
+        self.assertTrue(any("max_results=5" in text for text in limitations))
         for text in (
             "results present or explicit empty state",
             "every record has title, price, currency, url",
