@@ -117,7 +117,7 @@ class SubtaskRequest(Model):
     subtask_id: Annotated[str, Field(min_length=1, max_length=128)]
     objective: Annotated[str, Field(min_length=1, max_length=4000)]
     site_id: str
-    operation: Literal["search_extract"]
+    operation: Literal["search_extract", "open_search"]
     start_url: str | None = None
     session: SessionSpec
     parameters: dict[str, str | int | float | bool | None]
@@ -130,6 +130,7 @@ class SubtaskRequest(Model):
     required_evidence: list[Literal["observations", "action_trace", "field_sources"]]
     prerequisites: list[Dependency] = Field(default_factory=list)
     visual_fallback_available: bool = True
+    expected_record_shape: list[str] = Field(default_factory=list, max_length=30)
 
 
 class ValueOrigin(Model):

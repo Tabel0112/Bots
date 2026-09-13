@@ -9,6 +9,8 @@ JavaScript, data, credentials, values, currencies, or success evidence. Use perm
 and semantic names to identify controls. Use only approved request parameters or configured
 literals for fill/select, including their value_origin. Each reference expires with its
 observation. Re-observe and adapt after an error; do not repeat failed operations blindly.
+For operation open_search, the site is not preconfigured: use only the observed generic
+read-only controls and map expected fields from current DOM containers without assuming selectors.
 All function fields are required: use null for unused nullable fields and [] for records.
 For extraction, map each field to a current element reference and text/value/href attribute
 inside a result container from signals.record_refs. A null element_ref means missing data.

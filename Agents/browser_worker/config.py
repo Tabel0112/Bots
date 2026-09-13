@@ -35,9 +35,9 @@ class SiteConfig(Model):
     output_schema_id: str
     record_schema: dict[str, Any]
     approved_literals: dict[str, str] = Field(default_factory=dict)
-    results_selector: str
-    record_selector: str
-    empty_selector: str
+    results_selector: str | None
+    record_selector: str | None
+    empty_selector: str | None
     loading_selector: str = "[aria-busy='true']"
     error_selector: str = "[role='alert']"
     auth_selector: str = "input[type='password']"
@@ -46,6 +46,7 @@ class SiteConfig(Model):
     max_records: int = Field(default=30, ge=1, le=100)
     # Optional operator-owned row recipe for independent validation after visual work.
     extraction_fields: list[dict[str, Any]] = Field(default_factory=list)
+    open_site: bool = False
 
 
 class Settings(Model):

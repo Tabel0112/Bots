@@ -131,6 +131,7 @@ class ConnectedApiTests(unittest.TestCase):
             health = client.get("/api/health").json()
             self.assertEqual(health["runtime"], "connected")
             self.assertEqual(health["problems"], [])
+            self.assertTrue(health["open_world_search"])
             self.assertEqual(health["scenarios"], [])
             created = client.post(
                 "/api/runs", json={"text": "Find headphones under $150"}

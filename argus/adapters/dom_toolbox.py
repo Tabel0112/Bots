@@ -217,9 +217,12 @@ class DomToolbox:
                     + ["worker report not translatable"]
                 }
             else:
-                context["limitations"] = list(limitations) + list(
+                combined_limitations = list(limitations) + list(
                     context.get("limitations", [])
                 )
+                context["limitations"] = combined_limitations
+                if isinstance(result.evidence, dict):
+                    result.evidence["limitations"] = combined_limitations
         finally:
             with self._lock:
                 self._events.pop(key, None)

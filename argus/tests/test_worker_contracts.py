@@ -61,6 +61,9 @@ def make_input(
     budget: Budget | None = None,
     request_id: str | None = "request-1",
     session_handle: str | None = "worker-owned-1",
+    kind: str = "registry",
+    target_domain: str | None = None,
+    expected_record_shape: list[str] | None = None,
 ) -> SubtaskInput:
     base = Plan.from_dict(PLAN).subtasks[0]
     subtask = Subtask(
@@ -77,6 +80,9 @@ def make_input(
             else success_conditions
         ),
         goal=goal,
+        kind=kind,
+        target_domain=target_domain,
+        expected_record_shape=list(expected_record_shape or []),
     )
     return SubtaskInput(
         run_id="run-1",
@@ -203,6 +209,29 @@ class ToSubtaskRequestTests(unittest.TestCase):
         # The worker's own validator accepts what we built.
         _task, site = validate_request(request.model_dump(mode="json"), SITES)
         self.assertEqual(site.site_id, "demo-catalog")
+
+    def test_open_subtask_builds_a_valid_unconfigured_worker_request(self):
+        subtask_input = make_input(
+            operation="open_search",
+            site_id="open:example.com",
+            parameters={"query": "Toronto condos", "rating": 4.5},
+            goal="Find Toronto condos",
+            kind="open",
+            target_domain="example.com",
+            expected_record_shape=["title", "url", "price", "rating"],
+        )
+        request = wc.to_subtask_request(subtask_input, SITES)
+        self.assertEqual(request.operation, "open_search")
+        self.assertEqual(request.site_id, "open:example.com")
+        self.assertEqual(request.start_url, "https://example.com/")
+        self.assertEqual(request.parameters, {"query": "Toronto condos", "rating": 4.5})
+        self.assertEqual(
+            request.expected_record_shape, ["title", "url", "price", "rating"]
+        )
+        task, site = validate_request(request.model_dump(mode="json"), SITES)
+        self.assertEqual(task, request)
+        self.assertTrue(site.open_site)
+        self.assertEqual(site.output_schema_id, "open-records.v1")
 
     def test_session_is_worker_owned_without_a_session_ref(self):
         request = wc.to_subtask_request(make_input(), SITES)
@@ -332,6 +361,7 @@ class ToWorkerReportTests(unittest.TestCase):
         )
         self.assertEqual(report.failures, [])
         self.assertEqual(report.typed_failures, [])
+        self.assertEqual(report.evidence["limitations"], ["worker limitation"])
         self.assertEqual(
             context["ghost"], {"decision": "explore", "candidate_id": "cand-1"}
         )

@@ -189,15 +189,26 @@ class BrowserAdapter:
         self._check_blocked()
         await self._follow_redirects()
         guard_url(self.page.url, self.site, self.task)
+        config = self.site.model_dump(mode="json")
+        if self.site.open_site:
+            for name in ("results_selector", "record_selector", "empty_selector"):
+                config[name] = ":not(*)"
         data = await self.page.evaluate(
             OBSERVE_SCRIPT,
             {
                 "attribute": self.attribute,
                 "maxElements": 220,
                 "maxText": 12000,
-                "config": self.site.model_dump(mode="json"),
+                "config": config,
             },
         )
+        if self.site.open_site:
+            for element in data["elements"]:
+                role = element["role"]
+                if role in {"textbox", "searchbox", "combobox"}:
+                    element["permitted_actions"] = ["fill", "select"]
+                elif role in {"button", "link", "checkbox"}:
+                    element["permitted_actions"] = ["click"]
         # Remove credential-looking URLs instead of putting them in model context.
         for element in data["elements"]:
             if element.get("href"):
@@ -248,12 +259,38 @@ class BrowserAdapter:
                     )
                 if not await locator.is_visible():
                     raise WorkerError(C.TARGET_NOT_FOUND, "Target is no longer visible.", True)
-                # Recheck the trusted CSS permission against the live element, not the model.
+                # Recheck configured selectors, or the generic read-only role policy for
+                # an open site, against the live element rather than trusting the model.
                 if kind != "inspect_element":
-                    selectors = [r.selector for r in self.site.controls if kind in r.actions]
-                    if not await locator.evaluate(
-                        "(el, selectors) => selectors.some(s=>el.matches(s))", selectors
-                    ):
+                    if self.site.open_site:
+                        permitted = await locator.evaluate(
+                            """(el, kind) => {
+                              const role = el.getAttribute('role') || ({
+                                BUTTON:'button', A:'link', SELECT:'combobox',
+                                TEXTAREA:'textbox'
+                              })[el.tagName] || (el.tagName === 'INPUT' ? ({
+                                checkbox:'checkbox', radio:'radio', submit:'button',
+                                button:'button'
+                              })[el.type] || 'textbox' : 'generic');
+                              if (el.tagName === 'INPUT' && el.type === 'password') return false;
+                              if (kind === 'fill' || kind === 'select') {
+                                return ['textbox','searchbox','combobox'].includes(role);
+                              }
+                              if (kind === 'click') {
+                                const form = el.closest('form');
+                                const readOnlyForm = !form || (form.method || 'get').toLowerCase() === 'get';
+                                return readOnlyForm && ['button','link','checkbox'].includes(role);
+                              }
+                              return false;
+                            }""",
+                            kind,
+                        )
+                    else:
+                        selectors = [r.selector for r in self.site.controls if kind in r.actions]
+                        permitted = await locator.evaluate(
+                            "(el, selectors) => selectors.some(s=>el.matches(s))", selectors
+                        )
+                    if not permitted:
                         raise WorkerError(
                             C.ACTION_REJECTED,
                             "Live control no longer matches site permissions.",
@@ -274,7 +311,8 @@ class BrowserAdapter:
                         state="visible"
                     )
                 else:
-                    await self.page.locator(self.site.results_selector).wait_for(state="visible")
+                    selector = self.site.results_selector or "body"
+                    await self.page.locator(selector).wait_for(state="visible")
             await self._follow_redirects()
             self._check_blocked()
             return {"executed": True}

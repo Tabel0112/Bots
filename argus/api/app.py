@@ -56,6 +56,7 @@ def create_app(
             "ghost_api_url": os.getenv("GHOST_API_URL"),
             "argus_model": os.getenv("ARGUS_MODEL"),
             "moderator": os.getenv("ARGUS_MODERATOR") or "module",
+            "open_world_search": service.runtime == "connected",
             "scenarios": ["shopping", "travel", "jobs"]
             if service.runtime != "connected"
             else [],
