@@ -59,29 +59,7 @@ before the controller renders the answer. The ARGUS controller owns the run from
 start to finish: its state, budgets, browser sessions, event stream and result. The
 other components return decisions; the controller executes them and keeps every cap.
 
-```mermaid
-flowchart LR
-    U["Inquiry<br/>request text"] --> I
-    subgraph ARGUS["ARGUS controller"]
-        direction LR
-        I["Interpreter<br/>intents, parameters,<br/>cited spans"] --> G["Gate<br/>accept, clarify<br/>or reject"]
-        G --> P["Planner<br/>subtasks with<br/>dependencies"]
-    end
-    P --> L{"Ghost API<br/>lookup"}
-    L -- "qualified workflow" --> R["Replay<br/>bound inputs,<br/>0 model calls"]
-    L -- "no match" --> X["Explore"]
-    subgraph W["Browser subagents on Steel"]
-        direction LR
-        D["DOM worker"]
-        V["Visual worker<br/>UI-TARS"]
-    end
-    R --> W
-    X --> W
-    W --> M["Moderator<br/>reconcile reports,<br/>select validated records"]
-    M --> C["Validation<br/>worker checks +<br/>ARGUS binding checks"]
-    C --> A["Answer<br/>rendered by the controller,<br/>every record cites evidence"]
-    C -. "validated exploration" .-> S["Ghost skill<br/>candidate, qualification,<br/>reuse next time"]
-```
+<p align="center"><img src="docs/images/system-flow.svg" width="100%" alt="Flow from the inquiry through the ARGUS controller (interpreter, gate, planner), the Ghost API lookup (replay or explore), the browser subagents on Steel, the moderator and validation, to the rendered answer; a validated exploration becomes a Ghost skill reused on the next compatible request"></p>
 
 The stages, in the order the controller runs them:
 
