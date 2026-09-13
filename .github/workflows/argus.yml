@@ -1,0 +1,61 @@
+name: ARGUS controller tests
+
+on:
+  push:
+    paths:
+      - argus/**
+      - .github/workflows/argus.yml
+  pull_request:
+    paths:
+      - argus/**
+      - .github/workflows/argus.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The interpreter and planner build pydantic output schemas even under
+      # fake model clients, so the suite needs argus/requirements.txt.
+      - name: Install ARGUS dependencies
+        run: python -m pip install -r argus/requirements.txt
+
+      # PYTHONUTF8 is deliberately not set, so encoding regressions fail on Windows.
+      - name: Run unit tests
+        run: python -m unittest discover -s argus/tests -v
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install ruff
+
+      # Keep style and correctness findings blocking now that the baseline is clean.
+      - name: Run ruff
+        run: ruff check argus

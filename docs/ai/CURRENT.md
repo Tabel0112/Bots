@@ -1,6 +1,6 @@
 # Current checkpoint
 
-Updated: 2026-09-12. **HTML-1 DOM worker implemented locally; interactive dashboard prototype added; shared integration pending.** Ghost and visual modules have separate implementation/evidence below. Assignments and handoffs remain in [TEAM.md](TEAM.md).
+Updated: 2026-09-13. **HTML-1 DOM worker implemented locally; shared integration pending. ARGUS PR #10 includes the structured-publication review correction.** Ghost and visual modules have separate implementation/evidence below. Assignments and handoffs remain in [TEAM.md](TEAM.md).
 
 ## Latest user direction
 
@@ -35,6 +35,10 @@ Earlier documentation-only checkpoints and the local synthetic backend experimen
 2. Coordinate with Thomas on one shared Steel toolbox/session owner and verify a continuing `needs_visual` handoff in an ARGUS-owned session. Worker-owned sessions are released.
 3. Configure an OpenAI key and a reachable read-only site for the remaining live GPT + configured Steel task test. The independent Steel lifecycle check is already verified.
 4. Record receiver revisions/results in TEAM; HTML-1 remains Building and INT-1/INT-2 remain unintegrated.
+
+ARGUS PR #10 now includes implementation commit `388764e` on `feat/argus-controller-base`. Contract 0.5 addresses Tianqi's remaining semantic-provenance finding: the moderator returns only an `AnswerSelection` of validated-record indices, field references and fixed-vocabulary notes. The controller rejects invalid selections, derives the records, and renders every user-facing line itself. Any moderator-authored prose is discarded before logging or persistence. Reconciliation may still select, drop, reorder or supersede accepted records, but cannot manufacture data.
+
+The exact hostile phrase `is free and cures cancer`, supplied as moderator prose while citing a real record, is covered by a regression that proves neither string is published or stored. The cleanup also cleared the full Ruff baseline and makes the ARGUS lint job blocking. Checks actually run on the formatted tree before commit: `python3 -m unittest discover -s argus/tests -v` passed **453 tests in 1.249s** (Python 3.13.5); `ruff check argus`, `ruff format --check argus` and `git diff --check` passed. The registry fixture succeeded with controller-rendered lines; the vague open request ended `needs_input` at S4 with no session; the salary chain succeeded with four unique remote records in descending salary order. These are synthetic offline runs. No live model, browser, Steel, VLM, DNS or Ghost check was run. Remote CI for the pushed correction was pending at this checkpoint. Actual behavior and limits are in [argus/README.md](../../argus/README.md) and the newest ARGUS-1 block in [TEAM.md](TEAM.md).
 
 ## Visual worker module
 

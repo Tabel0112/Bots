@@ -1,0 +1,37 @@
+{
+  "lines": [
+    "2 selected records; validation passed.",
+    "Record 1 — title: \"Travel headphones\"; price: 79.0; currency: \"USD\".",
+    "Record 2 — title: \"Studio headphones\"; price: 129.0; currency: \"USD\"."
+  ],
+  "claims": [
+    {
+      "record_index": 0,
+      "fields": ["title", "price", "currency"]
+    },
+    {
+      "record_index": 1,
+      "fields": ["title", "price", "currency"]
+    }
+  ],
+  "records": [
+    {
+      "title": "Travel headphones",
+      "price": 79.0,
+      "currency": "USD",
+      "url": "https://demo-catalog.invalid/products/1",
+      "source_observation_id": "observation-000.png",
+      "retrieved_at": "2026-09-12T17:00:20Z"
+    },
+    {
+      "title": "Studio headphones",
+      "price": 129.0,
+      "currency": "USD",
+      "url": "https://demo-catalog.invalid/products/0",
+      "source_observation_id": "observation-000.png",
+      "retrieved_at": "2026-09-12T17:00:20Z"
+    }
+  ],
+  "failures": [],
+  "notes": []
+}
