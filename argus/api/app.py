@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .qualification import router as qualification_router
 from .service import RunService
 
 _OBSERVATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -42,6 +43,7 @@ def create_app(
         )
     app = FastAPI(title="ARGUS Mission Control", version="0.2-argus-3")
     app.state.run_service = service
+    app.include_router(qualification_router)
 
     @app.get("/api/health")
     def health():

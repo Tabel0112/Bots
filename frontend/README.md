@@ -38,7 +38,10 @@ a run that ends `needs_input` shows the gate's question with an answer box that
 starts a linked follow-up run. Records link to their evidence image when the run
 has one stored. Runs made in the controlled runtime carry a "Fixture data" badge
 in the run list and on the result panel, so sample data cannot be mistaken for a
-live result.
+live result. Those surfaces also identify whether persisted worker reports used a
+qualified Ghost replay (zero model calls) or exploration, including the exploration
+model-call total. The Ghost Library view reads `/api/workflows` and distinguishes
+candidate workflow versions from qualified ones.
 
 ## Checks
 
@@ -57,6 +60,8 @@ and Uvicorn serve it. The default backend calls Steel and reads current public p
 from Staples, Wikivoyage, and Remotive; `STEEL_API_KEY` is required. It uses Ghost's
 local registry lookup and streams ARGUS, subagent, Ghost, worker-action, moderator,
 validation, and synthesis events. Captures are observation references, not image
-files. GPT/UI-TARS recovery, Ghost replay/qualification controls, clarification
-continuation, and arbitrary-site extraction remain unfinished. Static Sites hosting
-cannot execute the local Python API without a separately hosted backend.
+files. Run lists fetch each run snapshot to derive their execution badges, so a
+large archive produces one detail request per displayed run. Qualification is an
+API job rather than an interactive frontend control. GPT/UI-TARS recovery and
+arbitrary-site extraction remain unfinished. Static Sites hosting cannot execute
+the local Python API without a separately hosted backend.

@@ -100,6 +100,11 @@ starts a follow-up request for a run that ended `needs_input` (original text plu
 `Clarification: <answer>`; the response carries `parent_run_id`);
 `GET /api/runs/{id}/evidence/{observation_id}` serves only files stored under that
 run's evidence directory, and each snapshot lists them as `evidence_files`.
+Qualification is a bounded background job: `POST
+/api/workflows/{skill_id}/versions/{version}/qualifications` accepts exactly three
+distinct input sets that differ from the named exploration run, returns a job ID,
+and `GET /api/workflows/qualifications/{job_id}` reports its result without provider
+text. `GET /api/workflows` proxies the configured Ghost registry for Mission Control.
 Unsupported or unsafe requests end as `needs_input` or a typed rejection from the
 real gate, never as an answer to a different question.
 The live worker currently uses deterministic read-only DOM extraction and opens a
