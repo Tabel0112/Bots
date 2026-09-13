@@ -32,7 +32,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # No install step: the argus test suite has no third-party dependencies.
+      # The interpreter and planner build pydantic output schemas even under
+      # fake model clients, so the suite needs argus/requirements.txt.
+      - name: Install ARGUS dependencies
+        run: python -m pip install -r argus/requirements.txt
+
       # PYTHONUTF8 is deliberately not set, so encoding regressions fail on Windows.
       - name: Run unit tests
         run: python -m unittest discover -s argus/tests -v

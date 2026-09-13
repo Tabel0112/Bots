@@ -475,13 +475,14 @@ The three CLI commands above ran with the exit statuses and output shown.
 
 ## Dependencies
 
-- Python 3.13 (developed on 3.13.5). The controller, store, planner, gate,
-  contracts, registry and fakes are standard library only.
-- Live interpretation and live open-world planning need the `openai` package
-  (which brings `pydantic`). `openai` **2.14.0** and `pydantic` 2.12.5 are
-  installed here; `pydantic` is also what `planner._output_model` and the
-  interpreter's output model need, so `--plan-fixture` and the injected fake
-  clients still build a real schema. No live call has been made.
+- Python 3.12 or 3.13 (developed on 3.13.5; CI runs both). The controller,
+  store, gate, contracts, registry and fakes are standard library only.
+- `argus/requirements.txt` (`openai`, `pydantic`) is required to run the
+  interpreter, the open-world planner and therefore the test suite: the output
+  schemas are real pydantic models even when a fake model client is injected.
+  Install with `python3 -m pip install -r argus/requirements.txt`. Verified with
+  `openai` 2.14.0 and `pydantic` 2.12.5. The first live interpretation call was
+  made on 2026-09-12 (`python3 -m argus.live_check`); no live planning call yet.
 
 ## Known limitations
 
