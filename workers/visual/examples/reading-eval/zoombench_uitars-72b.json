@@ -1,0 +1,13 @@
+{
+  "label": "uitars-72b",
+  "image_sha256_16": "9d4f489a6dc239c8",
+  "zoom_rate": "12/12",
+  "correct": "10/12",
+  "note": "run on one H100 80GB, Trillium trig0026, UI-TARS-72B-DPO Q4_K_M, max_turns=6, with conversation history",
+  "paths": [
+    "zoom->finished (OK)", "zoom->wait->finished (OK)", "zoom->wait->finished (WRONG)",
+    "zoom->finished (OK)", "zoom->click->finished (OK)", "zoom->wait->finished (OK)",
+    "zoom->wait->finished (OK)", "zoom->wait->finished (OK)", "zoom->finished (WRONG)",
+    "zoom->wait->finished (OK)", "zoom->wait->finished (OK)", "zoom->wait->finished (OK)"
+  ]
+}
