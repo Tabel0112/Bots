@@ -52,6 +52,62 @@ The connected runtime (ARGUS interpreter, DOM worker, Ghost and moderator on the
 controlled catalog) is a separate script in
 [docs/hackathon/DEMO-RUNBOOK.md](docs/hackathon/DEMO-RUNBOOK.md).
 
+## How the system works
+
+One request travels through ARGUS, Ghost, the browser subagents and the moderator
+before the controller renders the answer. The ARGUS controller owns the run from
+start to finish: its state, budgets, browser sessions, event stream and result. The
+other components return decisions; the controller executes them and keeps every cap.
+
+```mermaid
+flowchart LR
+    U["Inquiry<br/>request text"] --> I
+    subgraph ARGUS["ARGUS controller"]
+        direction LR
+        I["Interpreter<br/>intents, parameters,<br/>cited spans"] --> G["Gate<br/>accept, clarify<br/>or reject"]
+        G --> P["Planner<br/>subtasks with<br/>dependencies"]
+    end
+    P --> L{"Ghost API<br/>lookup"}
+    L -- "qualified workflow" --> R["Replay<br/>bound inputs,<br/>0 model calls"]
+    L -- "no match" --> X["Explore"]
+    subgraph W["Browser subagents on Steel"]
+        direction LR
+        D["DOM worker"]
+        V["Visual worker<br/>UI-TARS"]
+    end
+    R --> W
+    X --> W
+    W --> M["Moderator<br/>reconcile reports,<br/>select validated records"]
+    M --> C["Validation<br/>worker checks +<br/>ARGUS binding checks"]
+    C --> A["Answer<br/>rendered by the controller,<br/>every record cites evidence"]
+    C -. "validated exploration" .-> S["Ghost skill<br/>candidate, qualification,<br/>reuse next time"]
+```
+
+The stages, in the order the controller runs them:
+
+| Stage | Who | What happens |
+| --- | --- | --- |
+| 1. Interpreting | ARGUS interpreter (`argus/interpreter.py`) | The request text becomes typed intents on a configured site or, for open-world requests, a target domain and goal. Every parameter is cited to the words it came from; nothing is invented. |
+| 2. Gating | ARGUS gate (`argus/gate.py`) | Accepts the reading, asks one clarifying question when a required value is missing or too uncertain, or rejects requests for actions a read-only run never performs. |
+| 3. Planning | ARGUS planner (`argus/planner.py`) | Splits the request into subtasks with dependencies and success conditions. Independent subtasks run concurrently; dependent ones wait for accepted reports and receive their inputs from them. |
+| 4. Matching | Ghost API (`ghostapi/`) | Looks up a qualified workflow compatible with the subtask's site, operation and parameters. A match is replayed with strictly bound inputs and no model calls; otherwise the subtask explores. |
+| 5. to 7. Dispatch, monitor, intake | Browser subagents (`Agents/browser_worker`, `Agents/visual`) | Each subtask runs in its own Steel session. The DOM worker reads page structure; the visual worker drives mouse and keyboard from screenshots when a page exposes no usable structure. Workers return records, actions and evidence, never a session. |
+| 8. Reconciling | Moderator (`moderator/`) | Reads every accepted report, reorders, drops or supersedes records, and flags gaps and conflicts. It cannot add or alter a record: each one must equal a record a worker returned. |
+| 9. Validating | Ghost bridge + worker verifier | The worker's own checks plus ARGUS binding checks: records are objects, present or an evidenced empty state, cite an observation from this run, and sit on the target domain. |
+| 10. Synthesizing and publishing | Moderator selects, controller renders | The moderator selects validated records, their order and fields; the controller writes every user-facing line itself. A run never succeeds with a claim no record supports. |
+
+After a validated exploration, Ghost compiles the trace into a candidate skill.
+Qualification replays it in fresh sessions with changed inputs, including one case
+that must return an evidenced empty result; only then is it reusable. A later
+compatible request is served by replay and re-validated against the live page.
+
+The recorded demo runs the same controller and stages on the live runtime, which
+replaces the model interpreter and the workers with a fixed reader for three public
+pages (see "Run the demo" above). The full pipeline with the model interpreter, DOM
+worker, Ghost reuse and the moderator is the connected runtime in the
+[runbook](docs/hackathon/DEMO-RUNBOOK.md); the intended design is in
+[docs/ai/ARCHITECTURE.md](docs/ai/ARCHITECTURE.md).
+
 ## Run the browser worker
 
 Follow [Agents/browser_worker/README.md](Agents/browser_worker/README.md) for setup, the no-key local demo, real GPT/Steel configuration, API requests, tests, and known limitations. The worker's versioned boundary is `SubtaskRequest` / `SubtaskReport` **0.2**; it does not replace the historical provisional ARGUS contract automatically.
