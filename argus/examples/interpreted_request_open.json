@@ -1,0 +1,43 @@
+{
+  "request_id": "request-open-jobs-1",
+  "raw_text": "Find the best 10 software engineering jobs on jobs.example.com",
+  "intents": [
+    {
+      "site_id": "jobs.example.com",
+      "operation": "find_jobs",
+      "parameters": {
+        "query": {
+          "value": "software engineering",
+          "source": "text_span",
+          "confidence": 0.98,
+          "span": [17, 37]
+        }
+      },
+      "confidence": 0.88,
+      "kind": "open",
+      "target_domain": "jobs.example.com",
+      "goal": "Find software engineering jobs",
+      "criteria": [
+        {
+          "text": "best",
+          "kind": "rank",
+          "parameter": null,
+          "span": [9, 13],
+          "confidence": 0.4
+        },
+        {
+          "text": "10",
+          "kind": "limit",
+          "parameter": 10,
+          "span": [14, 16],
+          "confidence": 0.99
+        }
+      ],
+      "expected_record_shape": ["title", "company", "url"]
+    }
+  ],
+  "model": "claude-opus-5",
+  "interpreted_at": "2026-09-12T20:00:00Z",
+  "missing_required": [],
+  "ambiguities": ["The ranking criterion 'best' is underspecified."]
+}

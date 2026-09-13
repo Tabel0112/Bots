@@ -223,5 +223,8 @@ __marimo__/
 workers/visual/runs/
 *.gguf
 
+# ARGUS local run store
+argus-runs/
+
 # moderator run artifacts
 moderator/runs/

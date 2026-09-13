@@ -1,0 +1,32 @@
+{
+  "request_id": "request-open-jobs-salary",
+  "raw_text": "Find the highest salary 10 software engineering jobs, remote only, on jobs.example.com",
+  "intents": [
+    {
+      "site_id": "jobs.example.com",
+      "operation": "find_jobs",
+      "parameters": {
+        "query": {
+          "value": "software engineering",
+          "source": "text_span",
+          "confidence": 0.98,
+          "span": [27, 47]
+        }
+      },
+      "confidence": 0.98,
+      "kind": "open",
+      "target_domain": "jobs.example.com",
+      "goal": "Find software engineering jobs ranked by highest salary",
+      "criteria": [
+        {"text": "highest salary", "kind": "rank", "parameter": "salary", "span": [9, 23], "confidence": 0.99},
+        {"text": "10", "kind": "limit", "parameter": 10, "span": [24, 26], "confidence": 0.99},
+        {"text": "remote only", "kind": "filter", "parameter": "remote", "span": [54, 65], "confidence": 0.97}
+      ],
+      "expected_record_shape": ["title", "company", "url", "salary", "remote"]
+    }
+  ],
+  "model": "offline-fixture",
+  "interpreted_at": "2026-09-12T20:00:00Z",
+  "missing_required": [],
+  "ambiguities": []
+}

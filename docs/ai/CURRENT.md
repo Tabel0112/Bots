@@ -1,12 +1,12 @@
 # Current checkpoint
 
-Updated: 2026-09-12 (evening). Phase: **building component frameworks; integration deferred**. Four workstream assignments are confirmed in [TEAM.md](TEAM.md). Each workstream builds its own skeleton, README and evidence now; connecting components waits for the INT checkpoints in TEAM.
+Updated: 2026-09-13. **HTML-1 DOM worker implemented locally; shared integration pending. ARGUS PR #10 includes the structured-publication review correction.** Ghost and visual modules have separate implementation/evidence below. Assignments and handoffs remain in [TEAM.md](TEAM.md).
 
 ## Latest user direction
 
 The user supplied a detailed browser-worker runtime specification and explicitly requested its full implementation. This supersedes the earlier planning-only restriction for Tianqi's HTML-1 workstream. The browser worker handles one structured subtask; ARGUS decomposition/moderation, Ghost qualification, and visual execution remain separate responsibilities.
 
-
+## What exists now
 
 [browser_worker/README.md](../../browser_worker/README.md) is the setup and usage entry point. The new `browser_worker/` module includes:
 
@@ -25,7 +25,9 @@ Work started from `main` at `baf341a`; PR #7 on `codex/browser-worker-steel` is 
 
 PR #7 review checks: **74 DOM tests passed** on Python 3.12.14/Windows (37.72 seconds); Ruff lint/format and whitespace checks passed. The existing Ghost Python suite also passed all 12 tests. Ghost/visual source and Ghost CI remain unchanged against main. DOM test/lint configuration is scoped to its module; a separate Linux CI job was added (remote result pending). Review fixes cover ambient network traffic, model failure-code authority and portable browser setup.
 
+Prior evidence, not rerun for this review: the local demo drove real Chrome through search/extraction/verification/cleanup; a credentialed Steel-only sanity check created a session, connected Playwright, observed `https://example.com/` as `Example Domain`, and released the session in 5.671 seconds. It exposed and fixed a session ID format bug using a canonical UUID. No live GPT call or complete configured Steel task has been verified; the latter needs a reachable configured site instead of the local fixture.
 
+Earlier documentation-only checkpoints and the local synthetic backend experiment are historical. The experiment's 24-test result does not describe this worker and must not be used as its validation. No older `backend/` code was present in the starting checkout.
 
 ## Next handoff
 
@@ -34,14 +36,20 @@ PR #7 review checks: **74 DOM tests passed** on Python 3.12.14/Windows (37.72 se
 3. Configure an OpenAI key and a reachable read-only site for the remaining live GPT + configured Steel task test. The independent Steel lifecycle check is already verified.
 4. Record receiver revisions/results in TEAM; HTML-1 remains Building and INT-1/INT-2 remain unintegrated.
 
-**PR #1 review checkpoint (2026-09-12, evening).** Verified offline: `workers/visual/test_parser.py` passes with the Steel SDK stubbed, the package compiles, and the Hacker News evidence screenshot shows the reported title and points. Not run: the live Steel and UI-TARS scripts (need `STEEL_API_KEY` and a local model server). The PR merged during the review (`eb3095b`), so these are follow-ups requested from Thomas on a branch: bring the TEAM status **Building** to `main` (Thomas set it in `8082c65` on the PR branch three minutes after the merge, so it is stranded there; the example run has no interaction step, so `semantic_target` and `findings` are null); fix the stale README limitation text; add a requirements file and make the parser test importable without the Steel SDK; verify whether Steel click coordinates are in screenshot space while `elementFromPoint` uses viewport pixels (the screenshot includes about 88 px of browser chrome). Deferred to connection time: an interaction-step example, Ghost compilation input, the untested Claude backend. The review comment was posted on PR #1.
+ARGUS PR #10 now includes implementation commit `388764e` on `feat/argus-controller-base`. Contract 0.5 addresses Tianqi's remaining semantic-provenance finding: the moderator returns only an `AnswerSelection` of validated-record indices, field references and fixed-vocabulary notes. The controller rejects invalid selections, derives the records, and renders every user-facing line itself. Any moderator-authored prose is discarded before logging or persistence. Reconciliation may still select, drop, reorder or supersede accepted records, but cannot manufacture data.
 
-**PR #2/#3 review checkpoint (2026-09-12, evening).** Sting's Ghost demo landed on `main` as PR #3 (`4992b2c`, merge `b4c9e76`) after PR #2 was emptied by a force-push and closed; the first commit is kept at `origin/recovered/ghost-api-demo`. Offline on `main`: 12 Python and 5 Node tests pass, 71% branch coverage. The new `.github/workflows/ghost-codecov.yml` runs on every push touching `ghostapi/` and fails at the Codecov upload ("Repository not found"), so `main` and every branch show a red check until the repo is registered with Codecov or the upload is made non-blocking. PR #3 also changed root `AGENTS.md`, `docs/hackathon/CONTRACTS.md`, DECISIONS and this file without prior agreement; the asks are in the GHOST-1 review note in [TEAM.md](TEAM.md).
+The exact hostile phrase `is free and cures cancer`, supplied as moderator prose while citing a real record, is covered by a regression that proves neither string is published or stored. The cleanup also cleared the full Ruff baseline and makes the ARGUS lint job blocking. Checks actually run on the formatted tree before commit: `python3 -m unittest discover -s argus/tests -v` passed **453 tests in 1.249s** (Python 3.13.5); `ruff check argus`, `ruff format --check argus` and `git diff --check` passed. The registry fixture succeeded with controller-rendered lines; the vague open request ended `needs_input` at S4 with no session; the salary chain succeeded with four unique remote records in descending salary order. These are synthetic offline runs. No live model, browser, Steel, VLM, DNS or Ghost check was run. Remote CI for the pushed correction was pending at this checkpoint. Actual behavior and limits are in [argus/README.md](../../argus/README.md) and the newest ARGUS-1 block in [TEAM.md](TEAM.md).
 
-Next: Thomas applies the PR #1 follow-ups on a branch; Sting opens the GHOST-1 follow-up PR (CI green, context files on `main`, shared-file edits settled at INT-1); the other workstreams publish their frameworks the same way (module README, TEAM row, pull request to `main`, no direct pushes, one reviewer before merge). INT-1 in TEAM remains the planning checkpoint before anything is connected: walk through one concrete request and agree component inputs, outputs, evidence, failures and shared session responsibility. Public-site choice, agent framework/model, remaining ownership and precise experiments are open.
+## Visual worker module
+
+`workers/visual/` is merged on main. VLM-1 is Ready to connect, with reported parser, live Steel smoke, grounding calibration and a successful one-step Hacker News run. Preserve its [TEAM evidence](TEAM.md) and [module usage](../../workers/visual/README.md); its ARGUS/Ghost receiver checks remain pending. These are the visual workstream's recorded results, not checks rerun for HTML-1.
+
+## Dashboard UX prototype
+
+`frontend/dist/` contains a dependency-free Mission Control prototype with Paper and Midnight themes. The UX review update synchronizes immutable event snapshots across a decision-oriented execution flow, vertical recorded-only activity, and before/after sample evidence. History stays pinned until Return to live/latest. The flow uses Plan/Execute/Verify stages, an explicit proof decision, and a labeled visual-recovery loop returning to fresh DOM verification. Wide layouts show the fitted primary route; narrower chart space switches to a vertical layout with a fit/readable control. Successful reuse, price-filter failure with visual recovery, browser unavailability with retry, pause/resume, cancellation, and five-result completion are simulated. Runs, Ghost Library, and Evidence have consistent hash navigation; smaller screens use workspace panel tabs. No live service connection is claimed or implemented. This verified revision is deployed as owner-private Sites version 4 at `https://argus-mission-control.sunyihan666.chatgpt.site`. Usage and limitations are in [`frontend/README.md`](../../frontend/README.md).
 
 ## Ghost API local module
 
 `ghostapi/` now contains a simulated workflow registry and interactive flowchart viewer. It demonstrates exact workflow lookup, no-match discovery, SQLite candidate/version/run storage, parameter binding, replay, validation, qualification, and concurrent UI observation while queued work executes. The chart supports pointer dragging, zoom, history navigation, live following, and evidence inspection. The browser/catalog and discovery procedure remain fixtures; this is not evidence of Steel integration or automatic trace compilation.
 
-Focused validation at this checkpoint: 12 Python tests passed and 5 JavaScript tests passed. Coverage reports measured 72% Python coverage and 97.18% line / 91.30% branch coverage for the flowchart module. Root CI and Codecov configuration cover the module. Merged to `main` in `b4c9e76` (PR #3, 2026-09-12 18:50 UTC). The test and coverage figures above are Sting's report at that checkpoint and were not rerun here.
+Focused validation at this checkpoint: 12 Python tests passed and 5 JavaScript tests passed. Coverage reports measured 72% Python coverage and 97.18% line / 91.30% branch coverage for the flowchart module. Root CI and Codecov configuration cover the module. The feature changes are maintained on `feat/ghost-api-interactive-demo`.

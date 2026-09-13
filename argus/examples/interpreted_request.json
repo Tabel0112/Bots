@@ -1,0 +1,41 @@
+{
+  "request_id": "request-demo-1",
+  "raw_text": "Find headphones under $150 in the demo catalog",
+  "intents": [
+    {
+      "site_id": "demo-catalog",
+      "operation": "search_products",
+      "parameters": {
+        "query": {
+          "value": "headphones",
+          "source": "text_span",
+          "confidence": 0.96,
+          "span": [5, 15]
+        },
+        "max_price": {
+          "value": 150,
+          "source": "text_span",
+          "confidence": 0.92,
+          "span": [23, 26]
+        },
+        "max_results": {
+          "value": 5,
+          "source": "default",
+          "confidence": 1.0,
+          "span": null
+        },
+        "currency": {
+          "value": "USD",
+          "source": "default",
+          "confidence": 1.0,
+          "span": null
+        }
+      },
+      "confidence": 0.94
+    }
+  ],
+  "model": "claude-opus-5",
+  "interpreted_at": "2026-09-12T17:00:00Z",
+  "missing_required": [],
+  "ambiguities": []
+}
