@@ -12,7 +12,7 @@ Status: **draft, not agreed**. Written 2026-09-12 for Abel's review. Nothing her
 - Framework first, connections later. Everything below must work with a fake toolbox before Steel is wired in.
 
 
-> **Hardware limit:** at most 4 subagents may run at once. Our machine cannot handle more. `max_concurrency` must stay at or below 4, and the open-world `caps.max_subtasks` must respect it. Look through the docs and change this later if the hardware changes.
+> **Local VLM capacity:** at most 4 VLM executions may run locally at once. For the MVP, each run is capped at 4 concurrent workers because any worker may need vision. Separately, an open plan has at most 4 total subtasks and depth 3. A subtask may open ten results sequentially within its action/time budget. The live shared toolbox must enforce four VLM slots across runs and callers; per-run worker caps alone do not enforce a machine-wide limit. Revisit these separate limits when hardware or scope changes.
 
 ## Components
 
@@ -93,7 +93,7 @@ These are the contract additions ARGUS needs. Field-level shapes are for INT-1 t
 - `WorkerReport` — subtask ID, outcome, records, evidence references, actions with parameter origins, typed failures, returned session handle.
 - `ModeratorDecision` — stage, decision, reason, evidence references, next action.
 
-## Open-world navigation (user direction 2026-09-12, design not yet built)
+## Open-world navigation (user direction 2026-09-12; built offline in phase 1b)
 
 The product must handle any site and any read-only task. The controller, store, moderator boundary and session lifecycle above are unchanged. What changes:
 
@@ -101,7 +101,7 @@ The product must handle any site and any read-only task. The controller, store, 
 | --- | --- | --- |
 | Registry | Closed list; unknown operation is rejected | The set of *qualified* operations. Membership is earned by Ghost qualification, not by editing a file. Still consulted first so qualified skills are reused |
 | Interpreter | Maps text onto registry entries only | Two-tier output: a registry match when one fits, otherwise an open intent: target site or domain (from the text or a resolvable name), goal in plain words, extracted parameters with spans, expected record shape, and the user's ranking or selection criteria as explicit fields ("best" becomes a criterion, never silently dropped) |
-| Gate | Catalog rules G1 to G7 | Catalog rules for registry matches. For open intents, safety rules only: read-only action class, no authentication, no purchases or submissions, target domain resolvable and not on a blocklist, required values present. Clarify when the goal or criteria are ambiguous |
+| Gate | Catalog rules G1 to G7 | Catalog rules for registry matches. For open intents, public targets only; exclude local/private network targets. Public provider documentation is permitted. Clarify ambiguous goals/criteria with concrete example answers. Execution must independently block login, payment and state-changing submissions; mentioning those subjects in a documentation request is not itself a forbidden action |
 | Planner | Deterministic, one subtask per intent, no chains | Model-planned for open intents: subtasks with dependencies, so "search, then open each result" is expressible. Success conditions are written per run by the planner call, then rule-checked for acyclicity and budget. The deterministic path stays for registry matches |
 | Subagent | Preferred tool DOM or vision | Unchanged interface. Explore mode becomes the common case, so the toolbox must return action traces with parameter origins on every run for Ghost compilation |
 | Validation | Operation-specific checks | Generic checks always: every record cites an observation from this run, the query or filter visibly took effect, results present or an explicit empty state, no records outside the target domain. Operation-specific checks only when a qualified skill was used. Completeness is reported as unverified on open runs |
@@ -109,6 +109,18 @@ The product must handle any site and any read-only task. The controller, store, 
 | Ghost | Match, validate, compile | A successful open run compiles to a candidate; qualification promotes it into the registry. This is how the catalog grows |
 
 Consequences to accept: one extra model call per open request for planning; weaker first-contact validation; a bounded blocklist and allowlist policy for domains; a hard cap on chain depth and total subtasks per run so open planning cannot explode budgets.
+
+Approved by Abel after the Phase 0b review: keep four concurrent workers for local VLM capacity and four total open-plan subtasks as a separate MVP budget. Ask what unclear ranking terms mean and preserve explicit criteria. Example clarification: "What should 'best' mean? For example, highest salary, remote-only roles, or closest match to your experience." Example answer: "Highest salary, remote only." Store ranking and filtering separately; examples are suggestions, never selected defaults.
+
+Phase 0b carries target_domain, goal, criteria and expected_record_shape on each Subtask as well as Intent, so the worker and Ghost can consume that context without extra protocol arguments. The planner copies that context from the accepted request and re-checks it; the model owns scheduling only. inputs_from.field="url" collects top-level url values from a findings list in order (or retrieves the value from a findings mapping); "findings" passes the complete findings object. A missing required field fails the dependent task with PRECONDITION_FAILED and cancels its dependents; no silent dropping or transformation.
+
+Public-target enforcement has two parts: offline hostname/IP preflight and live transport checks of DNS results, connected destinations, redirects and subsequent requests. The latter must prevent private-address access and DNS rebinding. Only offline preflight exists in ARGUS so far; live toolbox connection and action enforcement are pending.
+
+### Phase 1b status (2026-09-12, offline)
+
+Built and covered by the offline suite: the interpreter's second tier (open intents with target_domain, goal, criteria and expected record shape, every span verified), gate rules S1 to S5 with the approved ranking clarification, model-planned chains through one `ModelClient` call for scheduling only, `inputs_from` transfer between subtasks, generic open-world validation through a `report_context` keyword on `Ghost.validate`, criteria applied at synthesis, and reconciliation that merges a chain's reports by record url so one job is answered once. Rejections carry their own codes: S2 fails a run with DOMAIN_NOT_ALLOWED, S5 with ACTION_CLASS_NOT_ALLOWED, an over-cap plan with PLAN_TOO_LARGE. Actual behavior, examples and limits are in [argus/README.md](../../argus/README.md).
+
+Not built and not claimed: live DNS/connection/redirect/rebinding and request enforcement, execution-time blocking of login, payment and submissions, shared four-slot VLM arbitration across runs and callers, real Steel sessions, Thomas's moderator in place of the stub, and Sting's verification of the Ghost boundary including the new `report_context` keyword, which he has not seen. No live model call has been made from ARGUS.
 
 ## Open questions for review
 

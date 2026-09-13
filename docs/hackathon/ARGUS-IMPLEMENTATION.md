@@ -5,7 +5,7 @@ Status: plan for Abel's review, written 2026-09-12. Scope is the ARGUS base only
 Decisions this plan assumes (all recorded in [DECISIONS.md](../ai/DECISIONS.md) or [ARGUS.md](ARGUS.md)): Python backend, JSON storage, sequential stages with concurrency only between subagents, ARGUS owns browser sessions, the moderator is Thomas's separate deliverable called through three callables, natural-language interpretation is in the MVP.
 
 
-> **Hardware limit:** at most 4 subagents may run at once. Our machine cannot handle more. `max_concurrency` must stay at or below 4, and the open-world `caps.max_subtasks` must respect it. Look through the docs and change this later if the hardware changes.
+> **Local VLM capacity:** at most 4 VLM executions may run locally at once. Each MVP run therefore permits at most 4 concurrent workers. Separately, open plans permit at most 4 total subtasks and depth 3. One subtask may open ten results sequentially within its budget. The live shared toolbox must arbitrate four VLM slots across runs/callers; the per-run controller cap alone is not machine-wide enforcement.
 
 ## Package layout
 
@@ -251,7 +251,11 @@ Do not commit. Run python3 -m unittest discover -s argus/tests -v and the CLI in
 
 Real Steel sessions, Thomas's moderator, Sting's Ghost adapter, the HTTP API and server-sent events from CONTRACTS, the dashboard, skill qualification and repair, the public site.
 
-## Phase 1b — open-world navigation (planned 2026-09-12, not started)
+## Phase 1b — open-world navigation (0b, E0, E, F and 2b built locally, offline)
+
+> Superseding note (2026-09-12): model calls use OpenAI-compatible APIs, not the Anthropic SDK. The current prompts are in [ARGUS-HANDOFF-1B.md](ARGUS-HANDOFF-1B.md); the Anthropic-SDK wording in the older prompts below is obsolete.
+
+> Status (2026-09-12, after 2b): every prompt in this phase has run. The offline suite is **419 tests, OK** on `feat/argus-controller-base` at `7641f87` plus uncommitted changes. Implemented: interpreter tier two, gate rules S1-S5, the `ModelClient` boundary (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ARGUS_MODEL`), model-planned chains, `inputs_from` transfer, generic open-world validation through the `report_context` keyword, criteria at synthesis, reconciliation that merges a chain's reports by record url, and the CLI's `--plan-fixture` offline planner injection. Behaviour, examples and limits: [argus/README.md](../../argus/README.md); evidence: the ARGUS-1 block in [TEAM.md](../ai/TEAM.md). Still pending and not claimed: live DNS/redirect/rebinding/request enforcement, execution-time action blocking, machine-wide four-slot VLM arbitration, real Steel sessions, Thomas's moderator, and Sting's verification of the Ghost boundary including `report_context`. No live model call has been made.
 
 User direction: the product must navigate any site and any read-only task. Design delta is the "Open-world navigation" section of [ARGUS.md](ARGUS.md). The closed-registry base from phases 0 to 2 stays; this phase widens it. Same working rules as phase 1: one agent per prompt, listed files only, no commits, tests offline.
 
@@ -267,10 +271,10 @@ User direction: the product must navigate any site and any read-only task. Desig
 Add to `argus/contracts.py`, keeping every existing field and fixture valid:
 
 - `Intent` gains `kind` (`"registry"` | `"open"`, default `"registry"`), `target_domain` (nullable, e.g. `"news.ycombinator.com"`), `goal` (nullable plain-language goal), `criteria: list[Criterion]`, `expected_record_shape: list[str]` (field names the user expects, may be empty). `Criterion`: `text`, `kind` (`"rank"` | `"filter"` | `"limit"`), `parameter` (nullable), `span` (nullable), `confidence`.
-- `Subtask` gains `inputs_from: dict[str, {"subtask_id", "field"}]` so a parameter can be filled from a completed dependency's findings, and `kind` (`"registry"` | `"open"`).
-- `Plan` gains `planned_by` (`"deterministic"` | `"model"`) and `caps: {"max_subtasks", "max_depth"}`.
+- `Subtask` gains `inputs_from: dict[str, {"subtask_id", "field"}]` so a parameter can be filled from a completed dependency's findings, and `kind` (`"registry"` | `"open"`). Review correction: also carry `target_domain`, `goal`, `criteria`, `expected_record_shape` with the same optional defaults as Intent, so the worker and Ghost receive the approved context. `field="findings"` passes the full findings; another field collects that top-level field from every record in a list, in order, or retrieves it from a mapping. Missing fields fail; sources must be declared dependencies.
+- `Plan` gains `planned_by` (`"deterministic"` | `"model"`) and `caps: {"max_subtasks", "max_depth"}`, defaulting to `{"max_subtasks": 4, "max_depth": 3}` for the four-subagent hardware ceiling.
 - New error codes: `DOMAIN_NOT_ALLOWED`, `ACTION_CLASS_NOT_ALLOWED`, `PLAN_TOO_LARGE`.
-- `registry.py` gains `DOMAIN_POLICY`: `blocklist` (login pages, payment providers, anything the team lists) and `allow_any_other: bool`, and a helper `domain_allowed(domain) -> (bool, reason)`.
+- `registry.py` gains `DOMAIN_POLICY`: `blocklist` (dedicated login/checkout hosts, not entire providers), `non_public_suffixes`, and `allow_any_other: bool`, plus `domain_allowed(domain) -> (bool, reason)`. Public documentation is permitted; local/private targets and ambiguous numeric IP spellings are rejected. DNS/connection/redirect/request checks and login/payment/submission action prevention belong to the live toolbox and remain mandatory before real open-world use.
 - New fixtures: `interpreted_request_open.json` (jobs example: target domain, goal, ten results, criterion "best" as rank with low confidence), `plan_open_chain.json` (search subtask then a dependent "open each result" subtask with `inputs_from`), `gate_open_accept.json`, `gate_open_reject_domain.json`.
 
 ### Prompt 0b — contract additions (Opus 5, high)
@@ -285,6 +289,10 @@ Do not touch interpreter.py, gate.py, planner.py, controller.py, store.py, fakes
 
 ### Prompt E — interpreter tier two and safety gate (Opus 5, high)
 
+Review checkpoint for E/F: schema constant is `0.3-argus-draft`; old payloads still load through default fields. Criterion confidence/span, context types, inputs_from shapes/declarations and plan caps are validated. Open and mixed plan size is bounded; registry-only total-work behavior remains unchanged. Plan cap shape/size is rechecked by validate_plan; open graph/depth checking remains F's work. Do not let model output raise controller-owned limits.
+
+Phase 0b review evidence: `python3 -m unittest discover -s argus/tests -v` passed 261 tests in 0.751s. After E, E0, F and 2b the same command passes **419 tests in 0.880s** on Python 3.13.5. Work is uncommitted on `feat/argus-controller-base` at `7641f87`; Abel reviews and commits. See the [ARGUS README](../../argus/README.md) and [TEAM checkpoint](../ai/TEAM.md) for the implemented boundary and remaining live integration work.
+
 ```text
 You are widening the ARGUS interpreter and gate for open-world navigation in the repository at /Users/baiyangchen/Developer/Coding/Bots. Read docs/hackathon/ARGUS-IMPLEMENTATION.md ("Phase 0 outcome", "Phase 1 outcome", "Phase 1b"), the "Open-world navigation" section of docs/hackathon/ARGUS.md, then argus/contracts.py, argus/registry.py, argus/interpreter.py, argus/gate.py and their tests. Contracts and registry are read-only for you.
 
@@ -296,7 +304,7 @@ Interpreter:
 - Same refusal handling, span verification and offline test pattern as before. Add tests: open intent with domain; open intent without domain producing an ambiguity; "best 10 jobs" producing a limit criterion 10 and a rank criterion "best" with confidence below 0.6; registry request still preferred over open when both could fit.
 
 Gate:
-- Keep G1 to G7 for kind "registry". For kind "open" apply S-rules in order: S1 target_domain null -> clarify asking for the site; S2 registry.domain_allowed false -> reject DOMAIN_NOT_ALLOWED; S3 goal empty -> clarify; S4 any criterion of kind rank with confidence below 0.6 -> clarify asking what "best" means; S5 the goal mentions logging in, buying, paying, submitting or posting -> reject ACTION_CLASS_NOT_ALLOWED (keyword list in gate.py, documented as a first cut); otherwise accept with rule_id "S0". Tests for every S-rule and for the fixtures gate_open_accept.json and gate_open_reject_domain.json.
+- Keep G1 to G7 for kind "registry". For kind "open" apply S-rules in order: S1 target_domain null -> clarify asking for the site; S2 registry.domain_allowed false -> reject DOMAIN_NOT_ALLOWED; S3 goal empty -> clarify; S4 any criterion of kind rank with confidence below 0.6 -> clarify with concrete example answers: "What should 'best' mean? For example, highest salary, remote-only roles, or closest match to your experience." Preserve explicit answers such as "Highest salary, remote only" as rank + filter criteria, with spans; never choose an example on the user's behalf. S5 reject requests to perform login, payment, purchases or state-changing submissions with ACTION_CLASS_NOT_ALLOWED; permit read-only documentation/research about those topics and ordinary search/filter actions. A word match alone is not a reliable action classifier: clarify uncertainty and treat the gate as preflight, with live action enforcement still required. Otherwise accept with rule_id "S0". Tests cover every S-rule, the two gate fixtures, helpful example answers, preservation of explicit criteria and read-only login/payment documentation requests.
 
 Do not modify contracts.py, registry.py, planner.py, controller.py, fakes.py, store.py or any other file. Do not pip install anything. Do not commit. Run python3 -m unittest discover -s argus/tests -v and report the command, output, files changed, and any contract change you need.
 ```
@@ -309,12 +317,14 @@ You are adding model-planned decomposition with dependent chains to the ARGUS co
 Edit only: argus/planner.py, argus/controller.py, argus/fakes.py, argus/tests/test_planner.py, argus/tests/test_controller.py, argus/tests/test_fakes.py.
 
 Planner:
-- Keep the deterministic path for kind "registry" intents unchanged. Add plan_open(interpreted, plan_id, client=None, model=None) for kind "open" intents: one model call using the official anthropic Python SDK with client.messages.parse and a pydantic plan model (import anthropic lazily; model from ARGUS_MODEL, default "claude-opus-5"; check stop_reason before content; refusal -> ContractError MODEL_REFUSED). The model receives the intent and returns subtasks with depends_on, inputs_from, concurrency_group, success_conditions and preferred_tool. Then rule-check: acyclic, every inputs_from names an earlier subtask and a field in expected_record_shape or "findings", subtask count <= caps.max_subtasks (default 6), depth <= caps.max_depth (default 3), else ContractError PLAN_TOO_LARGE. plan() dispatches by intent kind; a mixed request produces one Plan with planned_by "model".
+- Keep the deterministic path for kind "registry" intents unchanged. Add plan_open(interpreted, plan_id, client=None, model=None) for kind "open" intents: one model call using the official anthropic Python SDK with client.messages.parse and a pydantic plan model (import anthropic lazily; model from ARGUS_MODEL, default "claude-opus-5"; check stop_reason before content; refusal -> ContractError MODEL_REFUSED). The model receives the intent and returns subtasks with depends_on, inputs_from, concurrency_group, success_conditions and preferred_tool. Then rule-check: acyclic, every inputs_from names an earlier subtask and a field in expected_record_shape or "findings", subtask count <= caps.max_subtasks (default 4), depth <= caps.max_depth (default 3), else ContractError PLAN_TOO_LARGE. plan() dispatches by intent kind; a mixed request produces one Plan with planned_by "model".
+- Copy and check each subtask's target_domain, goal, criteria and expected_record_shape against its accepted intent. The target cannot silently change; retain the user's filters/limits/ranking through the chain. Use one subtask to open up to ten results sequentially rather than expanding that into ten workers. Planner cap values are controller-owned, never model-expandable. Check graph depth as node count on the longest dependency path (a single node has depth 1). Treat all subtasks of a mixed plan as part of its four-subtask budget.
 - Tests inject a fake client; cover a search-then-open-each chain, a cycle rejection, a too-large plan, and that registry intents never call the client.
 
 Controller:
 - When a subtask has inputs_from, fill those parameters from the dependency's accepted report findings before building SubtaskInput; if the field is missing, fail that subtask with PRECONDITION_FAILED and cancel its dependents. Findings from a dependency are also passed to the subagent in SubtaskInput.bound_procedure only if mode is reuse; otherwise as parameters only.
-- Everything else (caps, sessions, budgets, terminal result) unchanged. Add tests: a two-step chain where step two's parameter comes from step one's findings; missing field fails honestly; the chain respects max_concurrency.
+- Resolve field="findings" to all findings; a top-level field on a findings list yields an ordered list of values, and on a mapping yields that value. Reject missing fields and preserve list order, including empty lists; the source must be a declared dependency. No arbitrary transformations.
+- Everything else (caps, sessions, budgets, terminal result) unchanged. Enforce the hardware ceiling by rejecting `max_concurrency > 4`. Add tests: a two-step chain where step two's parameter comes from step one's findings; missing field fails honestly; the chain respects max_concurrency and the four-subagent ceiling.
 
 FakeGhost:
 - validate becomes generic when subtask.kind is "open": every record cites an observation from this run, records are non-empty or the report has an explicit empty-state marker, no record url is off the target domain. Operation-specific checks remain for kind "registry". Tests for both.
@@ -343,3 +353,5 @@ Do not commit. Run python3 -m unittest discover -s argus/tests -v and the CLI in
 - Moderator: Thomas implements assess_report, reconcile, synthesize per ARGUS.md; synthesis now also applies user criteria.
 - Ghost: adapter from Sting's demo names to match/validate/compile; CAD vs USD; qualification promoting open runs into the registry.
 - Domain blocklist contents.
+- Shared four-slot local VLM limiter across runs/callers; per-run worker caps do not prevent several controllers from overloading local VLM capacity.
+- Live public-address checks at DNS/connection/redirect/request boundaries and action enforcement for login, payments and state-changing submissions, while allowing read-only docs and ordinary search/filter actions.
