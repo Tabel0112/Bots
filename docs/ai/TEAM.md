@@ -112,7 +112,7 @@ Status meanings: **Planned** = identified; **Researching** = approach under inve
 
 ## INT-1 — agree before connecting components
 
-Read-only connection audit of all three packages against `argus/interfaces.py` (2026-09-12): [ARGUS-CONNECTION-AUDIT.md](../hackathon/ARGUS-CONNECTION-AUDIT.md). Two items need owner changes, not adapters: the visual worker cannot accept an ARGUS-owned session, and Ghost validates in CAD while ARGUS and the DOM worker fix USD. No moderator implementation exists yet.
+Read-only connection audit of all three packages against `argus/interfaces.py` (2026-09-12): [ARGUS-CONNECTION-AUDIT.md](../hackathon/ARGUS-CONNECTION-AUDIT.md). Phase 3 adapter prompts, order and the moderator-boundary question for Thomas: [ARGUS-HANDOFF-3.md](../hackathon/ARGUS-HANDOFF-3.md). Note: the merged `moderator/` module is a run harness (dispatch, monitoring, aggregation, synthesis) and does not implement `argus.interfaces.Moderator`; its synthesis prompt is reused by the P3-MOD adapter. Two items need owner changes, not adapters: the visual worker cannot accept an ARGUS-owned session, and Ghost validates in CAD while ARGUS and the DOM worker fix USD. No moderator implementation exists yet.
 
 Use the [provisional contract](../hackathon/CONTRACTS.md) as a reference. Its existing fake types do not yet settle moderator/subtask or visual-target messages.
 
