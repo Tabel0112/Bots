@@ -39,15 +39,21 @@ for f in "$W" "$MM"; do
   fi
 done
 
-"$LS" -m "models/$W" --mmproj "models/$MM" -ngl "$NGL" -c 8192 \
-  --port "$PORT" --host 127.0.0.1 > "$WORK/server-$LABEL.log" 2>&1 &
-SERVER=$!
-trap 'kill $SERVER 2>/dev/null || true' EXIT
-echo "== loading (tail -f $WORK/server-$LABEL.log) =="
-until curl -sf "http://127.0.0.1:$PORT/health" | grep -q '"status"'; do
-  kill -0 $SERVER 2>/dev/null || { echo "server died:"; tail -30 "$WORK/server-$LABEL.log"; exit 1; }
-  sleep 5
-done
+if curl -sf "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q '"status"'; then
+  echo "== reusing the server already on :$PORT =="
+  SERVER=""
+else
+  "$LS" -m "models/$W" --mmproj "models/$MM" -ngl "$NGL" -c 8192 \
+    --port "$PORT" --host 127.0.0.1 > "$WORK/server-$LABEL.log" 2>&1 &
+  SERVER=$!
+  echo "== loading (tail -f $WORK/server-$LABEL.log) =="
+  until curl -sf "http://127.0.0.1:$PORT/health" | grep -q '"status"'; do
+    kill -0 $SERVER 2>/dev/null || { echo "server died:"; tail -30 "$WORK/server-$LABEL.log"; exit 1; }
+    sleep 5
+  done
+fi
+# Deliberately no kill-on-exit trap: a 72B takes minutes to load, so leave it up for
+# re-runs. Stop it with:  pkill -f 'llama-server.*'"$W"
 
 cd "$WORK"
 python3 "$HERE/zoom_selfdirect_bench.py" --label "$LABEL" --base-url "http://127.0.0.1:$PORT/v1"

@@ -159,14 +159,20 @@ def b64(img):
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def chat(client, base_url, model, parts):
+def user_msg(parts):
     content = []
     for p in parts:
         content.append({"type": "text", "text": p} if isinstance(p, str)
                        else {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64(p)}"}})
+    return {"role": "user", "content": content}
+
+
+def chat(client, base_url, model, messages):
+    """Send the whole conversation. UI-TARS relies on its own action history, so a
+    stateless one-message-per-turn loop makes it repeat the same action forever."""
     r = client.post(f"{base_url}/chat/completions", json={
         "model": model, "temperature": 0.0, "max_tokens": 256,
-        "messages": [{"role": "user", "content": content}],
+        "messages": messages,
     })
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"].strip()
@@ -200,13 +206,15 @@ def main():
                        "The points are rendered in small text.")
         rec = {"title": title, "expected": points, "zoomed": False,
                "action": None, "correct": False, "turns": 0, "path": [], "note": ""}
-        # Let the agent actually run its loop: it may zoom, look, zoom again, then
-        # answer. Stopping at turn 2 measures impatience, not capability.
-        parts = [PROMPT_TEMPLATE.format(instruction=instruction), img]
+        # Run a real agent loop with conversation history. A stateless loop makes
+        # UI-TARS repeat itself forever (observed: zoom->wait->zoom->wait...), because
+        # the model reasons from its own action history.
+        messages = [user_msg([PROMPT_TEMPLATE.format(instruction=instruction), img])]
         try:
             for turn in range(args.max_turns):
                 rec["turns"] = turn + 1
-                reply = chat(client, args.base_url.rstrip("/"), args.model, parts)
+                reply = chat(client, args.base_url.rstrip("/"), args.model, messages)
+                messages.append({"role": "assistant", "content": reply})
                 name, kw = parse_action(reply)
                 rec["path"].append(name)
                 if rec["action"] is None:
@@ -222,15 +230,16 @@ def main():
                     if crop is None:
                         rec["note"] = f"unusable region ({x0},{y0})-({x1},{y1})"
                         break
-                    parts = [PROMPT_TEMPLATE.format(instruction=instruction),
-                             "Magnified view of the region you requested. Coordinates "
-                             "still refer to the full-page screenshot. If you can now read "
-                             "the value, report it with finished().", crop]
+                    messages.append(user_msg([
+                        "Magnified view of the region you requested. Coordinates still "
+                        "refer to the full-page screenshot. Read the value and report it "
+                        "with finished().", crop]))
                 else:
-                    # Any other action is a no-op here; re-show the page and let it retry.
-                    parts = [PROMPT_TEMPLATE.format(instruction=instruction),
-                             f"'{name}' does nothing in this read-only task. Read the value "
-                             "and report it with finished(), zooming first if needed.", img]
+                    # A no-op here. Keep the magnified view in context rather than
+                    # replacing it with the full page, which would restart the cycle.
+                    messages.append(user_msg([
+                        f"'{name}' does nothing in this read-only task. Using the images "
+                        "already shown, report the value with finished()."]))
             rec["note"] = rec["note"] or "->".join(rec["path"])
         except Exception as e:
             rec["note"] = f"ERROR: {type(e).__name__}: {e}"[:90]
