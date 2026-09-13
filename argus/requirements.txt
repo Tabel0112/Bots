@@ -1,0 +1,8 @@
+# ARGUS controller runtime dependencies. The controller, store, gate, registry,
+# contracts and fakes are standard library only; the interpreter and the
+# open-world planner build pydantic output schemas and call an OpenAI-compatible
+# endpoint through the openai package (which depends on pydantic). The test
+# suite needs pydantic even with fake model clients, because the schemas are
+# real. Versions pinned to what was verified on 2026-09-13.
+openai>=2.14,<3
+pydantic>=2.10,<3

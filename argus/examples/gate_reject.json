@@ -1,0 +1,6 @@
+{
+  "decision": "reject",
+  "rule_id": "G2",
+  "reason": "Site 'example-shop' is not configured; the supported sites are demo-catalog.",
+  "questions": []
+}

@@ -1,0 +1,6 @@
+{
+  "decision": "accept",
+  "rule_id": "S0",
+  "reason": "The open intent is read-only, names an allowed target domain and has a specific goal and criteria.",
+  "questions": []
+}

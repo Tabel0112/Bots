@@ -1,0 +1,7 @@
+{
+  "stage": "assess",
+  "decision": "accept",
+  "reason": "Three records carry title, price, currency USD and a demo-catalog url, each below the 150 bound, and the search field shows the query in observation-000.png from this run.",
+  "evidence_refs": ["observation-000.png"],
+  "next_action": null
+}

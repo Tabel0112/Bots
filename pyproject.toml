@@ -17,7 +17,9 @@ dependencies = [
 test = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "httpx>=0.28,<1", "ruff>=0.11,<1"]
 
 [tool.setuptools.packages.find]
-include = ["browser_worker*"]
+include = ["browser_worker*", "argus*"]
+exclude = ["argus.tests*"]
 
 [tool.setuptools.package-data]
 browser_worker = ["*.json", "*.md", "*.txt", "browser/*.js", "demo/*.html", "examples/*.json"]
+argus = ["examples/*.json"]

@@ -1,0 +1,6 @@
+{
+  "decision": "clarify",
+  "rule_id": "G4",
+  "reason": "The operation search_products requires a query and the request did not contain one.",
+  "questions": ["What product should I search the demo catalog for?"]
+}

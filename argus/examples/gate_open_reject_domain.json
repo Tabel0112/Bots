@@ -1,0 +1,6 @@
+{
+  "decision": "reject",
+  "rule_id": "S2",
+  "reason": "Target domain '127.0.0.1' is a local/private network target (DOMAIN_NOT_ALLOWED).",
+  "questions": []
+}
