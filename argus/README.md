@@ -147,6 +147,46 @@ Operation-specific checks are only legitimate when a qualified skill was used,
 which is why the open path has none. `report_context` is a local ARGUS addition
 to the `Ghost.validate` signature and **Sting has not seen it yet**.
 
+## Provenance rules around the moderator
+
+These are controller-side rule checks, not new moderator obligations. The
+moderator is handed copies of the reports and records, so editing what it
+received changes only its own answer.
+
+- **Reconcile (stage 8) may reorder, drop and supersede, never add or alter.**
+  Every record in the returned `findings` must equal, as JSON-normalised data,
+  one of the accepted reports' records, and may appear no more often than it
+  was supplied. A new record (for example one for `evil.invalid` citing
+  `foreign.png`) or a copy with one field changed fails the run with
+  `EXTRACTION_FAILED` naming it (`reconciled record 4 is not one of the accepted
+  reports' records: title='Evil job', url='https://evil.invalid/x'`) before
+  validation runs. `StubModerator`'s merge by `url` passes because the
+  superseding record is itself an accepted record.
+- **Synthesize (stage 10) is bound to this run's evidence.** The accepted
+  evidence set is the references passed to `synthesize` plus every screenshot
+  and verification observation of the accepted reports. Every `evidence_refs`
+  entry of every claim must be in it (a claim citing `foreign-observation.png`,
+  or a plausible-looking `observation-001.png` the run never took, fails the run
+  with `EXTRACTION_FAILED` naming the claim), and every entry of
+  `answer.records` must equal one of the validated records handed to
+  `synthesize` — reordered, filtered or truncated is fine; added, altered or
+  duplicated is not. A run never succeeds with a fabricated claim or record.
+
+## Request identity and report intake
+
+A run has exactly one request identity. `Controller.run(request, request_id)`
+raises `ContractError` (`INVALID_INPUT`) before creating a run when it is given
+an `InterpretedRequest` (or its dict) whose `request_id` differs from the
+argument; an interpreter or planner that returns another ID fails the run with
+the same code. Every `SubtaskInput` carries `request_id` (new in
+`0.4-argus-draft`, default `None` so older payloads load), and intake accepts a
+`WorkerReport` only if its `request_id` is the run's, its `subtask_id` is the
+one dispatched, and its `session_handle` is `None` or the lent handle. Anything
+else fails the schema check with `EXTRACTION_FAILED`; a foreign handle is never
+adopted for verification or cleanup, never closed and never written to an
+event. After a run, the store index, `interpreted.request_id`,
+`plan.request_id` and every `report.request_id` are the same value.
+
 ## The model client
 
 `argus/model_client.py` is the only place in `argus` that touches a vendor SDK.
@@ -171,6 +211,14 @@ every documented run below is offline. The live path is therefore unverified.
 Nothing secret is written to the store: a top-level `session_handle` is stripped
 from every report, snapshot and skill before it reaches disk.
 
+Every store read and write takes one re-entrant lock, so in-process readers of
+`run.json` never race a writer's `os.replace`. `os.replace` is retried on
+`PermissionError` only (up to 50 attempts, 20 ms apart), because on Windows a
+reader that still holds the destination open makes the replacement fail; an
+*external* reader such as a dashboard process can still trigger retries, and
+after the last attempt the write fails loudly with the original
+`PermissionError` and the temporary file is removed.
+
 ## Entry point
 
 ```bash
@@ -188,6 +236,11 @@ asked for.
 `--interpreted FILE` skips stage 1 by reading an `InterpretedRequest` from JSON,
 so a whole run works offline. Without it, stage 1 calls the model.
 
+`--request-id ID` applies to request text only. It is a usage error (exit `2`)
+together with `--interpreted`: the file's own `request_id` is the run's single
+request identity, and the controller refuses to run an interpreted request under
+another ID.
+
 `--plan-fixture FILE` is **explicit offline planner injection** and requires
 `--interpreted`. It reads a `Plan` JSON, wraps it in
 `argus.fakes.FakePlannerClient` and injects it through `Controller(plan=...)`.
@@ -201,7 +254,7 @@ request still calls the planner model.
 
 | File | Stage | Purpose |
 | --- | --- | --- |
-| `contracts.py` | all | The messages between stages (`0.3-argus-draft`), with strict JSON round-trips and the typed error codes. |
+| `contracts.py` | all | The messages between stages (`0.4-argus-draft`), with strict JSON round-trips and the typed error codes. |
 | `interfaces.py` | all | `Toolbox`, `Moderator`, `ProgressObserver`, `Ghost` and `Store` protocols. |
 | `model_client.py` | 1, 3 | The single model boundary: `ModelClient`, `ModelResult`, `OpenAICompatibleClient`. |
 | `registry.py` | 1-3 | Supported sites, operations, parameters, defaults, parameter validation and the open-world `DOMAIN_POLICY`. |
@@ -413,8 +466,9 @@ python3 -m argus --fake --interpreted argus/examples/interpreted_request_open_sa
     --plan-fixture argus/examples/plan_open_chain.json --store /tmp/argus-open-b
 ```
 
-On 2026-09-12, after phase 1b integration, the suite ran **419 tests in 0.880s,
-OK** on Python 3.13.5 (contracts, model client, interpreter and planner with
+On 2026-09-12, after the review fixes (provenance, request identity, budget
+cutoff, store retry), the suite ran **451 tests in 1.155s, OK** on Python 3.13.5
+without `PYTHONUTF8` set (contracts, model client, interpreter and planner with
 injected fake clients, gate, domain policy, controller, store, fakes and the
 end-to-end runs in `tests/test_end_to_end.py`). No test touches the network.
 The three CLI commands above ran with the exit statuses and output shown.
@@ -454,11 +508,16 @@ The three CLI commands above ran with the exit statuses and output shown.
 - `clarify` ends the run; there is no resume after the user answers.
 - A `reconcile` decision of `verify` is recorded in `answer.unverified`, not
   executed. Only intake verification runs, at most once per subtask.
-- `SubtaskInput` carries `run_id` but no `request_id`, so the fake worker fills
-  `WorkerReport.request_id` with the run ID. INT-1 should settle this.
-- Budgets are enforced between calls: a subtask already inside `run_subtask`
-  cannot be interrupted, so a run that breaches `max_seconds` waits for the
-  in-flight worker and then discards its report.
+- **A hung worker thread can outlive the run.** `max_seconds` bounds the run:
+  when the deadline passes with workers still inside `run_subtask`, each running
+  subtask is failed with `BUDGET_EXCEEDED`, its lent session is closed through
+  the toolbox (the transport-level cutoff), the pool is shut down without
+  waiting, and the failed result is written. A report that arrives afterwards
+  is ignored and logged (`late_report_ignored`, kept in memory and on the
+  `argus.controller` logger, never in `events.jsonl` after the terminal event
+  and never stored as the run's report). The thread itself cannot be killed and
+  is joined at interpreter exit, so toolbox adapters must honour
+  `Budget.max_seconds` themselves for a clean stop.
 
 ## Pending live toolbox integration
 

@@ -35,6 +35,39 @@ Nothing that a provider or a worker said verbatim reaches events or results:
 unexpected exceptions become ``EXTRACTION_FAILED`` carrying only the exception
 class name, and session handles are stripped from every report that is
 persisted.
+
+Identity and provenance rules the controller enforces around the moderator and
+the workers (they are controller-side checks, not moderator obligations):
+
+* One request identity.  ``run(request, request_id)`` refuses an interpreted
+  request whose ``request_id`` differs from the argument (``INVALID_INPUT``),
+  the plan must carry the same ID, every ``SubtaskInput`` carries it, and a
+  report is taken through intake only if its ``request_id`` and ``subtask_id``
+  are the ones dispatched and its ``session_handle`` is ``None`` or the lent
+  handle.  A report naming another session is a schema failure; the foreign
+  handle is never adopted and never closed.
+* Reconciliation cannot add or alter.  Each reconciled record must equal, as
+  JSON-normalised data, one of the accepted reports' records; the moderator may
+  reorder, drop and supersede, and any other record fails the run with
+  ``EXTRACTION_FAILED`` naming it.
+* Synthesis is bound to the run's evidence.  Every evidence reference on every
+  claim must be an observation of this run (the references handed to
+  ``synthesize`` plus every screenshot and verification of the accepted
+  reports), and every record in the answer must equal one of the validated
+  records handed to ``synthesize``.  A run never succeeds with a fabricated
+  claim or record.
+
+Wall-clock cutoff: ``max_seconds`` bounds the run, not only the calls between
+stages.  When the deadline passes while workers are still inside
+``run_subtask``, the controller does not wait for them: each running subtask is
+failed with ``BUDGET_EXCEEDED``, its lent session is closed through the toolbox
+(the transport-level cutoff for a hung browser call), the pool is shut down
+without waiting, and the terminal result is written.  A report that arrives
+after that is ignored and logged (``late_report_ignored``), never stored as the
+run's report.  The worker *thread* itself cannot be killed: a hung worker may
+outlive the run and, since pool threads are joined at interpreter exit, delay
+process shutdown.  Toolbox adapters must honour ``Budget.max_seconds``
+themselves for a clean stop.
 """
 
 from __future__ import annotations
@@ -42,9 +75,12 @@ from __future__ import annotations
 import copy
 import dataclasses
 import importlib
+import json
+import logging
 import threading
 import time
 import uuid
+from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -77,6 +113,11 @@ __all__ = [
     "MAX_SUBAGENTS",
     "Controller",
 ]
+
+#: Late reports and session closes after the terminal event go here, since the
+#: run's event stream is closed once the terminal event is written.
+log = logging.getLogger(__name__)
+log.addHandler(logging.NullHandler())
 
 #: Per-run worker ceiling: each worker may need one of four local VLM slots.
 #: The shared live toolbox must also arbitrate VLM capacity across runs.
@@ -185,6 +226,45 @@ def _evidence_of(report: WorkerReport) -> list[str]:
     return refs
 
 
+def _canonical(value: Any) -> str:
+    """One JSON-normalised text per record: key order and container type do
+    not matter, any changed field does.  Non-JSON data falls back to ``repr``."""
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def _label(record: Any) -> str:
+    """How a record is named in a failure message: its title and url when it
+    has them, else the start of its canonical form."""
+    if isinstance(record, dict):
+        parts = [
+            f"{key}={record[key][:80]!r}"
+            for key in ("title", "url")
+            if isinstance(record.get(key), str) and record[key].strip()
+        ]
+        if parts:
+            return ", ".join(parts)
+    return _canonical(record)[:80]
+
+
+def _first_unsupplied(candidates: list[Any], supplied: list[Any]) -> tuple[int, Any] | None:
+    """Index and value of the first candidate that is not one of ``supplied``.
+
+    Compared as JSON-normalised data, as a multiset: a candidate may repeat only
+    as often as it was supplied, so reordering, dropping and truncating pass
+    while adding, altering or duplicating do not.
+    """
+    remaining = Counter(_canonical(record) for record in supplied)
+    for index, record in enumerate(candidates):
+        key = _canonical(record)
+        if remaining[key] <= 0:
+            return index, record
+        remaining[key] -= 1
+    return None
+
+
 def _bound_value(findings: Any, field: str, dependency: str) -> Any:
     """The value one ``inputs_from`` binding reads from a dependency's findings.
 
@@ -255,7 +335,10 @@ class _RunState:
         self.lock = threading.RLock()
         self.cancel_requested = threading.Event()
         self.events: list[Event] = []
-        self.sessions: dict[str, str] = {}  # handle -> subtask_id, in open order
+        self.late_events: list[Event] = []  # after the terminal event; logged, not stored
+        self.sessions: dict[str, str] = {}  # handle -> subtask_id, still open
+        self.sessions_opened = 0
+        self.closing = False  # set once run-end cleanup starts; no session may register after
         self.interpreted: InterpretedRequest | None = None
         self.gate: GateDecision | None = None
         self.plan: Plan | None = None
@@ -266,6 +349,33 @@ class _RunState:
 
     def elapsed(self) -> float:
         return time.monotonic() - self.started
+
+    @property
+    def finished(self) -> bool:
+        return self.result is not None
+
+    def note(self, type: str, message: str, data: dict[str, Any] | None = None) -> Event:
+        """Emit while the stream is open; after the terminal event keep the
+        event in memory and log it.  Nothing may follow the terminal event on
+        disk, but what a worker thread does after the run ended must still be
+        visible somewhere."""
+        with self.lock:
+            if self.result is None:
+                return self.emit(type, message, data)
+            self.sequence += 1
+            event = Event(
+                run_id=self.run_id,
+                sequence=self.sequence,
+                timestamp=_utc_now(),
+                type=type,
+                stage=self.state,
+                message=message,
+                data=dict(data or {}),
+            )
+            self.late_events.append(event)
+        log.warning("run %s: %s after the terminal event: %s %s",
+                    self.run_id, type, message, event.data)
+        return event
 
     def emit(self, type: str, message: str, data: dict[str, Any] | None = None) -> Event:
         with self.lock:
@@ -344,6 +454,7 @@ class _SubtaskState:
     stop_requested: str | None = None
     actions_used: int = 0
     started: float | None = None
+    abandoned: bool = False  # the run stopped waiting for it after a budget breach
 
     @property
     def subtask_id(self) -> str:
@@ -407,6 +518,17 @@ class Controller:
         when a stage raises.  The returned result is also the last snapshot in
         the store.
         """
+        given = None
+        if isinstance(text_or_interpreted, InterpretedRequest):
+            given = text_or_interpreted.request_id
+        elif isinstance(text_or_interpreted, dict):
+            given = text_or_interpreted.get("request_id")
+        if given is not None and given != request_id:
+            raise ContractError(
+                f"interpreted request_id {given!r} differs from the run's request_id "
+                f"{request_id!r}; a run has exactly one request identity",
+                code="INVALID_INPUT",
+            )
         run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
         state = _RunState(run_id, request_id, self.store)
         self._runs[run_id] = state
@@ -481,6 +603,12 @@ class Controller:
         if not isinstance(state.plan, Plan):
             state.plan = Plan.from_dict(state.plan)
         planner.validate_plan(state.plan)
+        if state.plan.request_id != state.request_id:
+            raise ContractError(
+                f"plan request_id {state.plan.request_id!r} is not the run's "
+                f"{state.request_id!r}; a run has exactly one request identity",
+                code="INVALID_INPUT",
+            )
         state.subtasks = {s.subtask_id: _SubtaskState(subtask=s) for s in state.plan.subtasks}
         state.emit("plan_created", f"{len(state.plan.subtasks)} subtask(s)", {
             "plan_id": state.plan.plan_id,
@@ -527,7 +655,9 @@ class Controller:
 
         # 10. synthesize
         state.transition("synthesizing")
-        state.answer = self._stage_synthesize(state, records, evidence, failures, unverified)
+        state.answer = self._stage_synthesize(
+            state, accepted, records, evidence, failures, unverified
+        )
         self._check_run_limits(state)
 
         # 11. publish
@@ -563,6 +693,12 @@ class Controller:
         interpreted = interpret(text_or_interpreted, request_id)
         if not isinstance(interpreted, InterpretedRequest):
             interpreted = InterpretedRequest.from_dict(interpreted)
+        if interpreted.request_id != request_id:
+            raise ContractError(
+                f"interpreter returned request_id {interpreted.request_id!r} for "
+                f"request {request_id!r}; a run has exactly one request identity",
+                code="INVALID_INPUT",
+            )
         return interpreted
 
     def _stage_match(self, state: _RunState) -> None:
@@ -598,7 +734,8 @@ class Controller:
         pending = [st for st in state.subtasks.values()]
         running: dict[Future, _SubtaskState] = {}
         budget_breached = False
-        with ThreadPoolExecutor(max_workers=self.max_concurrency) as pool:
+        pool = ThreadPoolExecutor(max_workers=self.max_concurrency)
+        try:
             while pending or running:
                 if state.cancel_requested.is_set() or budget_breached:
                     reason = "run budget exceeded" if budget_breached else "run cancelled"
@@ -646,11 +783,11 @@ class Controller:
                     state.emit("budget_exceeded", "run exceeded max_seconds", {
                         "max_seconds": self.max_seconds, "elapsed_seconds": round(state.elapsed(), 3),
                     })
-                    # Running subtasks cannot be interrupted; they are waited for
-                    # below and their reports are discarded.
-                    for future, st in running.items():
-                        future.result()
-                        self._discard_after_breach(state, st)
+                    # The run does not wait for a worker that is still inside
+                    # run_subtask: each one is failed now, its session is
+                    # closed, and whatever it returns later is ignored.
+                    for st in running.values():
+                        self._abandon_after_breach(state, st)
                     running = {}
                     continue
                 for future in done:
@@ -663,6 +800,10 @@ class Controller:
                             code="EXTRACTION_FAILED", message="subtask ended without a decision",
                             retryable=False, step_id=st.subtask_id,
                         ))
+        finally:
+            # After a breach the pool is not waited for: waiting on a hung
+            # worker would hold the run open past max_seconds.
+            pool.shutdown(wait=not budget_breached, cancel_futures=True)
         if budget_breached:
             raise _Finished(self._result(state, "failed", error=TypedError(
                 code="BUDGET_EXCEEDED",
@@ -681,6 +822,8 @@ class Controller:
         """
         sid = st.subtask_id
         try:
+            if self._abandoned(state, st):
+                return
             self._observe(state, st, state.emit("subtask_started", sid, {
                 "subtask_id": sid, "mode": st.mode, "preferred_tool": st.subtask.preferred_tool,
             }))
@@ -693,9 +836,17 @@ class Controller:
             if not self._resolve_inputs(state, st):
                 return
             handle = self.toolbox.open_session(st.subtask.site_id)
-            st.handle = handle
             with state.lock:
-                state.sessions[handle] = sid
+                too_late = state.closing or st.abandoned
+                if not too_late:
+                    st.handle = handle
+                    state.sessions[handle] = sid
+                    state.sessions_opened += 1
+            if too_late:
+                # The run stopped waiting for this subtask while the session
+                # was being opened; nothing may run on it.
+                self._close_session(state, handle, sid)
+                return
             state.emit("session_opened", sid, {"subtask_id": sid})
 
             report = self._run_worker(state, st, st.subtask)
@@ -772,28 +923,45 @@ class Controller:
             budget=Budget(max_actions=remaining_actions, max_seconds=remaining_seconds),
             mode=st.mode,
             bound_procedure=st.bound_procedure,
+            request_id=state.request_id,
         )
         try:
             raw = self.toolbox.run_subtask(subtask_input)
         except Exception as exc:  # noqa: BLE001
             self._fail_subtask(state, st, _unexpected(exc, f"{sid} run_subtask", sid))
             return None
+        if self._abandoned(state, st):
+            # The run stopped waiting for this subtask (budget breach) or has
+            # already published: the report is not this run's report.
+            outcome = getattr(raw, "outcome", None)
+            if isinstance(raw, dict):
+                outcome = raw.get("outcome")
+            state.note("late_report_ignored", sid, {
+                "subtask_id": sid, "outcome": outcome if isinstance(outcome, str) else None,
+                "reason": "report arrived after the run stopped waiting for this subtask",
+            })
+            return None
 
-        # schema check
+        # schema check, and the binding to this request and the lent session
         try:
             report = raw if isinstance(raw, WorkerReport) else WorkerReport.from_dict(raw)
             if report.subtask_id != sid:
                 raise ContractError(f"report subtask_id {report.subtask_id!r} is not {sid!r}")
+            if report.request_id != state.request_id:
+                raise ContractError(
+                    f"report request_id {report.request_id!r} is not this run's "
+                    f"{state.request_id!r}"
+                )
+            if report.session_handle is not None and report.session_handle != st.handle:
+                # The foreign handle is named nowhere: not adopted, not closed,
+                # not written to an event.
+                raise ContractError("report returned a session handle that is not the lent one")
         except ContractError as exc:
             self._fail_subtask(state, st, TypedError(
                 code="EXTRACTION_FAILED", message=f"report failed schema check: {exc}",
                 retryable=False, step_id=sid,
             ))
             return None
-        if report.session_handle:
-            with state.lock:
-                state.sessions.setdefault(report.session_handle, sid)
-            st.handle = report.session_handle
         st.report = report
         self.store.save_report(state.run_id, _strip_handle(report))
 
@@ -840,13 +1008,26 @@ class Controller:
         sid = st.subtask_id
         current = st.subtask
         for _ in range(4):
+            if self._abandoned(state, st):
+                state.note("late_report_ignored", sid, {
+                    "subtask_id": sid, "reason": "intake stopped: the run no longer waits for this subtask",
+                })
+                return
             if st.force_verify and not st.verify_used:
                 self._verify(state, st, report, None)
             decision = self._assess(state, st, report)
             if decision is None:
                 return
             if decision.decision == "accept":
-                st.status = _ACCEPTED
+                with state.lock:
+                    accepted = st.status == _RUNNING and not st.abandoned
+                    if accepted:
+                        st.status = _ACCEPTED
+                if not accepted:
+                    state.note("late_report_ignored", sid, {
+                        "subtask_id": sid, "reason": "accepted after the run stopped waiting for it",
+                    })
+                    return
                 state.emit("subtask_accepted", sid, {
                     "subtask_id": sid, "reason": decision.reason,
                     "evidence_refs": list(decision.evidence_refs),
@@ -893,8 +1074,9 @@ class Controller:
         try:
             with state.lock:
                 state.moderator_calls += 1
+            # A copy: the moderator judges the report, it does not edit it.
             decision = self.moderator.assess_report(
-                st.subtask, report, list(st.subtask.success_conditions)
+                st.subtask, copy.deepcopy(report), list(st.subtask.success_conditions)
             )
             if not isinstance(decision, ModeratorDecision):
                 decision = ModeratorDecision.from_dict(decision)
@@ -921,6 +1103,8 @@ class Controller:
         """One read-only verification on the lent session; its result is added
         to the report's evidence so the next assessment can see it."""
         sid = st.subtask_id
+        if self._abandoned(state, st):
+            return
         st.verify_used = True
         st.force_verify = False
         question = None
@@ -961,7 +1145,7 @@ class Controller:
                 return
             st.status = _FAILED
             st.failure = failure
-        state.emit("subtask_failed", f"{st.subtask_id}: {failure.code}", {
+        state.note("subtask_failed", f"{st.subtask_id}: {failure.code}", {
             "subtask_id": st.subtask_id, "error": failure.to_dict(),
         })
 
@@ -978,15 +1162,30 @@ class Controller:
             "subtask_id": st.subtask_id, "reason": reason,
         })
 
-    def _discard_after_breach(self, state: _RunState, st: _SubtaskState) -> None:
-        if st.status == _ACCEPTED:
-            return
+    @staticmethod
+    def _abandoned(state: _RunState, st: _SubtaskState) -> bool:
+        """Whether the run has stopped waiting for this subtask: its report, if
+        one still arrives, is ignored and nothing is stored for it."""
         with state.lock:
-            st.status = _FAILED
-            st.failure = self._budget_error(st, "run exceeded max_seconds")
-        state.emit("subtask_failed", f"{st.subtask_id}: BUDGET_EXCEEDED", {
-            "subtask_id": st.subtask_id, "error": st.failure.to_dict(),
-        })
+            return st.abandoned or state.result is not None
+
+    def _abandon_after_breach(self, state: _RunState, st: _SubtaskState) -> None:
+        """Stop waiting for a subtask the run has no time left for.
+
+        Its thread may still be inside ``run_subtask``.  The subtask is failed
+        with ``BUDGET_EXCEEDED`` (unless it was accepted just before the
+        deadline), its lent session is closed now through the toolbox, which is
+        the transport-level cutoff for a hung browser call, and its report, if
+        it ever arrives, is ignored.
+        """
+        with state.lock:
+            st.abandoned = True
+            handle = st.handle
+            if handle is not None:
+                state.sessions.pop(handle, None)
+        self._fail_subtask(state, st, self._budget_error(st, "run exceeded max_seconds"))
+        if handle is not None:
+            self._close_session(state, handle, st.subtask_id)
 
     def _observe(self, state: _RunState, st: _SubtaskState, event: Event) -> None:
         """Optional live monitoring on selected events only."""
@@ -1019,7 +1218,9 @@ class Controller:
         reports = [st.report for st in accepted if st.report is not None]
         with state.lock:
             state.moderator_calls += 1
-        decision = self.moderator.reconcile(state.plan, reports)
+        # Copies: the accepted reports are the provenance the reconciled
+        # records are checked against below, so the moderator cannot hold them.
+        decision = self.moderator.reconcile(state.plan, [copy.deepcopy(r) for r in reports])
         if not isinstance(decision, ModeratorDecision):
             decision = ModeratorDecision.from_dict(decision)
         if decision.stage != "reconcile":
@@ -1039,6 +1240,17 @@ class Controller:
         action = decision.next_action if isinstance(decision.next_action, dict) else {}
         merged = action.get("findings")
         if isinstance(merged, list):
+            # rule check: reconciliation may reorder, drop and supersede, never
+            # add or alter.  Every reconciled record must be one of the accepted
+            # reports' records, compared as JSON-normalised data.
+            unsupplied = _first_unsupplied(merged, records)
+            if unsupplied is not None:
+                index, record = unsupplied
+                raise ContractError(
+                    f"reconciled record {index} is not one of the accepted reports' "
+                    f"records: {_label(record)}",
+                    code="EXTRACTION_FAILED", evidence_refs=list(decision.evidence_refs),
+                )
             records = list(merged)
         for key in ("gaps", "conflicts"):
             for entry in action.get(key) or []:
@@ -1124,14 +1336,17 @@ class Controller:
         }
 
     def _stage_synthesize(
-        self, state: _RunState, records: list[Any], evidence: list[str],
-        failures: list[TypedError], unverified: list[str],
+        self, state: _RunState, accepted: list[_SubtaskState], records: list[Any],
+        evidence: list[str], failures: list[TypedError], unverified: list[str],
     ) -> FinalAnswer:
         assert state.interpreted is not None and state.validation is not None
         with state.lock:
             state.moderator_calls += 1
+        # Copies: the validated records are the provenance the answer's records
+        # are checked against below, so the moderator cannot alter them in place.
         answer = self.moderator.synthesize(
-            state.interpreted, list(records), dict(state.validation), list(evidence), list(failures)
+            state.interpreted, copy.deepcopy(records), copy.deepcopy(state.validation),
+            list(evidence), list(failures)
         )
         if not isinstance(answer, FinalAnswer):
             answer = FinalAnswer.from_dict(answer)
@@ -1140,6 +1355,33 @@ class Controller:
         if bare:
             raise ContractError(
                 f"{len(bare)} claim(s) carry no evidence reference: {bare[0][:80]!r}",
+                code="EXTRACTION_FAILED", evidence_refs=list(evidence),
+            )
+        # rule check: every claim cites evidence of this run only.  The accepted
+        # set is what synthesize was handed plus every screenshot and
+        # verification of the accepted reports.
+        allowed = set(evidence)
+        for st in accepted:
+            if st.report is not None:
+                allowed.update(_evidence_of(st.report))
+        for index, claim in enumerate(answer.claims):
+            foreign = [
+                ref for ref in claim.evidence_refs
+                if not isinstance(ref, str) or ref not in allowed
+            ]
+            if foreign:
+                raise ContractError(
+                    f"claim {index} cites evidence that is not from this run: "
+                    f"{foreign[0]!r} in claim {claim.text[:80]!r}",
+                    code="EXTRACTION_FAILED", evidence_refs=list(evidence),
+                )
+        # rule check: the answer's records are the validated records, possibly
+        # reordered, filtered or truncated, never added to or altered.
+        unsupplied = _first_unsupplied(answer.records, records)
+        if unsupplied is not None:
+            index, record = unsupplied
+            raise ContractError(
+                f"answer record {index} is not one of the validated records: {_label(record)}",
                 code="EXTRACTION_FAILED", evidence_refs=list(evidence),
             )
         # rule check: failures and gaps stated plainly
@@ -1208,7 +1450,7 @@ class Controller:
             "elapsed_seconds": round(state.elapsed(), 3),
             "browser_action_count": sum(st.actions_used for st in state.subtasks.values()),
             "moderator_calls": state.moderator_calls,
-            "sessions_opened": len(state.sessions),
+            "sessions_opened": state.sessions_opened,
             "subtasks": {sid: st.status for sid, st in state.subtasks.items()},
             "max_actions": self.max_actions,
             "max_seconds": self.max_seconds,
@@ -1233,21 +1475,27 @@ class Controller:
         return self._result(state, "failed", error=error)
 
     def _close_sessions(self, state: _RunState) -> None:
-        """Close every session this run opened.  Runs in ``finally``; never raises."""
+        """Close every session this run still holds.  Runs in ``finally``; never raises."""
         with state.lock:
+            state.closing = True
             handles = list(state.sessions.items())
             state.sessions.clear()
         for handle, sid in handles:
+            self._close_session(state, handle, sid)
+
+    def _close_session(self, state: _RunState, handle: str, sid: str) -> None:
+        """Close one session through the toolbox.  Never raises; the handle
+        itself is named in no event."""
+        try:
+            self.toolbox.close_session(handle)
+            state.note("session_closed", sid, {"subtask_id": sid})
+        except Exception as exc:  # noqa: BLE001
             try:
-                self.toolbox.close_session(handle)
-                state.emit("session_closed", sid, {"subtask_id": sid})
-            except Exception as exc:  # noqa: BLE001
-                try:
-                    state.emit("session_close_failed", f"{sid}: {type(exc).__name__}", {
-                        "subtask_id": sid, "exception": type(exc).__name__,
-                    })
-                except Exception:  # noqa: BLE001 - the store is already failing
-                    pass
+                state.note("session_close_failed", f"{sid}: {type(exc).__name__}", {
+                    "subtask_id": sid, "exception": type(exc).__name__,
+                })
+            except Exception:  # noqa: BLE001 - the store is already failing
+                pass
 
     @staticmethod
     def _import(module: str, name: str) -> Callable[..., Any]:

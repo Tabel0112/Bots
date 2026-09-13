@@ -49,7 +49,7 @@ FIXTURES = {
 
 
 def load(name):
-    return json.loads((EXAMPLES / name).read_text())
+    return json.loads((EXAMPLES / name).read_text(encoding="utf-8"))
 
 
 def assert_payload_preserved(test_case, expected, actual, path="payload"):
@@ -138,7 +138,7 @@ class FixtureTests(unittest.TestCase):
 
 class WorkerReportTests(unittest.TestCase):
     def test_accepts_the_real_visual_worker_report_unchanged(self):
-        payload = json.loads(WORKER_REPORT.read_text())
+        payload = json.loads(WORKER_REPORT.read_text(encoding="utf-8"))
         report = WorkerReport.from_dict(payload)
         self.assertEqual(report.schema_version, "0.1-provisional")
         self.assertEqual(report.worker, "visual")
@@ -150,12 +150,12 @@ class WorkerReportTests(unittest.TestCase):
         self.assertEqual(report.failures, [])
 
     def test_argus_additions_default_when_absent(self):
-        report = WorkerReport.from_dict(json.loads(WORKER_REPORT.read_text()))
+        report = WorkerReport.from_dict(json.loads(WORKER_REPORT.read_text(encoding="utf-8")))
         self.assertIsNone(report.session_handle)
         self.assertEqual(report.typed_failures, [])
 
     def test_argus_additions_round_trip_when_present(self):
-        payload = json.loads(WORKER_REPORT.read_text())
+        payload = json.loads(WORKER_REPORT.read_text(encoding="utf-8"))
         payload["session_handle"] = "session-7"
         payload["typed_failures"] = [
             {
@@ -172,7 +172,7 @@ class WorkerReportTests(unittest.TestCase):
         self.assertEqual(WorkerReport.from_dict(report.to_dict()), report)
 
     def test_typed_failures_are_not_shared_with_the_payload(self):
-        payload = json.loads(WORKER_REPORT.read_text())
+        payload = json.loads(WORKER_REPORT.read_text(encoding="utf-8"))
         report = WorkerReport.from_dict(payload)
         report.evidence["screenshots"].append("observation-001.png")
         self.assertEqual(payload["evidence"]["screenshots"], ["observation-000.png"])
@@ -298,6 +298,20 @@ class ConstructedMessageTests(unittest.TestCase):
                 mode="explore",
             )
         )
+
+    def test_subtask_input_carries_the_request_id_and_defaults_it_to_none(self):
+        subtask = Plan.from_dict(load("plan.json")).subtasks[0]
+        message = SubtaskInput(
+            run_id="run-1", subtask=subtask, session_handle=None,
+            budget=Budget(max_actions=30, max_seconds=120), mode="explore",
+            request_id="request-1",
+        )
+        self._round_trip(message)
+        payload = message.to_dict()
+        self.assertEqual(payload["request_id"], "request-1")
+        # A payload written before the field existed still loads.
+        del payload["request_id"]
+        self.assertIsNone(SubtaskInput.from_dict(payload).request_id)
 
     def test_event_round_trips(self):
         self._round_trip(

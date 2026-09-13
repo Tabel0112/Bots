@@ -354,13 +354,13 @@ class GateTest(unittest.TestCase):
     # -- shipped fixtures --------------------------------------------------- #
 
     def test_example_interpreted_request_is_accepted(self):
-        data = json.loads((EXAMPLES / "interpreted_request.json").read_text())
+        data = json.loads((EXAMPLES / "interpreted_request.json").read_text(encoding="utf-8"))
         decision = gate(InterpretedRequest.from_dict(data))
         self.assertDecision(decision, "accept", "G0")
 
     def test_example_gate_clarify_matches_the_rules(self):
         expected = GateDecision.from_dict(
-            json.loads((EXAMPLES / "gate_clarify.json").read_text())
+            json.loads((EXAMPLES / "gate_clarify.json").read_text(encoding="utf-8"))
         )
         decision = gate(
             interpreted(
@@ -375,7 +375,7 @@ class GateTest(unittest.TestCase):
 
     def test_example_gate_reject_matches_the_rules(self):
         expected = GateDecision.from_dict(
-            json.loads((EXAMPLES / "gate_reject.json").read_text())
+            json.loads((EXAMPLES / "gate_reject.json").read_text(encoding="utf-8"))
         )
         decision = gate(interpreted([good_intent(site_id="example-shop")]))
         self.assertEqual(decision.decision, expected.decision)
@@ -678,25 +678,25 @@ class GateTest(unittest.TestCase):
 
     def test_example_open_salary_request_matches_the_accept_fixture(self):
         expected = GateDecision.from_dict(
-            json.loads((EXAMPLES / "gate_open_accept.json").read_text())
+            json.loads((EXAMPLES / "gate_open_accept.json").read_text(encoding="utf-8"))
         )
-        data = json.loads((EXAMPLES / "interpreted_request_open_salary.json").read_text())
+        data = json.loads((EXAMPLES / "interpreted_request_open_salary.json").read_text(encoding="utf-8"))
         decision = gate(InterpretedRequest.from_dict(data))
         self.assertEqual(decision.decision, expected.decision)
         self.assertEqual(decision.rule_id, expected.rule_id)
         self.assertEqual(decision.questions, expected.questions)
 
     def test_example_open_request_clarifies_on_s4(self):
-        data = json.loads((EXAMPLES / "interpreted_request_open.json").read_text())
+        data = json.loads((EXAMPLES / "interpreted_request_open.json").read_text(encoding="utf-8"))
         decision = gate(InterpretedRequest.from_dict(data))
         self.assertDecision(decision, "clarify", "S4")
         self.assertEqual(decision.questions, [BEST_QUESTION])
 
     def test_example_gate_open_reject_domain_matches_the_rules(self):
         expected = GateDecision.from_dict(
-            json.loads((EXAMPLES / "gate_open_reject_domain.json").read_text())
+            json.loads((EXAMPLES / "gate_open_reject_domain.json").read_text(encoding="utf-8"))
         )
-        data = json.loads((EXAMPLES / "interpreted_request_open_salary.json").read_text())
+        data = json.loads((EXAMPLES / "interpreted_request_open_salary.json").read_text(encoding="utf-8"))
         data["intents"][0]["target_domain"] = "127.0.0.1"
         decision = gate(InterpretedRequest.from_dict(data))
         self.assertEqual(decision.decision, expected.decision)

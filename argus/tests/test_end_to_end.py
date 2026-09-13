@@ -28,10 +28,12 @@ Each dispatching run also asserts what the store holds afterwards: ``run.json``,
 import copy
 import io
 import json
+import os
 import tempfile
 import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 from functools import partial
 from pathlib import Path
 
@@ -318,6 +320,17 @@ class SingleSubtaskSearchTest(EndToEndCase):
         self.assertEqual(names, ["open_session", "run_subtask", "close_session"])
         self.assertEqual(len(self.toolbox.closed_sessions), 1)
 
+    def test_every_stored_id_is_the_request_id(self):
+        stored = self.store.run(self.result.run_id)
+        self.assertEqual(self.store.run_id_for_request("request-demo-1"), self.result.run_id)
+        self.assertEqual(stored["interpreted"]["request_id"], "request-demo-1")
+        self.assertEqual(stored["plan"]["request_id"], "request-demo-1")
+        self.assertEqual([r["request_id"] for r in stored["reports"]], ["request-demo-1"])
+        on_disk = json.loads(
+            (self.store.reports_dir(self.result.run_id) / "subtask-1.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(on_disk["request_id"], "request-demo-1")
+
 
 class CompoundRequestTest(EndToEndCase):
     """Two independent subtasks: they run together and are reconciled."""
@@ -338,6 +351,7 @@ class CompoundRequestTest(EndToEndCase):
     def test_the_reports_are_reconciled_into_one_answer(self):
         self.assertIn("reconciled", self.event_types())
         self.assertIn(("reconcile", ("subtask-1", "subtask-2")), self.moderator.calls)
+        self.assertEqual({r.request_id for r in self.result.reports}, {"request-demo-compound"})
         titles = [record["title"] for record in self.result.answer.records]
         self.assertEqual(
             titles,
@@ -404,7 +418,7 @@ class RetryOtherPathTest(EndToEndCase):
         self.assert_run_is_terminal_and_clean()
         self.assert_store_layout(["subtask-1"])
         stored = json.loads(
-            (self.store.reports_dir(self.result.run_id) / "subtask-1.json").read_text()
+            (self.store.reports_dir(self.result.run_id) / "subtask-1.json").read_text(encoding="utf-8")
         )
         self.assertEqual(stored["outcome"], "succeeded")
 
@@ -727,14 +741,46 @@ class CommandLineTest(unittest.TestCase):
             (Path(self.store_dir) / "runs" / payload["run_id"] / "run.json").is_file()
         )
 
-    def test_request_id_can_be_overridden(self):
-        status, out, _ = self.call(
+    def test_request_id_applies_to_request_text(self):
+        # Text input calls the model at stage 1; with no model named the run
+        # ends PRECONDITION_FAILED before any call, and is still recorded
+        # under the given request ID.
+        env = {k: v for k, v in os.environ.items() if k not in ("ARGUS_MODEL", "OPENAI_API_KEY")}
+        with mock.patch.dict(os.environ, env, clear=True):
+            status, out, _ = self.call(
+                "Find headphones in the demo catalog", "--store", self.store_dir,
+                "--request-id", "request-cli-1",
+            )
+        self.assertEqual(status, EXIT_RUN_NOT_SUCCEEDED)
+        payload = json.loads(out)
+        self.assertEqual(payload["error"]["code"], "PRECONDITION_FAILED")
+        self.assertEqual(JsonStore(self.store_dir).run_id_for_request("request-cli-1"), payload["run_id"])
+
+    def test_request_id_with_interpreted_is_a_usage_error(self):
+        status, out, err = self.call(
             "--interpreted", str(FIXTURE_PATH), "--store", self.store_dir,
             "--request-id", "request-cli-1",
         )
+        self.assertEqual(status, EXIT_USAGE)
+        self.assertEqual(out, "")
+        self.assertIn("--request-id applies to request text only", err)
+        self.assertFalse((Path(self.store_dir) / "runs").exists(), "a run was created")
+
+    def test_the_interpreted_files_request_id_is_the_runs(self):
+        status, out, _ = self.call("--interpreted", str(FIXTURE_PATH), "--store", self.store_dir)
         self.assertEqual(status, EXIT_OK)
-        run_id = json.loads(out)["run_id"]
-        self.assertEqual(JsonStore(self.store_dir).run_id_for_request("request-cli-1"), run_id)
+        payload = json.loads(out)
+        request_id = FIXTURE["request_id"]
+        self.assertEqual(payload["interpreted"]["request_id"], request_id)
+        self.assertEqual(payload["plan"]["request_id"], request_id)
+        self.assertEqual([r["request_id"] for r in payload["reports"]], [request_id])
+        self.assertEqual(JsonStore(self.store_dir).run_id_for_request(request_id), payload["run_id"])
+
+    def test_help_states_the_request_id_rule(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err), self.assertRaises(SystemExit):
+            main(["--help"])
+        self.assertIn("Not allowed with --interpreted", " ".join(out.getvalue().split()))
 
     def test_without_fake_it_says_no_toolbox_is_connected(self):
         status, out, err = self.call("--no-fake", "Find headphones in the demo catalog")

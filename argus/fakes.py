@@ -425,6 +425,10 @@ class FakeToolbox:
     a sequence of them consumed one per call (``None`` for a normal success, and
     success again once the sequence is exhausted) so a retry can be scripted to
     succeed on its second attempt.
+
+    Every report carries ``request_id`` from ``SubtaskInput.request_id`` and
+    ``session_handle`` from ``SubtaskInput.session_handle``, which is what the
+    controller's intake requires of a real worker.
     """
 
     def __init__(self, script: Mapping[str, Any] | None = None) -> None:
@@ -789,7 +793,14 @@ class FakeToolbox:
         data.update(
             worker="fake",
             worker_model="argus.fakes.FakeToolbox",
-            request_id=subtask_input.run_id,
+            # The report echoes the request identity the controller dispatched
+            # with; a payload from before the field existed falls back to the
+            # run ID, which the controller then rejects at intake.
+            request_id=(
+                subtask_input.request_id
+                if subtask_input.request_id is not None
+                else subtask_input.run_id
+            ),
             subtask_id=subtask.subtask_id,
             subtask=self._subtask_text(subtask),
             outcome=outcome,

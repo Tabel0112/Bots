@@ -29,7 +29,7 @@ from argus.contracts import (
 from argus.controller import TERMINAL, Controller
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
-REPORT_FIXTURE = json.loads((EXAMPLES / "worker_report.json").read_text())
+REPORT_FIXTURE = json.loads((EXAMPLES / "worker_report.json").read_text(encoding="utf-8"))
 SECRET = "provider said: quota exhausted for key sk-live-123"
 
 
@@ -96,7 +96,8 @@ def report_for(subtask_input, *, outcome="succeeded", records=None, actions=1,
                typed_failures=(), screenshots=("observation-000.png",)):
     data = json.loads(json.dumps(REPORT_FIXTURE))
     data.update(
-        request_id=subtask_input.run_id, subtask_id=subtask_input.subtask.subtask_id,
+        request_id=subtask_input.request_id or subtask_input.run_id,
+        subtask_id=subtask_input.subtask.subtask_id,
         subtask=subtask_input.subtask.operation, outcome=outcome,
         findings=records if records is not None else [record(1), record(2)],
     )
@@ -940,6 +941,287 @@ class OpenWorldDataFlowTests(ControllerTestCase):
         attempts = [i for i in self.toolbox.inputs if i.subtask.subtask_id == "details"]
         self.assertEqual([a.subtask.preferred_tool for a in attempts], ["dom", "vision"])
         self.assertTrue(all(a.subtask.parameters["result_urls"] == self.URLS for a in attempts))
+
+
+class TamperingModerator(FakeModerator):
+    """Synthesises like :class:`FakeModerator`, then ``tamper(answer)`` edits
+    the answer the way a fabricating moderator would."""
+
+    def __init__(self, tamper, **kwargs):
+        super().__init__(**kwargs)
+        self.tamper = tamper
+
+    def synthesize(self, interpreted, records, validation, evidence, failures):
+        answer = super().synthesize(interpreted, records, validation, evidence, failures)
+        self.tamper(answer)
+        return answer
+
+
+class InjectingModerator(FakeModerator):
+    """Reconciles like :class:`FakeModerator`, then ``inject(findings)`` edits
+    the merged findings list before it is returned."""
+
+    def __init__(self, inject, **kwargs):
+        super().__init__(**kwargs)
+        self.inject = inject
+
+    def reconcile(self, plan, reports):
+        decision = super().reconcile(plan, reports)
+        self.inject(decision.next_action["findings"])
+        return decision
+
+
+class SynthesisProvenanceTests(ControllerTestCase):
+    """Claims cite this run's evidence only; answer records are the validated ones."""
+
+    def assert_failed_for_provenance(self, result, *named):
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error.code, "EXTRACTION_FAILED")
+        for text in named:
+            self.assertIn(text, result.error.message)
+        self.assertEqual(self.ghost.compile_calls, [], "nothing compiled from a fabricated answer")
+        self.assertEqual(self.store.saved_skills, [])
+
+    def test_a_claim_citing_foreign_evidence_fails_the_run(self):
+        def tamper(answer):
+            answer.claims.append(Claim("Item 3 costs 30.0", ["foreign-observation.png"]))
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assert_failed_for_provenance(result, "foreign-observation.png", "Item 3 costs 30.0")
+
+    def test_a_plausible_but_unaccepted_evidence_ref_fails_the_run(self):
+        # observation-001.png follows the worker's numbering, but this run's only
+        # observation is observation-000.png.
+        def tamper(answer):
+            answer.claims[0].evidence_refs = ["observation-001.png"]
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assertEqual(result.validation["evidence"], ["observation-000.png"])
+        self.assert_failed_for_provenance(result, "observation-001.png", "claim 0")
+
+    def test_a_record_not_among_the_validated_records_fails_the_run(self):
+        def tamper(answer):
+            answer.records.append(record(3))
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assert_failed_for_provenance(result, "Item 3", "not one of the validated records")
+
+    def test_an_altered_copy_of_a_validated_record_fails_the_run(self):
+        def tamper(answer):
+            answer.records[0] = dict(answer.records[0], price=1.0)
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assert_failed_for_provenance(result, "Item 1", "answer record 0")
+
+    def test_a_record_altered_in_place_by_the_moderator_fails_the_run(self):
+        # The moderator gets copies, so editing what it was handed alters only
+        # its own answer, which then no longer matches the validated records.
+        def tamper(answer):
+            answer.records[1]["price"] = 999.0
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assert_failed_for_provenance(result, "Item 2")
+
+    def test_a_duplicated_record_counts_as_added(self):
+        def tamper(answer):
+            answer.records.append(answer.records[0])
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assert_failed_for_provenance(result, "answer record 2")
+
+    def test_reordering_filtering_and_truncating_the_records_is_allowed(self):
+        def tamper(answer):
+            answer.records.reverse()
+            del answer.records[1:]
+            answer.claims = [c for c in answer.claims if c.text.startswith("Item 2")]
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual(result.answer.records, [record(2)])
+        self.assertEqual([c.text for c in result.answer.claims], ["Item 2 costs 20.0"])
+        self.assertEqual(len(self.ghost.compile_calls), 1)
+
+
+class ReconcileProvenanceTests(ControllerTestCase):
+    """Reconciled records must each be one of the accepted reports' records."""
+
+    EVIL = {"title": "Evil job", "price": 0.0, "currency": "USD",
+            "url": "https://evil.invalid/x", "source_observation_id": "foreign.png"}
+
+    def run_two(self, inject):
+        self.build(moderator=InjectingModerator(inject), plan=plan_of(subtask("a"), subtask("b")))
+        return self.execute()
+
+    def assert_failed_before_validation(self, result, *named):
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error.code, "EXTRACTION_FAILED")
+        for text in named:
+            self.assertIn(text, result.error.message)
+        self.assertEqual(result.metrics["subtasks"], {"a": "accepted", "b": "accepted"},
+                         "the worker reports themselves were accepted")
+        self.assertIsNone(result.validation, "validation never ran on the injected records")
+        self.assertEqual(self.moderator.synthesize_calls, [])
+        self.assertEqual(self.ghost.validate_calls, [])
+        self.assertEqual(self.ghost.compile_calls, [])
+        stages = [e["message"] for e in self.events if e["type"] == "stage_changed"]
+        self.assertEqual(stages[-1], "reconciling")
+
+    def test_reconcile_cannot_inject_a_record(self):
+        result = self.run_two(lambda findings: findings.append(dict(self.EVIL)))
+        self.assert_failed_before_validation(result, "evil.invalid", "reconciled record 4")
+
+    def test_reconcile_cannot_alter_a_record(self):
+        result = self.run_two(lambda findings: findings.__setitem__(0, dict(findings[0], price=999.0)))
+        self.assert_failed_before_validation(result, "Item 1", "reconciled record 0")
+
+    def test_reconcile_cannot_alter_a_record_in_place(self):
+        # The moderator is handed copies of the reports, so an in-place edit of
+        # a record it received never reaches the accepted reports.
+        def mutate(findings):
+            findings[0]["price"] = 999.0
+        result = self.run_two(mutate)
+        self.assert_failed_before_validation(result, "Item 1")
+        for report in result.reports:
+            self.assertEqual([r["price"] for r in report.findings], [10.0, 20.0])
+
+    def test_reconcile_may_drop_reorder_and_supersede(self):
+        # Keep one record per url: the later report's copy wins, as the stub does.
+        def merge(findings):
+            by_url = {r["url"]: r for r in findings}
+            findings[:] = list(reversed(by_url.values()))
+        result = self.run_two(merge)
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual(len(result.answer.records), 2)
+        self.assertEqual([r["title"] for r in result.answer.records], ["Item 2", "Item 1"])
+
+
+class HungWorkerTests(ControllerTestCase):
+    def test_a_hung_worker_does_not_hold_the_run_past_max_seconds(self):
+        release = threading.Event()
+
+        def hang(inp):
+            release.wait(timeout=10)  # well past max_seconds; the test releases it later
+            return report_for(inp)
+
+        self.build(FakeToolbox(hang), max_seconds=0.2)
+        started = time.monotonic()
+        try:
+            result = self.execute()
+            took = time.monotonic() - started
+            self.assertLess(took, 3.0, "the run waited for the hung worker")
+            self.assertEqual(result.status, "failed")
+            self.assertEqual(result.error.code, "BUDGET_EXCEEDED")
+            self.assertIsNone(result.error.step_id)
+            self.assertEqual(result.metrics["subtasks"], {"subtask-1": "failed"})
+            self.assertEqual(result.metrics["sessions_opened"], 1)
+            self.assertEqual(result.reports, [], "no report from the hung worker")
+            self.assertEqual(self.toolbox.closed, ["session-1"], "the lent session was cut off")
+            types = [e["type"] for e in self.events]
+            self.assertLess(types.index("budget_exceeded"), types.index("subtask_failed"))
+            self.assertLess(types.index("subtask_failed"), types.index("session_closed"))
+            self.assertEqual(self.moderator.assess_calls, [])
+            stored = json.loads(json.dumps(self.store.run(result.run_id)))
+            events_before = list(self.events)
+        finally:
+            release.set()
+
+        # The worker now returns its report, after the run has finished.
+        state = self.controller._runs[result.run_id]
+        deadline = time.monotonic() + 5
+        while not state.late_events and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual([e.type for e in state.late_events], ["late_report_ignored"])
+        self.assertEqual(state.late_events[0].data["subtask_id"], "subtask-1")
+        self.assertEqual(self.store.run(result.run_id), stored, "the stored result changed")
+        self.assertEqual(self.store.reports[result.run_id], {}, "the late report was stored")
+        self.assertEqual(self.store.events(result.run_id), events_before, "an event followed the terminal one")
+        self.assertEqual(self.moderator.assess_calls, [], "the late report reached the moderator")
+        self.assertEqual(self.toolbox.closed, ["session-1"], "closed twice")
+
+
+class RequestIdentityTests(ControllerTestCase):
+    def test_the_run_has_exactly_one_request_identity(self):
+        self.build(plan=plan_of(subtask("a"), subtask("b")))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual(self.store.index, {"request-t": result.run_id})
+        self.assertEqual(result.interpreted.request_id, "request-t")
+        self.assertEqual(result.plan.request_id, "request-t")
+        self.assertEqual([r.request_id for r in result.reports], ["request-t", "request-t"])
+        self.assertEqual({i.request_id for i in self.toolbox.inputs}, {"request-t"})
+        self.assertEqual(
+            {r["request_id"] for r in self.store.reports[result.run_id].values()}, {"request-t"}
+        )
+
+    def test_an_interpreted_request_with_another_id_is_refused_before_a_run_exists(self):
+        self.build()
+        for request in (interpreted(request_id="request-other"),
+                        interpreted(request_id="request-other").to_dict()):
+            with self.subTest(type=type(request).__name__):
+                with self.assertRaises(ContractError) as caught:
+                    self.controller.run(request, "request-t")
+                self.assertEqual(caught.exception.code, "INVALID_INPUT")
+        self.assertEqual(self.store.runs, {}, "a run was created under a disputed identity")
+        self.assertEqual(self.toolbox.inputs, [])
+
+    def test_an_interpreter_returning_another_id_fails_the_run(self):
+        self.build(interpret=lambda text, request_id: interpreted(request_id="request-other"))
+        result = self.execute("find headphones")
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error.code, "INVALID_INPUT")
+        self.assertEqual(self.toolbox.opened, [])
+
+    def test_a_plan_for_another_request_fails_the_run(self):
+        def foreign(_request, plan_id):
+            return Plan(plan_id=plan_id, request_id="request-other", subtasks=[subtask("a")], created_at="t")
+        self.build(plan=foreign)
+        result = self.execute()
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error.code, "INVALID_INPUT")
+        self.assertEqual(self.toolbox.opened, [])
+
+    def test_a_report_with_a_foreign_request_id_fails_intake(self):
+        def behaviour(inp):
+            report = report_for(inp)
+            report.request_id = "request-foreign"
+            return report
+        self.build(FakeToolbox(behaviour))
+        result = self.execute()
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error.code, "EXTRACTION_FAILED")
+        self.assertIn("request_id 'request-foreign'", result.error.message)
+        self.assertEqual(self.moderator.assess_calls, [], "a foreign report reached the moderator")
+        self.assertEqual(result.reports, [])
+        self.assertEqual(self.store.reports[result.run_id], {}, "a foreign report was stored")
+
+    def test_a_report_with_a_foreign_session_handle_fails_intake_and_the_handle_is_never_closed(self):
+        def behaviour(inp):
+            report = report_for(inp)
+            report.session_handle = "session-stolen"
+            return report
+        self.build(FakeToolbox(behaviour))
+        result = self.execute()
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error.code, "EXTRACTION_FAILED")
+        self.assertIn("session handle that is not the lent one", result.error.message)
+        self.assertEqual(self.moderator.assess_calls, [])
+        # FakeToolbox.close_session raises on an unknown handle, so a close of
+        # the foreign handle would show up as session_close_failed.
+        self.assertEqual(self.toolbox.closed, ["session-1"])
+        self.assertFalse(any(e["type"] == "session_close_failed" for e in self.events))
+        self.assertNotIn("session-stolen", json.dumps(self.events) + json.dumps(result.to_dict()))
+        self.assertEqual(self.store.reports[result.run_id], {})
+
+    def test_a_report_returning_no_handle_is_still_bound_to_the_lent_session(self):
+        def behaviour(inp):
+            report = report_for(inp)
+            report.session_handle = None
+            return report
+        self.build(FakeToolbox(behaviour), FakeModerator({"subtask-1": ["verify", "accept"]}))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual(self.toolbox.observe_calls, ["session-1"], "verification used the lent session")
+        self.assertEqual(self.toolbox.closed, ["session-1"])
 
 
 if __name__ == "__main__":

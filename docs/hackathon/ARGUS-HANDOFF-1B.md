@@ -7,7 +7,7 @@ Written 2026-09-12 after Codex ran out of usage mid-phase. Branch `feat/argus-co
 Verified with `python3 -m unittest discover -s argus/tests -v` (261 tests, OK) and `git diff --check` (clean).
 
 **Done and sound (phase 0b):**
-- `contracts.py` at `0.3-argus-draft`: `Criterion`, open fields on `Intent` and `Subtask`, `inputs_from` with declared-dependency check, `Plan.planned_by` and `caps` with the 4/3 ceilings, three new error codes. Old fixtures load through defaults. 
+- `contracts.py` at `0.3-argus-draft`: `Criterion`, open fields on `Intent` and `Subtask`, `inputs_from` with declared-dependency check, `Plan.planned_by` and `caps` with the 4/3 ceilings, three new error codes. Old fixtures load through defaults.
 - `registry.DOMAIN_POLICY` and `domain_allowed()` with a thorough offline test module. Note: `example.com` and `jobs.example.com` are allowed; only the bare `.example` TLD is blocked, so the fixtures are consistent with the policy.
 - Controller rejects `max_concurrency` above 4 and non-integers, with tests.
 - Five new fixtures. `plan_open_chain.json` passes `validate_plan` today.

@@ -13,7 +13,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from argus import store as store_module
 from argus.contracts import ContractError, Event, RunResult, WorkerReport
 from argus.interfaces import Store
 from argus.store import JsonStore
@@ -83,7 +85,7 @@ class CreateAndReadTest(unittest.TestCase):
             self.assertTrue(store.reports_dir("run-1").is_dir())
             self.assertTrue(store.evidence_dir("run-1").is_dir())
             self.assertEqual(
-                json.loads((Path(tmp) / "index.json").read_text()), {"request-1": "run-1"}
+                json.loads((Path(tmp) / "index.json").read_text(encoding="utf-8")), {"request-1": "run-1"}
             )
 
     def test_create_accepts_plain_dict_snapshot(self) -> None:
@@ -141,7 +143,7 @@ class EventTest(unittest.TestCase):
             for sequence in range(3):
                 store.append_event("run-1", _event("run-1", sequence))
 
-            lines = (store.run_dir("run-1") / "events.jsonl").read_text().splitlines()
+            lines = (store.run_dir("run-1") / "events.jsonl").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), 3)
             events = store.events("run-1")
             self.assertEqual([item["sequence"] for item in events], [0, 1, 2])
@@ -210,7 +212,7 @@ class EventTest(unittest.TestCase):
             store.create_run("run-1", "request-1", _snapshot())
             store.append_event("run-1", _event("run-1", 0, message="two\nlines"))
             path = store.run_dir("run-1") / "events.jsonl"
-            self.assertEqual(len(path.read_text().splitlines()), 1)
+            self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 1)
             self.assertEqual(store.events("run-1")[0]["message"], "two\nlines")
 
 
@@ -284,6 +286,113 @@ class AtomicWriteTest(unittest.TestCase):
             )
 
 
+def _leftovers(root: str) -> list[str]:
+    return [
+        str(path) for path in Path(root).rglob("*")
+        if path.name.endswith(".tmp") or path.name.startswith(".")
+    ]
+
+
+class ReplaceRetryTest(unittest.TestCase):
+    """``os.replace`` is retried on ``PermissionError`` (a reader holding the
+    file open on Windows) and gives up loudly after the last attempt."""
+
+    def test_replace_is_retried_on_permission_error(self) -> None:
+        real_replace = os.replace
+        attempts: list[str] = []
+
+        def flaky(src, dst):
+            attempts.append(str(dst))
+            if len(attempts) <= 2:
+                raise PermissionError(32, "The process cannot access the file")
+            return real_replace(src, dst)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JsonStore(tmp)
+            with mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0), \
+                    mock.patch("os.replace", side_effect=flaky):
+                store.create_run("run-1", "request-1", _snapshot())
+            # run.json took three attempts, index.json one.
+            self.assertEqual(len(attempts), 4)
+            self.assertTrue(attempts[0].endswith("run.json"))
+            self.assertEqual(store.run("run-1")["status"], "succeeded")
+            self.assertEqual(store.run_id_for_request("request-1"), "run-1")
+            self.assertEqual(_leftovers(tmp), [])
+
+    def test_replace_gives_up_after_the_last_attempt_with_the_original_error(self) -> None:
+        attempts: list[str] = []
+
+        def stuck(src, dst):
+            attempts.append(str(dst))
+            raise PermissionError(32, "The process cannot access the file")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JsonStore(tmp)
+            with mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0), \
+                    mock.patch("os.replace", side_effect=stuck):
+                with self.assertRaises(PermissionError) as caught:
+                    store.create_run("run-1", "request-1", _snapshot())
+            self.assertEqual(len(attempts), store_module._REPLACE_ATTEMPTS)
+            self.assertEqual(store_module._REPLACE_ATTEMPTS, 50)
+            self.assertEqual(caught.exception.errno, 32)
+            self.assertEqual(_leftovers(tmp), [], "the temporary file was left behind")
+            with self.assertRaises(KeyError):
+                store.run("run-1")
+
+    def test_other_errors_are_not_retried(self) -> None:
+        attempts: list[str] = []
+
+        def full(src, dst):
+            attempts.append(str(dst))
+            raise OSError(28, "No space left on device")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JsonStore(tmp)
+            with mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0), \
+                    mock.patch("os.replace", side_effect=full):
+                with self.assertRaises(OSError) as caught:
+                    store.create_run("run-1", "request-1", _snapshot())
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual(caught.exception.errno, 28)
+            self.assertEqual(_leftovers(tmp), [])
+
+
+class LockTest(unittest.TestCase):
+    """In-process readers and writers of the same path share the store's lock."""
+
+    def test_a_snapshot_read_waits_for_the_lock_a_writer_holds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JsonStore(tmp)
+            store.create_run("run-1", "request-1", _snapshot())
+            seen: list[str] = []
+            finished = threading.Event()
+
+            def reader() -> None:
+                seen.append(store.run("run-1")["status"])
+                finished.set()
+
+            store._lock.acquire()  # what a writer holds during _write_atomic
+            try:
+                thread = threading.Thread(target=reader)
+                thread.start()
+                self.assertFalse(finished.wait(0.2), "the read did not wait for the writer")
+                self.assertEqual(seen, [])
+            finally:
+                store._lock.release()
+            self.assertTrue(finished.wait(5))
+            thread.join(5)
+            self.assertEqual(seen, ["succeeded"])
+
+    def test_the_lock_is_reentrant_for_index_updates(self) -> None:
+        # create_run writes index.json while holding the lock, through the
+        # same locked _write_json; a plain Lock would deadlock here.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JsonStore(tmp)
+            store.create_run("run-1", "request-1", _snapshot())
+            store.create_run("run-2", "request-2", _snapshot("run-2"))
+            self.assertEqual(store.run_id_for_request("request-2"), "run-2")
+
+
 class ReportTest(unittest.TestCase):
     def test_session_handle_is_stripped_from_a_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -293,7 +402,7 @@ class ReportTest(unittest.TestCase):
             store.save_report("run-1", report)
 
             path = store.reports_dir("run-1") / "subtask-1.json"
-            raw = path.read_text()
+            raw = path.read_text(encoding="utf-8")
             self.assertNotIn("session_handle", raw)
             self.assertNotIn("steel-session-secret", raw)
             stored = json.loads(raw)
@@ -311,7 +420,7 @@ class ReportTest(unittest.TestCase):
             payload = _report().to_dict()
             payload["session_handle"] = "steel-session-secret"
             store.save_report("run-1", payload)
-            stored = json.loads((store.reports_dir("run-1") / "subtask-1.json").read_text())
+            stored = json.loads((store.reports_dir("run-1") / "subtask-1.json").read_text(encoding="utf-8"))
             self.assertNotIn("session_handle", stored)
             # The caller's dict is not mutated.
             self.assertEqual(payload["session_handle"], "steel-session-secret")
@@ -325,7 +434,7 @@ class ReportTest(unittest.TestCase):
                 reports=[_report(session_handle="steel-session-secret")],
             )
             store.create_run("run-1", "request-1", snapshot)
-            raw = (store.run_dir("run-1") / "run.json").read_text()
+            raw = (store.run_dir("run-1") / "run.json").read_text(encoding="utf-8")
             self.assertNotIn("steel-session-secret", raw)
             self.assertNotIn("session_handle", raw)
             self.assertEqual(len(store.run("run-1")["reports"]), 1)
@@ -348,7 +457,7 @@ class ReportTest(unittest.TestCase):
                 sorted(os.listdir(store.reports_dir("run-1"))),
                 ["subtask-1.json", "subtask-2.json"],
             )
-            stored = json.loads((store.reports_dir("run-1") / "subtask-1.json").read_text())
+            stored = json.loads((store.reports_dir("run-1") / "subtask-1.json").read_text(encoding="utf-8"))
             self.assertEqual(stored["outcome"], "failed")
 
 
@@ -428,7 +537,7 @@ class SkillTest(unittest.TestCase):
             store.save_skill(
                 {"skill_id": "search-demo", "version": 1, "session_handle": "steel-secret"}
             )
-            raw = (store.skills_dir / "search-demo" / "v1.json").read_text()
+            raw = (store.skills_dir / "search-demo" / "v1.json").read_text(encoding="utf-8")
             self.assertNotIn("steel-secret", raw)
             self.assertEqual(store.skills(), [{"skill_id": "search-demo", "version": 1}])
 

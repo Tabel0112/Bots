@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / "argus" / "examples"
 ORIGIN = "https://demo-catalog.invalid"
 DOMAIN = "jobs.example.com"
-CHAIN = json.loads((EXAMPLES / "plan_open_chain.json").read_text())
+CHAIN = json.loads((EXAMPLES / "plan_open_chain.json").read_text(encoding="utf-8"))
 STEP_FIELDS = {
     "subtask_id", "intent_index", "operation", "depends_on", "inputs_from",
     "concurrency_group", "success_conditions", "preferred_tool",
@@ -144,7 +144,7 @@ def run(toolbox, task=None, *, run_id="run-1"):
 
 
 def interpreted():
-    data = json.loads((EXAMPLES / "interpreted_request.json").read_text())
+    data = json.loads((EXAMPLES / "interpreted_request.json").read_text(encoding="utf-8"))
     return InterpretedRequest.from_dict(data)
 
 
@@ -242,7 +242,7 @@ class SuccessfulReportTests(unittest.TestCase):
 
     def test_the_report_is_a_complete_worker_report(self):
         self.assertIsInstance(self.report, WorkerReport)
-        fixture_fields = set(json.loads((EXAMPLES / "worker_report.json").read_text()))
+        fixture_fields = set(json.loads((EXAMPLES / "worker_report.json").read_text(encoding="utf-8")))
         self.assertEqual(len(fixture_fields), 13)
         payload = self.report.to_dict()
         self.assertTrue(fixture_fields <= set(payload))
@@ -250,9 +250,21 @@ class SuccessfulReportTests(unittest.TestCase):
 
     def test_the_ids_are_the_subtasks(self):
         self.assertEqual(self.report.subtask_id, "subtask-1")
+        # No request_id on the input (a pre-0.4 payload): the run ID stands in.
         self.assertEqual(self.report.request_id, "run-1")
         self.assertEqual(self.report.session_handle, "fake-session-1")
         self.assertEqual(self.report.worker, "fake")
+
+    def test_the_report_echoes_the_dispatched_request_id_and_the_lent_handle(self):
+        task = subtask()
+        handle = self.toolbox.open_session(task.site_id)
+        report = self.toolbox.run_subtask(SubtaskInput(
+            run_id="run-1", subtask=task, session_handle=handle,
+            budget=Budget(max_actions=30, max_seconds=120.0), mode="explore",
+            request_id="request-9",
+        ))
+        self.assertEqual(report.request_id, "request-9")
+        self.assertEqual(report.session_handle, handle)
 
     def test_findings_are_filtered_by_query_and_max_price(self):
         titles = [record["title"] for record in self.report.findings]

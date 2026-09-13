@@ -69,7 +69,7 @@ __all__ = [
 ]
 
 #: Version of the message shapes in this module.  Bump it when a field changes.
-SCHEMA_VERSION = "0.3-argus-draft"
+SCHEMA_VERSION = "0.4-argus-draft"
 
 #: Local VLM capacity and the separate MVP open-plan size budget.
 MAX_CONCURRENT_WORKERS = 4
@@ -527,6 +527,11 @@ class SubtaskInput(Message):
     The session is lent by the controller; the subagent never opens or closes
     one.  ``mode`` is ``reuse`` only when Ghost matched a qualified skill, in
     which case ``bound_procedure`` carries it.
+
+    ``request_id`` is the run's single request identity.  The controller always
+    sets it, and the worker must echo it in ``WorkerReport.request_id``: a report
+    carrying another request's ID fails intake.  It defaults to ``None`` only so
+    that payloads written before the field existed still load.
     """
 
     run_id: str
@@ -535,6 +540,7 @@ class SubtaskInput(Message):
     budget: Budget
     mode: str
     bound_procedure: dict[str, Any] | None = None
+    request_id: str | None = None
 
     _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {
         "subtask": ("one", Subtask),

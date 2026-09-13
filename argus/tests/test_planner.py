@@ -22,7 +22,7 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
 def load(name):
-    return json.loads((EXAMPLES / name).read_text())
+    return json.loads((EXAMPLES / name).read_text(encoding="utf-8"))
 
 
 CHAIN = load("plan_open_chain.json")

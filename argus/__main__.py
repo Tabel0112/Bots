@@ -19,7 +19,11 @@ pretending: no real toolbox, moderator or Ghost is connected yet (phase 3).
 
 ``--interpreted FILE`` skips stage 1 and reads an
 :class:`~argus.contracts.InterpretedRequest` from JSON, so the whole path from
-gate to published result runs offline.  Without it, stage 1 calls a model
+gate to published result runs offline.  The file's own ``request_id`` is the
+run's request identity, so ``--request-id`` is refused alongside it (usage
+error): a run has exactly one request ID and the controller rejects an
+interpreted request whose ID differs from the one it is run under.
+``--request-id`` applies to request text only.  Without ``--interpreted``, stage 1 calls a model
 through :mod:`argus.model_client`, which needs the ``openai`` package installed,
 ``ARGUS_MODEL`` naming the model and the SDK's own ``OPENAI_API_KEY`` (plus
 ``OPENAI_BASE_URL`` for a self-hosted endpoint).  A missing package or model
@@ -117,7 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--request-id",
         metavar="ID",
-        help="request ID to record (default: the interpreted request's, else a fresh one)",
+        help=(
+            "request ID to record for request text (default: a fresh one). Not "
+            "allowed with --interpreted: the file's own request_id is the run's "
+            "single request identity."
+        ),
     )
     parser.add_argument(
         "--interpreted",
@@ -187,11 +195,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.plan_fixture and not args.interpreted:
         print("--plan-fixture requires --interpreted FILE for an explicit offline run.", file=sys.stderr)
         return EXIT_USAGE
+    if args.request_id and args.interpreted:
+        print(
+            "--request-id applies to request text only: an --interpreted FILE "
+            "carries its own request_id, and a run has exactly one request identity.",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
 
     request: Any
     if args.interpreted:
         request = _load_interpreted(args.interpreted)
-        request_id = args.request_id or request.request_id
+        request_id = request.request_id
     else:
         request = args.text
         request_id = args.request_id or f"request-{uuid.uuid4().hex[:8]}"

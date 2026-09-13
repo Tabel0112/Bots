@@ -19,9 +19,19 @@ Durability rules, all enforced here rather than by callers:
 * Every whole-file write goes to a temporary file in the *same* directory and is
   then moved into place with :func:`os.replace`, so a reader either sees the
   previous file or the new one, never a half-written one.
-* A single :class:`threading.Lock` serialises ``index.json`` updates and
-  ``events.jsonl`` appends, which are the only writes two threads can race on
-  (the dispatcher runs subtasks concurrently, and each one emits events).
+* A single re-entrant lock serialises every read and write the store makes:
+  ``index.json`` updates, ``events.jsonl`` appends and reads, and the whole-file
+  reads and writes of ``run.json``, reports and skills.  The dispatcher runs
+  subtasks concurrently and each one emits events and reports, and an
+  in-process reader of ``run.json`` (a test, a dashboard thread) must never
+  hold the destination open while :func:`os.replace` runs, because on Windows
+  that raises :class:`PermissionError`.
+* :func:`os.replace` is retried, only on :class:`PermissionError`, up to
+  ``_REPLACE_ATTEMPTS`` times with a short sleep between attempts.  The lock
+  keeps in-process readers out of that window; an *external* reader on
+  Windows, such as a dashboard process holding ``run.json`` open, can still
+  make a write retry.  After the last attempt the write fails loudly with the
+  original :class:`PermissionError` and the temporary file is removed.
 * Reads of an unknown run raise :class:`KeyError` naming the run and the root,
   rather than leaking a path-not-found from deeper down.
 * Nothing secret is stored: a top-level ``session_handle`` is stripped from
@@ -40,6 +50,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -51,6 +62,11 @@ __all__ = ["JsonStore", "SESSION_HANDLE_KEY"]
 SESSION_HANDLE_KEY = "session_handle"
 
 _FORBIDDEN_SEGMENTS = {"", ".", ".."}
+
+#: How often :func:`os.replace` is retried on ``PermissionError`` (a reader
+#: holding the destination open on Windows), and the pause between attempts.
+_REPLACE_ATTEMPTS = 50
+_REPLACE_DELAY_SECONDS = 0.02
 
 
 def _segment(kind: str, value: Any) -> str:
@@ -101,7 +117,7 @@ class JsonStore:
 
     def __init__(self, root_dir: str | os.PathLike[str]) -> None:
         self.root = Path(root_dir)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
@@ -146,7 +162,25 @@ class JsonStore:
     # ------------------------------------------------------------- primitives
 
     @staticmethod
-    def _write_atomic(path: Path, text: str) -> None:
+    def _replace(tmp_name: str, path: Path) -> None:
+        """``os.replace`` with a bounded retry on ``PermissionError`` only.
+
+        On Windows a reader that still has ``path`` open makes the replacement
+        fail with ``PermissionError``; the reader usually lets go within
+        milliseconds, so the move is retried ``_REPLACE_ATTEMPTS`` times.  Any
+        other error, and the last ``PermissionError``, propagate unchanged.
+        """
+        for attempt in range(1, _REPLACE_ATTEMPTS + 1):
+            try:
+                os.replace(tmp_name, path)
+                return
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS:
+                    raise
+                time.sleep(_REPLACE_DELAY_SECONDS)
+
+    @classmethod
+    def _write_atomic(cls, path: Path, text: str) -> None:
         """Write ``text`` to ``path`` as one indivisible replacement."""
         path.parent.mkdir(parents=True, exist_ok=True)
         handle_fd, tmp_name = tempfile.mkstemp(
@@ -157,18 +191,20 @@ class JsonStore:
                 handle.write(text)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(tmp_name, path)
+            cls._replace(tmp_name, path)
         except BaseException:
             Path(tmp_name).unlink(missing_ok=True)
             raise
 
     def _write_json(self, path: Path, payload: Any) -> None:
-        self._write_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+        with self._lock:
+            self._write_atomic(path, text)
 
-    @staticmethod
-    def _read_json(path: Path) -> dict[str, Any]:
-        with path.open(encoding="utf-8") as handle:
-            return json.load(handle)
+    def _read_json(self, path: Path) -> dict[str, Any]:
+        with self._lock:
+            with path.open(encoding="utf-8") as handle:
+                return json.load(handle)
 
     @staticmethod
     def _scrub(data: dict[str, Any]) -> dict[str, Any]:
@@ -271,7 +307,8 @@ class JsonStore:
         os.close(handle_fd)
         try:
             shutil.copyfile(source, tmp_name)
-            os.replace(tmp_name, target)
+            with self._lock:
+                self._replace(tmp_name, target)
         except BaseException:
             Path(tmp_name).unlink(missing_ok=True)
             raise
@@ -333,10 +370,11 @@ class JsonStore:
         if not self.run_dir(run_id).is_dir():
             raise KeyError(f"no run {run_id!r} under {self.runs_dir}")
         path = self._events_path(run_id)
-        if not path.exists():
-            return []
-        with path.open(encoding="utf-8") as handle:
-            return [json.loads(line) for line in handle if line.strip()]
+        with self._lock:
+            if not path.exists():
+                return []
+            with path.open(encoding="utf-8") as handle:
+                return [json.loads(line) for line in handle if line.strip()]
 
     def run_id_for_request(self, request_id: str) -> str | None:
         """The run recorded for this request, or ``None`` if there is none."""
