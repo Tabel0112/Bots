@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,11 @@ def _now():
 
 class LiveSteelToolbox(FakeToolbox):
     """ARGUS Toolbox that visits real public pages in worker-owned Steel sessions."""
+
+    #: Public pages are visited one at a time: the Steel plan behind the demo
+    #: allows a single live session, so concurrent subtasks queue for the browser
+    #: instead of failing when the second session is refused.
+    _browser = threading.Lock()
 
     def __init__(self):
         super().__init__()
@@ -52,7 +58,8 @@ class LiveSteelToolbox(FakeToolbox):
                 )
             )
         try:
-            return asyncio.run(self._browse(subtask_input))
+            with self._browser:
+                return asyncio.run(self._browse(subtask_input))
         except Exception as exc:  # noqa: BLE001 - any browser failure becomes a typed failed report
             return self._failed_report(subtask_input, type(exc).__name__)
 
