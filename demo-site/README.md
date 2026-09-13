@@ -7,3 +7,26 @@ Proposed scope: one read-only product search with query and maximum price. Agree
 Plan v1 and v2 with the same semantic data and one deliberate supported control-target change. The old procedure should first fail observably on v2, then a semantically equivalent target can be proposed and the new candidate version qualified. Include one unsupported change state to test honest failure/fallback. No accounts or submissions.
 
 An eventual integration needs URLs, start command, version switch, truth data, fixed inputs and expected outputs. See [evaluation scenarios](../docs/hackathon/EVALUATION.md). The controlled site requires its own learned skill; public-site skill transfer is not assumed.
+
+## Hosted controlled catalog (2026-09-13)
+
+The controlled catalog `Agents/browser_worker/demo/catalog.html` is published
+unchanged from the public repository `Tabel0112/Bots-Hosting` at
+`https://tabel0112.github.io/Bots-Hosting/catalog.html` (the path is
+case-sensitive; the lowercase spelling lands on an unrelated 404 page).
+
+`sites.hosted.json` in this folder is the worker site config for that address:
+same selectors, controls, schemas and checks as the bundled `demo-catalog`, with
+`start_url`, `allowed_domains` and `allowed_url_patterns` pointing at the host.
+Product links on the page are root-relative (`/products/<id>`), so on GitHub Pages
+they resolve to `https://tabel0112.github.io/products/<id>`; the patterns allow
+that. Use it with `WORKER_SITES_FILE=demo-site/sites.hosted.json` and
+`WORKER_BROWSER=steel`.
+
+Status: verified on 2026-09-13 — connected Mission Control runs on this hosted
+catalog succeeded on Steel: exploration with candidate saved (run-5b5d9ce59c),
+qualification (three replays, 0 model calls) and reuse (run-f4ba558e00, 0 worker
+model calls). Known Steel quirk: replaying the "50 USD" price option fails its
+expected state; use 100/150/200 in Steel demos until fixed. The Steel account allows one
+concurrent session; a session left live by an earlier run blocks the next one, so
+release stale sessions before a demo. No two-UI-version site exists yet.

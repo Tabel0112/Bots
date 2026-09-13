@@ -397,6 +397,30 @@ def _outcome_failure(report: SubtaskReport, subtask_id: str) -> TypedError | Non
     return None
 
 
+def ghost_summary(ghost: Any) -> dict[str, Any]:
+    """Persisted, credential-free summary of the worker's Ghost decision.
+
+    Says whether memory was reused or explored, whether a candidate was saved or
+    why it was skipped, and which Ghost error codes occurred.  Only these fixed
+    keys are copied.
+    """
+    if not isinstance(ghost, dict):
+        return {}
+    candidate = ghost.get("candidate")
+    summary: dict[str, Any] = {"mode": ghost.get("mode")}
+    if isinstance(candidate, dict):
+        summary["candidate"] = {
+            key: candidate.get(key) for key in ("skill_id", "version", "status")
+        }
+    for key in ("candidate_skipped", "workflow", "run_id", "visual_used"):
+        if ghost.get(key) is not None:
+            summary[key] = ghost.get(key)
+    errors = ghost.get("errors")
+    if errors:
+        summary["errors"] = [str(code) for code in errors]
+    return summary
+
+
 def to_worker_report(
     report: SubtaskReport, subtask_input: SubtaskInput
 ) -> tuple[WorkerReport, dict[str, Any]]:
@@ -447,6 +471,7 @@ def to_worker_report(
                 observation.observation_id for observation in report.observations
             ],
             "final_url": report.final_url,
+            "ghost": ghost_summary(report.ghost),
         },
         {
             "browser_action_count": int(metrics.actions),
