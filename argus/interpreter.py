@@ -754,46 +754,49 @@ def interpret(
     active_client = OpenAICompatibleClient(model=model) if client is None else client
 
     first = _interpret_once(active_client, text, request_id, system_prompt())
-    matches = registry.sites_carrying(text) if _unresolved_open(first) else []
-    if not matches:
+    if not _open_intents(first):
         return first
 
-    # The request names no site but asks for a product a configured site
-    # carries. Left as an open intent, the connected runtime would suggest a
-    # public retailer for it. Ask once more, with the mapping spelled out, so the
-    # model reads the parameters from the text itself; if it still will not map
-    # the request, keep the first reading rather than invent parameters here.
+    # Every run is served by the configured registry sites. An open reading,
+    # whether it names a site or not, is asked once more with the mapping
+    # spelled out so the model reads the parameters from the text itself; if it
+    # still will not map the request, keep the first reading rather than invent
+    # parameters here.
     try:
         second = _interpret_once(
-            active_client, text, request_id, system_prompt() + _registry_hint(matches)
+            active_client, text, request_id, system_prompt() + _registry_hint(text)
         )
     except ContractError:
         return first
-    if _unresolved_open(second):
+    if _open_intents(second):
         return first
     return second
 
 
-def _unresolved_open(interpreted: InterpretedRequest) -> list[Intent]:
-    return [
-        intent
-        for intent in interpreted.intents
-        if intent.kind == "open" and intent.target_domain is None and not intent.site_id
-    ]
+def _open_intents(interpreted: InterpretedRequest) -> list[Intent]:
+    return [intent for intent in interpreted.intents if intent.kind == "open"]
 
 
-def _registry_hint(matches: list[dict[str, Any]]) -> str:
+def _registry_hint(text: str) -> str:
+    carried = {
+        match["site_id"]: match["subjects"] for match in registry.sites_carrying(text)
+    }
     lines = ["", "Registry mapping required for this request:"]
-    for match in matches:
-        operation = match["operations"][0]
+    for site in registry.SITES.values():
+        operation = site["operations"][0]
+        subjects = carried.get(site["site_id"])
+        reason = (
+            f"It asks for {', '.join(subjects)}, which {site['site_id']} carries. "
+            if subjects
+            else ""
+        )
         lines.append(
-            f"  - It asks for {', '.join(match['subjects'])}, which site "
-            f'{match["site_id"]} carries. Return kind="registry" intents on '
-            f"{match['site_id']} with operation {operation}, one intent per "
-            "product, with query read from the words that name the product "
-            "(the site's spelling when the text contains it) and max_price from "
-            'any price limit. Do not return kind="open" for these products and '
-            "do not ask which site to use."
+            f'  - {reason}Return kind="registry" intents on {site["site_id"]} with '
+            f"operation {operation}, one intent per thing to find, with query read "
+            "from the words that name what to find (a product, a topic or a "
+            "place; the site's spelling when the text contains it) and max_price "
+            "from any price limit. Ignore any website named in the request. Do "
+            'not return kind="open" and do not ask which site to use.'
         )
     return "\n".join(lines)
 

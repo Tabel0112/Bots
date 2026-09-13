@@ -741,7 +741,9 @@ class InterpreterTest(unittest.TestCase):
         self.assertEqual(len(client.calls), 2)
         self.assertEqual(interpreted.intents[0].kind, "open")
 
-    def test_no_reask_without_a_carried_product_or_when_a_site_is_named(self):
+    def test_every_open_reading_is_reasked_to_the_registry(self):
+        # Runs are served by the configured sites only. An open reading is asked
+        # once more with the mapping spelled out, whether or not it names a site.
         condos = payload(
             intents=[
                 open_intent(
@@ -752,20 +754,44 @@ class InterpreterTest(unittest.TestCase):
                 )
             ]
         )
-        client = FakeModelClient(ModelResult(status="ok", parsed=condos, model=MODEL))
-        interpreted = interpret(
-            "Give me the best condos in Toronto", "r", client=client
+        mapped = payload(
+            intents=[intent([parameter("query", "condos", span=(12, 18))])]
         )
-        self.assertEqual(len(client.calls), 1)
-        self.assertEqual(interpreted.intents[0].kind, "open")
+        client = FakeModelClient(
+            [
+                ModelResult(status="ok", parsed=condos, model=MODEL),
+                ModelResult(status="ok", parsed=mapped, model=MODEL),
+            ]
+        )
+        interpreted = interpret("Give me the condos in Toronto", "r", client=client)
+        self.assertEqual(len(client.calls), 2)
+        self.assertIn("Ignore any website named", client.calls[1]["system"])
+        self.assertEqual(interpreted.intents[0].kind, "registry")
+        self.assertEqual(interpreted.intents[0].parameters["query"].value, "condos")
 
         named = payload(
-            intents=[open_intent(target_domain="bestbuy.com", site_id="bestbuy.com")]
+            intents=[
+                open_intent(
+                    target_domain="en.wikipedia.org", site_id="en.wikipedia.org"
+                )
+            ]
         )
-        client = FakeModelClient(ModelResult(status="ok", parsed=named, model=MODEL))
-        interpreted = interpret("Find headphones on bestbuy.com", "r", client=client)
-        self.assertEqual(len(client.calls), 1)
-        self.assertEqual(interpreted.intents[0].target_domain, "bestbuy.com")
+        towers = payload(
+            intents=[intent([parameter("query", "Toronto towers", span=(28, 42))])]
+        )
+        client = FakeModelClient(
+            [
+                ModelResult(status="ok", parsed=named, model=MODEL),
+                ModelResult(status="ok", parsed=towers, model=MODEL),
+            ]
+        )
+        interpreted = interpret(
+            "On en.wikipedia.org, search for Toronto towers", "r", client=client
+        )
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(interpreted.intents[0].kind, "registry")
+        self.assertEqual(interpreted.intents[0].site_id, "demo-catalog")
+        self.assertIsNone(interpreted.intents[0].target_domain)
 
     def test_sites_carrying_matches_whole_words_and_plurals(self):
         self.assertEqual(
