@@ -37,9 +37,9 @@ instead of calling the network.
 
 from __future__ import annotations
 
-import re
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlsplit
 
 from argus import registry
@@ -93,9 +93,11 @@ def system_prompt() -> str:
     changes the prompt with no edit here.  Exposed for tests and for review.
     """
     lines = [
-        "You are the interpreter of ARGUS, a controller that runs browser tasks "
-        "on public websites. You do not browse and you do not act. You "
-        "read one request and report what it asks for, in JSON.",
+        (
+            "You are the interpreter of ARGUS, a controller that runs browser tasks "
+            "on public websites. You do not browse and you do not act. You "
+            "read one request and report what it asks for, in JSON."
+        ),
         "",
         "Supported sites:",
     ]
@@ -119,53 +121,73 @@ def system_prompt() -> str:
         [
             "",
             "Rules:",
-            "1. Split a compound request into one intent per site operation. "
-            '"Find headphones and also find keyboards" is two intents, not one '
-            "intent with two queries.",
-            '2. Prefer kind="registry" and the listed site_id/operation when a '
-            'qualified operation fits. Otherwise use kind="open", a short '
-            "operation name, target_domain, goal, criteria and expected_record_shape. "
-            "Set site_id to the named site (or an empty string if none). Unknown "
-            "sites are valid open requests, not unsupported registry requests. "
-            "Never invent a domain. Extract the hostname from an explicit URL or "
-            "domain; a named site may resolve only if unambiguous. If no site is "
-            "named, leave target_domain null and add an ambiguity asking for it.",
-            "3. Every parameter must come from the request. Set source to "
-            '"text_span" and give span_start and span_end as the zero-based, '
-            "half-open character range of the request text the value came from, "
-            "so request_text[span_start:span_end] is exactly the words you read "
-            "the value from. Set source to \"structured\" with span_start and "
-            "span_end null only when the value came from a structured field "
-            'rather than prose. Never use "default": the controller fills '
-            "defaults itself.",
-            "4. Never invent a parameter. Do not add a parameter the request does "
-            "not mention, do not fill in a default, and do not translate an "
-            "unsupported filter into a supported one.",
-            "5. If a required parameter is absent, leave it out of parameters and "
-            "add an entry to missing_required with the intent's index, the "
-            "parameter name, and one short question that would get it. Do not "
-            "guess the value.",
-            "6. If the request is ambiguous - two readings, a vague quantity, an "
-            "unsupported registry filter or an unresolved site name - add a "
-            "plain sentence to ambiguities. Listing an ambiguity is always better "
-            "than guessing.",
-            "7. confidence is 0.0 to 1.0: how sure you are of that value, and of "
-            "that intent, given the words in the request.",
-            "8. Report only what the request says. You are not deciding whether "
-            "it can run; a later stage does that.",
-            "9. For open intents preserve every ranking, filter and limit as a "
-            "separate criterion with the exact quoted text and character span. "
-            "'best 10 jobs' gives rank 'best' with confidence below 0.6 and limit "
-            "'10' with parameter 10. 'cheapest' is a price rank; 'top 10' has both "
-            "rank and limit. Vague ranking must stay uncertain. 'Highest salary, "
-            "remote only' gives rank parameter 'salary' and filter parameter "
-            "'remote', with their own spans. Never drop or guess criteria, and "
-            "never select a suggested clarification example for the user. "
-            "Criteria parameter holds its resolved scalar value or null. "
-            "Registry intents use null open context and empty criteria/shape.",
-            "10. expected_record_shape lists field names as short snake_case "
-            "identifiers without spaces (title, company, url, salary, remote, "
-            "points), one per field a record should carry; never sentences.",
+            (
+                "1. Split a compound request into one intent per site operation. "
+                '"Find headphones and also find keyboards" is two intents, not one '
+                "intent with two queries."
+            ),
+            (
+                '2. Prefer kind="registry" and the listed site_id/operation when a '
+                'qualified operation fits. Otherwise use kind="open", a short '
+                "operation name, target_domain, goal, criteria and expected_record_shape. "
+                "Set site_id to the named site (or an empty string if none). Unknown "
+                "sites are valid open requests, not unsupported registry requests. "
+                "Never invent a domain. Extract the hostname from an explicit URL or "
+                "domain; a named site may resolve only if unambiguous. If no site is "
+                "named, leave target_domain null and add an ambiguity asking for it."
+            ),
+            (
+                "3. Every parameter must come from the request. Set source to "
+                '"text_span" and give span_start and span_end as the zero-based, '
+                "half-open character range of the request text the value came from, "
+                "so request_text[span_start:span_end] is exactly the words you read "
+                'the value from. Set source to "structured" with span_start and '
+                "span_end null only when the value came from a structured field "
+                'rather than prose. Never use "default": the controller fills '
+                "defaults itself."
+            ),
+            (
+                "4. Never invent a parameter. Do not add a parameter the request does "
+                "not mention, do not fill in a default, and do not translate an "
+                "unsupported filter into a supported one."
+            ),
+            (
+                "5. If a required parameter is absent, leave it out of parameters and "
+                "add an entry to missing_required with the intent's index, the "
+                "parameter name, and one short question that would get it. Do not "
+                "guess the value."
+            ),
+            (
+                "6. If the request is ambiguous - two readings, a vague quantity, an "
+                "unsupported registry filter or an unresolved site name - add a "
+                "plain sentence to ambiguities. Listing an ambiguity is always better "
+                "than guessing."
+            ),
+            (
+                "7. confidence is 0.0 to 1.0: how sure you are of that value, and of "
+                "that intent, given the words in the request."
+            ),
+            (
+                "8. Report only what the request says. You are not deciding whether "
+                "it can run; a later stage does that."
+            ),
+            (
+                "9. For open intents preserve every ranking, filter and limit as a "
+                "separate criterion with the exact quoted text and character span. "
+                "'best 10 jobs' gives rank 'best' with confidence below 0.6 and limit "
+                "'10' with parameter 10. 'cheapest' is a price rank; 'top 10' has both "
+                "rank and limit. Vague ranking must stay uncertain. 'Highest salary, "
+                "remote only' gives rank parameter 'salary' and filter parameter "
+                "'remote', with their own spans. Never drop or guess criteria, and "
+                "never select a suggested clarification example for the user. "
+                "Criteria parameter holds its resolved scalar value or null. "
+                "Registry intents use null open context and empty criteria/shape."
+            ),
+            (
+                "10. expected_record_shape lists field names as short snake_case "
+                "identifiers without spaces (title, company, url, salary, remote, "
+                "points), one per field a record should carry; never sentences."
+            ),
         ]
     )
     return "\n".join(lines)
@@ -201,7 +223,7 @@ def _output_model() -> Any:
             code="PRECONDITION_FAILED",
         ) from exc
 
-    from typing import Literal, Optional, Union
+    from typing import Literal
 
     class _Strict(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -209,25 +231,29 @@ def _output_model() -> Any:
     class ParameterOut(_Strict):
         """One parameter value and the characters of the request behind it."""
 
-        name: str = Field(description="Parameter name exactly as the operation declares it.")
-        value: Union[str, int, float, bool] = Field(description="The value the request asks for.")
+        name: str = Field(
+            description="Parameter name exactly as the operation declares it."
+        )
+        value: str | int | float | bool = Field(
+            description="The value the request asks for."
+        )
         source: Literal["text_span", "structured"] = Field(
             description='"text_span" when the value was read from the request text.'
         )
         confidence: float = Field(description="0.0 to 1.0 confidence in this value.")
-        span_start: Optional[int] = Field(
+        span_start: int | None = Field(
             description="Zero-based start of the span, or null when source is not text_span."
         )
-        span_end: Optional[int] = Field(
+        span_end: int | None = Field(
             description="Exclusive end of the span, or null when source is not text_span."
         )
 
     class CriterionOut(_Strict):
         text: str
         kind: Literal["rank", "filter", "limit"]
-        parameter: Optional[Union[str, int, float, bool]]
-        span_start: Optional[int]
-        span_end: Optional[int]
+        parameter: str | int | float | bool | None
+        span_start: int | None
+        span_end: int | None
         confidence: float
 
     class IntentOut(_Strict):
@@ -238,8 +264,8 @@ def _output_model() -> Any:
         parameters: list[ParameterOut]
         confidence: float
         kind: Literal["registry", "open"]
-        target_domain: Optional[str]
-        goal: Optional[str]
+        target_domain: str | None
+        goal: str | None
         criteria: list[CriterionOut]
         expected_record_shape: list[str]
 
@@ -376,7 +402,9 @@ def _origin(
             code="EXTRACTION_FAILED",
         )
     value = _normalise_value(operation, name, _field(raw, "value"))
-    confidence = _float(_field(raw, "confidence", 0.0), f"parameter {name!r} confidence")
+    confidence = _float(
+        _field(raw, "confidence", 0.0), f"parameter {name!r} confidence"
+    )
     span = _read_span(raw)
 
     if source != "text_span":
@@ -385,7 +413,11 @@ def _origin(
 
     if span is None or not _span_matches(raw_text, span, value):
         quoted = "" if span is None else raw_text[max(span[0], 0) : max(span[1], 0)]
-        where = "no span was given" if span is None else f"characters {span[0]}-{span[1]} ({quoted!r})"
+        where = (
+            "no span was given"
+            if span is None
+            else f"characters {span[0]}-{span[1]} ({quoted!r})"
+        )
         ambiguities.append(
             f"intent {intent_index}: the value {value!r} for {name!r} was cited "
             f"to {where}, which is not where it appears in the request; the "
@@ -677,7 +709,7 @@ def _missing_parameter(raw: Any) -> MissingParameter:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def interpret(

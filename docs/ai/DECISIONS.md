@@ -1,6 +1,6 @@
 # Decisions and open questions
 
-Updated: 2026-09-12. Keep status explicit; a proposal is not an implementation commitment.
+Updated: 2026-09-13. Keep status explicit; a proposal is not an implementation commitment.
 
 ## Confirmed user direction
 
@@ -24,6 +24,7 @@ Updated: 2026-09-12. Keep status explicit; a proposal is not an implementation c
 - **VLM hardware (2026-09-12):** four H100s, 320 GB total. At most four VLM instances run at once, hence the per-run cap of four workers. The four-subtask open-plan cap is a separate MVP budget.
 - **Execution beyond read-only (Abel, 2026-09-12, direction; design not built):** the product should be able to execute tasks such as applying to jobs, not only read. Proposed shape, to be designed after INT-2: each subtask carries an action class (read_only, interactive, committing); the gate classifies instead of rejecting outright; a committing action pauses the run in a needs_confirmation state showing exactly what will be submitted, and proceeds only on the user's yes; the toolbox enforces the class at execution time; before/after screenshots and the sent request are stored as evidence; credentials never pass through ARGUS, the human logs in inside the live session viewer; Ghost never replays a committing skill without fresh confirmation. The hackathon demo path stays read-only.
 - **Documentation sharing (2026-09-12):** user authorized commit and push of the shared planning/AI handoff docs. The provisional runtime remains a local experiment; publication of these docs does not imply a working shared backend.
+- **ARGUS publication boundary (Abel, 2026-09-13; implemented locally, receiver confirmation pending):** the moderator never writes user-facing prose. Contract 0.5 makes synthesis an `AnswerSelection` of validated-record indices, structured field claims and typed notes with controller-checked subjects. The controller derives final records and renders every answer line. Known prose fields are discarded and logged by field path only. This replaces the evidence-reference-only rule, which could not prevent arbitrary prose from citing a real observation; Tianqi's `"is free and cures cancer"` case is the regression test. Thomas must confirm the adapter boundary before MOD-1 is connected.
 
 ## Existing MVP constraints
 
@@ -43,7 +44,7 @@ The PR #7 review reiterates no required HTTP layer between ARGUS and its toolbox
 
 | Question/proposal | Current position |
 | --- | --- |
-| Moderator implementation | User direction 2026-09-12: the moderator is a separate deliverable with its own owner, not Abel. The controller remains the single owner of run state and calls the moderator through three callables; proposed boundary in [ARGUS.md](../hackathon/ARGUS.md), not yet accepted by the moderator owner |
+| Moderator implementation | User direction 2026-09-12: the moderator is a separate deliverable with its own owner, not Abel. The controller remains the single owner of run state. The local 0.5 callable boundary now returns structured `AnswerSelection`, never prose; Thomas's receiver confirmation remains pending before connection |
 | Subtask boundaries and parallelism | Settled for registered operations (one subtask per intent, deterministic planner, built 2026-09-12). Open-world requests need the model-planned decomposition with dependent chains; design in [ARGUS.md](../hackathon/ARGUS.md) open-world section |
 | Browser-agent framework and model | DOM worker uses direct async Python/Playwright and GPT-5.4; other reasoning/visual choices remain open |
 | Public website | Unselected; needs an access and workflow feasibility check |

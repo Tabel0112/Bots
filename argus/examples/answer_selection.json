@@ -1,0 +1,14 @@
+{
+  "record_indices": [1, 0],
+  "claims": [
+    {
+      "record_index": 0,
+      "fields": ["title", "price", "currency", "url"]
+    },
+    {
+      "record_index": 1,
+      "fields": ["title", "price", "currency", "url"]
+    }
+  ],
+  "notes": []
+}

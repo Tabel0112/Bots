@@ -44,20 +44,22 @@ from __future__ import annotations
 import copy
 import json
 import threading
-from datetime import datetime, timezone
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 from urllib.parse import urlsplit
 
 from argus import registry
 from argus.contracts import (
     ERROR_CODES,
+    AnswerSelection,
     Claim,
     ContractError,
     Criterion,
-    FinalAnswer,
     InterpretedRequest,
     ModeratorDecision,
+    Note,
     Plan,
     Subtask,
     SubtaskInput,
@@ -68,15 +70,15 @@ from argus.model_client import MODEL_STATUSES, ModelResult
 
 __all__ = [
     "CATALOG",
+    "DEFAULT_SITE_ID",
     "OPEN_DATASET",
     "OPEN_RECORD_SHAPE",
-    "DEFAULT_SITE_ID",
     "SCRIPTED_OUTCOMES",
+    "FakeGhost",
     "FakeModelClient",
     "FakePlannerClient",
     "FakeToolbox",
     "StubModerator",
-    "FakeGhost",
 ]
 
 #: The site every fake defaults to; its origin comes from the registry.
@@ -105,20 +107,62 @@ OPEN_RECORD_SHAPE: tuple[str, ...] = ("title", "company", "url", "salary", "remo
 #: the moderator's filter, rank and limit criteria to act on.
 OPEN_DATASET: dict[str, tuple[dict[str, Any], ...]] = {
     "jobs.example.com": (
-        {"index": 1, "title": "Senior Software Engineer", "company": "Northwind",
-         "salary": 185000, "remote": True, "keywords": "software engineering backend"},
-        {"index": 2, "title": "Software Engineer, Platform", "company": "Contoso",
-         "salary": 150000, "remote": False, "keywords": "software engineering platform"},
-        {"index": 3, "title": "Staff Software Engineer", "company": "Fabrikam",
-         "salary": 210000, "remote": True, "keywords": "software engineering staff"},
-        {"index": 4, "title": "Software Engineering Intern", "company": "Northwind",
-         "salary": 48000, "remote": False, "keywords": "software engineering intern"},
-        {"index": 5, "title": "Frontend Software Engineer", "company": "Adatum",
-         "salary": 132000, "remote": True, "keywords": "software engineering frontend"},
-        {"index": 6, "title": "Site Reliability Engineer", "company": "Contoso",
-         "salary": 160000, "remote": True, "keywords": "software engineering reliability"},
-        {"index": 7, "title": "Engineering Manager", "company": "Adatum",
-         "salary": 195000, "remote": False, "keywords": "engineering management"},
+        {
+            "index": 1,
+            "title": "Senior Software Engineer",
+            "company": "Northwind",
+            "salary": 185000,
+            "remote": True,
+            "keywords": "software engineering backend",
+        },
+        {
+            "index": 2,
+            "title": "Software Engineer, Platform",
+            "company": "Contoso",
+            "salary": 150000,
+            "remote": False,
+            "keywords": "software engineering platform",
+        },
+        {
+            "index": 3,
+            "title": "Staff Software Engineer",
+            "company": "Fabrikam",
+            "salary": 210000,
+            "remote": True,
+            "keywords": "software engineering staff",
+        },
+        {
+            "index": 4,
+            "title": "Software Engineering Intern",
+            "company": "Northwind",
+            "salary": 48000,
+            "remote": False,
+            "keywords": "software engineering intern",
+        },
+        {
+            "index": 5,
+            "title": "Frontend Software Engineer",
+            "company": "Adatum",
+            "salary": 132000,
+            "remote": True,
+            "keywords": "software engineering frontend",
+        },
+        {
+            "index": 6,
+            "title": "Site Reliability Engineer",
+            "company": "Contoso",
+            "salary": 160000,
+            "remote": True,
+            "keywords": "software engineering reliability",
+        },
+        {
+            "index": 7,
+            "title": "Engineering Manager",
+            "company": "Adatum",
+            "salary": 195000,
+            "remote": False,
+            "keywords": "engineering management",
+        },
     ),
 }
 
@@ -167,7 +211,7 @@ _SUPERSEDED = object()
 
 def _now() -> str:
     """Current UTC time in the fixtures' ``...Z`` format."""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _origin(site_id: str) -> str:
@@ -191,7 +235,8 @@ def _open_rows(domain: str | None) -> tuple[dict[str, Any], ...]:
         return ()
     rows = OPEN_DATASET.get(domain.strip().lower(), ())
     return tuple(
-        dict(row, url=f"https://{domain.strip().lower()}/jobs/{row['index']}") for row in rows
+        dict(row, url=f"https://{domain.strip().lower()}/jobs/{row['index']}")
+        for row in rows
     )
 
 
@@ -236,7 +281,9 @@ def _verifications_of(report: WorkerReport) -> list[str]:
     entries = evidence.get("verifications")
     refs: list[str] = []
     for entry in entries if isinstance(entries, list) else []:
-        observation = entry.get("observation_id") if isinstance(entry, Mapping) else None
+        observation = (
+            entry.get("observation_id") if isinstance(entry, Mapping) else None
+        )
         if isinstance(observation, str) and observation not in refs:
             refs.append(observation)
     return refs
@@ -341,7 +388,9 @@ class FakePlannerClient:
         if not isinstance(plan_payload, Mapping) or not isinstance(
             plan_payload.get("subtasks"), list
         ):
-            raise ContractError("FakePlannerClient needs a Plan object with a subtasks list")
+            raise ContractError(
+                "FakePlannerClient needs a Plan object with a subtasks list"
+            )
         self.status = status
         self.steps: list[dict[str, Any]] = [
             self._step(index, raw) for index, raw in enumerate(plan_payload["subtasks"])
@@ -367,8 +416,12 @@ class FakePlannerClient:
             step["inputs_from"] = [
                 {
                     "parameter": parameter,
-                    "subtask_id": source.get("subtask_id") if isinstance(source, Mapping) else None,
-                    "field": source.get("field") if isinstance(source, Mapping) else None,
+                    "subtask_id": source.get("subtask_id")
+                    if isinstance(source, Mapping)
+                    else None,
+                    "field": source.get("field")
+                    if isinstance(source, Mapping)
+                    else None,
                 }
                 for parameter, source in bindings.items()
             ]
@@ -518,7 +571,9 @@ class FakeToolbox:
             )
         forced = self._next_forced(subtask.subtask_id)
         if forced == "raise":
-            raise RuntimeError(f"fake toolbox failed while running {subtask.subtask_id}")
+            raise RuntimeError(
+                f"fake toolbox failed while running {subtask.subtask_id}"
+            )
         return self._build_report(subtask_input, forced)
 
     def observe(self, handle: str) -> str:
@@ -546,7 +601,9 @@ class FakeToolbox:
 
     # -- report construction ---------------------------------------------
 
-    def records_for(self, subtask: Subtask, observation: str | None = None) -> list[dict[str, Any]]:
+    def records_for(
+        self, subtask: Subtask, observation: str | None = None
+    ) -> list[dict[str, Any]]:
         """The catalog rows a subtask's parameters select, as records.
 
         Filtered by ``query`` as a case-insensitive substring of the title and
@@ -578,7 +635,9 @@ class FakeToolbox:
         ]
 
     @staticmethod
-    def _shape(subtask: Subtask, row: Mapping[str, Any], observation: str | None) -> dict[str, Any]:
+    def _shape(
+        subtask: Subtask, row: Mapping[str, Any], observation: str | None
+    ) -> dict[str, Any]:
         """One open-world record in the subtask's expected shape, cited."""
         shape = subtask.expected_record_shape or list(OPEN_RECORD_SHAPE)
         record: dict[str, Any] = {name: copy.deepcopy(row.get(name)) for name in shape}
@@ -598,7 +657,9 @@ class FakeToolbox:
         rows = _open_rows(subtask.target_domain)
         observations = list(observations) or [None]
 
-        if subtask.operation == "open_results" and isinstance(params.get("result_urls"), list):
+        if subtask.operation == "open_results" and isinstance(
+            params.get("result_urls"), list
+        ):
             by_url = {row["url"]: row for row in rows}
             records = []
             for index, url in enumerate(params["result_urls"]):
@@ -609,9 +670,11 @@ class FakeToolbox:
 
         query = str(params.get("query") or "").casefold().split()
         selected = [
-            row for row in rows
+            row
+            for row in rows
             if all(
-                word in f"{row['title']} {row['company']} {row.get('keywords', '')}".casefold()
+                word
+                in f"{row['title']} {row['company']} {row.get('keywords', '')}".casefold()
                 for word in query
             )
         ]
@@ -654,7 +717,9 @@ class FakeToolbox:
         )
         return action
 
-    def _build_report(self, subtask_input: SubtaskInput, forced: str | None) -> WorkerReport:
+    def _build_report(
+        self, subtask_input: SubtaskInput, forced: str | None
+    ) -> WorkerReport:
         subtask = subtask_input.subtask
         data = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
         template = data["actions"][0]
@@ -664,7 +729,9 @@ class FakeToolbox:
         params = subtask.parameters if isinstance(subtask.parameters, Mapping) else {}
         query = params.get("query")
         result_urls = params.get("result_urls") if is_open else None
-        opens_results = subtask.operation == "open_results" and isinstance(result_urls, list)
+        opens_results = subtask.operation == "open_results" and isinstance(
+            result_urls, list
+        )
 
         observation, observation_n = self._next_observation()
         # ``open_results`` cites one further observation per opened URL.
@@ -702,7 +769,9 @@ class FakeToolbox:
                         name="open_url",
                         payload={"url": url},
                         url=str(url),
-                        observation_before=observation if index == 0 else opened[index - 1],
+                        observation_before=observation
+                        if index == 0
+                        else opened[index - 1],
                         observation_after=opened[index] if opened else None,
                     )
                 )
@@ -839,8 +908,12 @@ class FakeToolbox:
     @staticmethod
     def _subtask_text(subtask: Subtask) -> str:
         params = subtask.parameters if isinstance(subtask.parameters, Mapping) else {}
-        detail = ", ".join(f"{name}={value!r}" for name, value in sorted(params.items()))
-        return f"{subtask.operation} on {subtask.site_id} with {detail or 'no parameters'}"
+        detail = ", ".join(
+            f"{name}={value!r}" for name, value in sorted(params.items())
+        )
+        return (
+            f"{subtask.operation} on {subtask.site_id} with {detail or 'no parameters'}"
+        )
 
 
 class StubModerator:
@@ -1028,136 +1101,108 @@ class StubModerator:
         validation: dict[str, Any],
         evidence: list[str],
         failures: list[TypedError],
-    ) -> FinalAnswer:
-        """Stage 10: one claim per record, each citing that record's observation.
+    ) -> AnswerSelection:
+        """Stage 10: select records and fields without producing prose.
 
         The request's explicit criteria are applied first, in order: ``filter``
         keeps records whose named field is truthy (or equals the criterion's
         ``value`` when its parameter is ``{"field", "value"}``), ``rank`` sorts
         descending on the named field and ``limit`` truncates.  A criterion
         whose field is absent from the records, or that names no field, is not
-        applied and is named in ``unverified`` with the reason, so the answer
-        never pretends a ranking it could not do.  The answer's ``records`` are
-        the records after the criteria.
-
-        A record with no observation of its own falls back to the run's first
-        evidence reference; a record with neither is named in ``unverified``
-        instead of becoming a claim, so no claim is ever emitted without an
-        evidence reference.  ``failures`` is repeated unchanged.
+        applied and is returned as a typed ``criterion_not_applied`` note, so
+        the controller can render a caveat without trusting moderator prose.
+        The selected ``records`` are the records after the criteria.
         """
         self.calls.append(("synthesize", interpreted.request_id, len(records)))
-        fallback = evidence[0] if evidence else None
         claims: list[Claim] = []
-        unverified: list[str] = []
+        notes: list[Note] = []
 
         criteria = [
-            criterion for intent in interpreted.intents for criterion in intent.criteria
+            (f"intent-{intent_index}:criterion-{criterion_index}", criterion)
+            for intent_index, intent in enumerate(interpreted.intents)
+            for criterion_index, criterion in enumerate(intent.criteria)
         ]
-        records, not_applied = self._apply_criteria(criteria, list(records))
-        unverified.extend(not_applied)
+        selected, not_applied = self._apply_criteria(criteria, list(records))
+        notes.extend(Note("criterion_not_applied", subject) for subject in not_applied)
 
-        for index, record in enumerate(records):
-            label = f"record {index}"
+        record_indices: list[int] = []
+        for original_index, record in selected:
             if isinstance(record, Mapping):
-                label = str(record.get("title") or label)
-                ref = record.get("source_observation_id") or fallback
-                text = self._claim_text(label, record)
+                fields = [name for name in record if name != "source_observation_id"]
+                observation = record.get("source_observation_id")
             else:
-                ref = fallback
-                text = f"{label}: {record!r}."
-            if not ref:
-                unverified.append(f"{label}: no evidence reference, so it is not claimed.")
+                fields = []
+                observation = None
+            if not fields or not isinstance(observation, str):
                 continue
-            claims.append(Claim(text=text, evidence_refs=[str(ref)]))
+            record_indices.append(original_index)
+            claims.append(Claim(record_index=len(record_indices) - 1, fields=fields))
 
-        status = validation.get("status") if isinstance(validation, Mapping) else None
-        if status != "passed":
-            unverified.append(f"Validation status is {status!r}, not 'passed'.")
-        for failure in failures:
-            unverified.append(f"{failure.code}: {failure.message}")
-
-        if claims:
-            text = (
-                f"{len(claims)} record(s) for {interpreted.raw_text!r}, each cited to an "
-                "observation from this run."
-            )
-        else:
-            text = f"No cited record for {interpreted.raw_text!r}."
-        if failures:
-            text += f" {len(failures)} subtask failure(s) are reported unchanged."
-
-        return FinalAnswer(
-            text=text,
-            claims=claims,
-            records=list(records),
-            failures=list(failures),
-            unverified=unverified,
+        return AnswerSelection(
+            record_indices=record_indices, claims=claims, notes=notes
         )
-
-    @staticmethod
-    def _claim_text(label: str, record: Mapping[str, Any]) -> str:
-        """The registry sentence for priced records; field pairs for anything else."""
-        if "price" in record:
-            return (
-                f"{label} costs {record.get('price')} {record.get('currency')} "
-                f"at {record.get('url')}."
-            )
-        details = ", ".join(
-            f"{name} {value}"
-            for name, value in record.items()
-            if name not in ("title", "source_observation_id", "retrieved_at") and value is not None
-        )
-        return f"{label}: {details}." if details else f"{label}."
 
     @staticmethod
     def _apply_criteria(
-        criteria: Sequence[Criterion], records: list[Any]
-    ) -> tuple[list[Any], list[str]]:
-        """Filter, rank and limit ``records``; say which criteria could not apply."""
+        criteria: Sequence[tuple[str, Criterion]], records: list[Any]
+    ) -> tuple[list[tuple[int, Any]], list[str]]:
+        """Filter, rank and limit records; return IDs of criteria not applied."""
         not_applied: list[str] = []
+        indexed = list(enumerate(records))
 
         def rows_carry(field: Any) -> bool:
-            return bool(records) and all(
-                isinstance(record, Mapping) and field in record for record in records
+            return bool(indexed) and all(
+                isinstance(record, Mapping) and field in record for _, record in indexed
             )
 
-        def skipped(criterion: Criterion, why: str) -> None:
-            not_applied.append(
-                f"Criterion {criterion.text!r} ({criterion.kind}) was not applied: {why}"
-            )
+        def skipped(subject: str) -> None:
+            not_applied.append(subject)
 
         ordered = sorted(
-            criteria, key=lambda c: {"filter": 0, "rank": 1, "limit": 2}.get(c.kind, 3)
+            criteria,
+            key=lambda item: {
+                "filter": 0,
+                "rank": 1,
+                "limit": 2,
+            }.get(item[1].kind, 3),
         )
-        for criterion in ordered:
+        for subject, criterion in ordered:
             parameter = criterion.parameter
             if criterion.kind == "limit":
-                if not isinstance(parameter, int) or isinstance(parameter, bool) or parameter < 0:
-                    skipped(criterion, "its limit is not a non-negative integer.")
+                if (
+                    not isinstance(parameter, int)
+                    or isinstance(parameter, bool)
+                    or parameter < 0
+                ):
+                    skipped(subject)
                     continue
-                records = records[:parameter]
+                indexed = indexed[:parameter]
                 continue
 
             field, wanted, exact = parameter, None, False
             if isinstance(parameter, Mapping) and "field" in parameter:
-                field, wanted, exact = parameter["field"], parameter.get("value"), "value" in parameter
+                field, wanted, exact = (
+                    parameter["field"],
+                    parameter.get("value"),
+                    "value" in parameter,
+                )
             if not isinstance(field, str) or not field.strip():
-                skipped(criterion, "it names no record field to apply it to.")
+                skipped(subject)
                 continue
             if not rows_carry(field):
-                skipped(
-                    criterion,
-                    f"no record carries the field {field!r}, so it could not be checked.",
-                )
+                skipped(subject)
                 continue
             if criterion.kind == "filter":
-                records = [
-                    record for record in records
+                indexed = [
+                    (index, record)
+                    for index, record in indexed
                     if (record[field] == wanted if exact else bool(record[field]))
                 ]
             elif criterion.kind == "rank":
-                records = sorted(records, key=lambda r: _rank_key(r[field]), reverse=True)
-        return records, not_applied
+                indexed = sorted(
+                    indexed, key=lambda item: _rank_key(item[1][field]), reverse=True
+                )
+        return indexed, not_applied
 
 
 def _rank_key(value: Any) -> tuple[int, Any]:
@@ -1183,7 +1228,9 @@ class FakeGhost:
     definition; session handles and evidence never enter it.
     """
 
-    def __init__(self, site_id: str = DEFAULT_SITE_ID, origin: str | None = None) -> None:
+    def __init__(
+        self, site_id: str = DEFAULT_SITE_ID, origin: str | None = None
+    ) -> None:
         self.site_id = site_id
         self.origin = origin or _origin(site_id)
         #: Every call, in order, as ``(method name, *identifying arguments)``.
@@ -1229,7 +1276,8 @@ class FakeGhost:
         checks = {
             "records_are_objects": len(rows) == len(records or []),
             "title_present": all(
-                isinstance(row.get("title"), str) and row["title"].strip() for row in rows
+                isinstance(row.get("title"), str) and row["title"].strip()
+                for row in rows
             ),
             "price_present": all(_is_number(row.get("price")) for row in rows),
             "currency_usd": all(row.get("currency") == "USD" for row in rows),
@@ -1240,7 +1288,10 @@ class FakeGhost:
             "price_within_max": (
                 True
                 if not _is_number(max_price)
-                else all(_is_number(row.get("price")) and row["price"] <= max_price for row in rows)
+                else all(
+                    _is_number(row.get("price")) and row["price"] <= max_price
+                    for row in rows
+                )
             ),
         }
         failed = sorted(name for name, passed in checks.items() if not passed)
@@ -1270,7 +1321,9 @@ class FakeGhost:
                 known.add(str(shot))
             verifications = report_evidence.get("verifications")
             for entry in verifications if isinstance(verifications, list) else []:
-                observation = entry.get("observation_id") if isinstance(entry, Mapping) else None
+                observation = (
+                    entry.get("observation_id") if isinstance(entry, Mapping) else None
+                )
                 if isinstance(observation, str):
                     known.add(observation)
         rows = [record for record in (records or []) if isinstance(record, Mapping)]
@@ -1288,7 +1341,9 @@ class FakeGhost:
             # the query or filter took effect; a real Ghost reads the page.
             "query_visibly_applied": bool(known),
             "urls_on_target_domain": all(
-                _on_domain(row["url"], subtask.target_domain) for row in rows if "url" in row
+                _on_domain(row["url"], subtask.target_domain)
+                for row in rows
+                if "url" in row
             ),
         }
         failed = sorted(name for name, passed in checks.items() if not passed)
@@ -1299,8 +1354,10 @@ class FakeGhost:
             "record_count": len(records or []),
             "evidence_refs": sorted(known),
             "unverified": [
-                "completeness: generic checks cannot tell whether every matching "
-                "record was collected"
+                (
+                    "completeness: generic checks cannot tell whether every matching "
+                    "record was collected"
+                )
             ],
             "scope": "generic open-world checks on synthetic records; no live website was visited",
         }

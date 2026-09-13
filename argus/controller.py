@@ -50,12 +50,12 @@ the workers (they are controller-side checks, not moderator obligations):
   JSON-normalised data, one of the accepted reports' records; the moderator may
   reorder, drop and supersede, and any other record fails the run with
   ``EXTRACTION_FAILED`` naming it.
-* Synthesis is bound to the run's evidence.  Every evidence reference on every
-  claim must be an observation of this run (the references handed to
-  ``synthesize`` plus every screenshot and verification of the accepted
-  reports), and every record in the answer must equal one of the validated
-  records handed to ``synthesize``.  A run never succeeds with a fabricated
-  claim or record.
+* Synthesis is selection, never prose.  The moderator may select validated
+  records, their order, fields to state and typed notes.  The controller checks
+  every record index, field and note subject against run-owned closed sets,
+  derives evidence references, discards any prose-shaped fields, and renders
+  every user-facing line itself.  A run never succeeds with a fabricated claim,
+  record or model-written assertion.
 
 Wall-clock cutoff: ``max_seconds`` bounds the run, not only the calls between
 stages.  When the deadline passes while workers are still inside
@@ -81,13 +81,16 @@ import threading
 import time
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from argus import interfaces, planner
 from argus.contracts import (
     MAX_CONCURRENT_WORKERS,
+    SYNTHESIS_FALLBACK_SUBJECTS,
+    AnswerSelection,
     Budget,
     Claim,
     ContractError,
@@ -96,6 +99,7 @@ from argus.contracts import (
     GateDecision,
     InterpretedRequest,
     ModeratorDecision,
+    Note,
     Plan,
     RunResult,
     Subtask,
@@ -105,12 +109,12 @@ from argus.contracts import (
 )
 
 __all__ = [
+    "GATE_REJECT_CODES",
+    "MAX_SUBAGENTS",
     "STAGES",
     "TERMINAL",
-    "TRANSITIONS",
-    "GATE_REJECT_CODES",
     "TERMINAL_STATE_FOR_STATUS",
-    "MAX_SUBAGENTS",
+    "TRANSITIONS",
     "Controller",
 ]
 
@@ -173,17 +177,33 @@ TERMINAL_STATE_FOR_STATUS = {
 
 #: Subtask statuses inside ``dispatching``.
 _PENDING, _RUNNING, _ACCEPTED, _FAILED, _CANCELLED = (
-    "pending", "running", "accepted", "failed", "cancelled",
+    "pending",
+    "running",
+    "accepted",
+    "failed",
+    "cancelled",
 )
 
 _OTHER_TOOL = {"dom": "vision", "vision": "dom"}
 
+# Fields used only to bind a record to run evidence are never selectable for a
+# user-facing claim.  Evidence references are derived separately by the
+# controller.
+_INTERNAL_RECORD_FIELDS = frozenset({"source_observation_id"})
+
+# These are the only moderator-authored note subjects that are not derived from
+# the current request.  They describe a fixed fallback path, never provider
+# prose, and are rendered as one generic controller-owned sentence.
+_SYNTHESIS_FALLBACK_SUBJECTS = frozenset(SYNTHESIS_FALLBACK_SUBJECTS)
+
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _unexpected(exc: BaseException, where: str, step_id: str | None = None) -> TypedError:
+def _unexpected(
+    exc: BaseException, where: str, step_id: str | None = None
+) -> TypedError:
     """Map an unexpected exception to a typed failure that names only its class."""
     return TypedError(
         code="EXTRACTION_FAILED",
@@ -220,7 +240,11 @@ def _evidence_of(report: WorkerReport) -> list[str]:
         if isinstance(shot, str) and shot not in refs:
             refs.append(shot)
     for verification in evidence.get("verifications") or []:
-        obs = verification.get("observation_id") if isinstance(verification, dict) else None
+        obs = (
+            verification.get("observation_id")
+            if isinstance(verification, dict)
+            else None
+        )
         if isinstance(obs, str) and obs not in refs:
             refs.append(obs)
     return refs
@@ -230,7 +254,9 @@ def _canonical(value: Any) -> str:
     """One JSON-normalised text per record: key order and container type do
     not matter, any changed field does.  Non-JSON data falls back to ``repr``."""
     try:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
     except (TypeError, ValueError):
         return repr(value)
 
@@ -249,7 +275,9 @@ def _label(record: Any) -> str:
     return _canonical(record)[:80]
 
 
-def _first_unsupplied(candidates: list[Any], supplied: list[Any]) -> tuple[int, Any] | None:
+def _first_unsupplied(
+    candidates: list[Any], supplied: list[Any]
+) -> tuple[int, Any] | None:
     """Index and value of the first candidate that is not one of ``supplied``.
 
     Compared as JSON-normalised data, as a multiset: a candidate may repeat only
@@ -288,7 +316,8 @@ def _bound_value(findings: Any, field: str, dependency: str) -> Any:
     if isinstance(findings, dict):
         if field not in findings:
             raise ContractError(
-                f"{dependency}'s findings have no field {field!r}", code="PRECONDITION_FAILED"
+                f"{dependency}'s findings have no field {field!r}",
+                code="PRECONDITION_FAILED",
             )
         return copy.deepcopy(findings[field])
     raise ContractError(
@@ -315,6 +344,98 @@ def _empty_state_of(report: WorkerReport) -> bool:
     return False
 
 
+def _criterion_subjects(interpreted: InterpretedRequest) -> dict[str, Any]:
+    """Closed note-subject set for criteria in this interpreted request."""
+    return {
+        f"intent-{intent_index}:criterion-{criterion_index}": criterion
+        for intent_index, intent in enumerate(interpreted.intents)
+        for criterion_index, criterion in enumerate(intent.criteria)
+    }
+
+
+def _render_value(value: Any) -> str:
+    """Deterministic, JSON-shaped display of a validated record field."""
+    try:
+        rendered = json.dumps(
+            value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+        return rendered.replace("\\n", " ").replace("\\r", " ")
+    except (TypeError, ValueError):
+        return '"[unsupported value]"'
+
+
+def _render_note(note: Note, criteria: dict[str, Any]) -> str:
+    """Render a validated typed note without echoing its subject verbatim."""
+    if note.kind == "criterion_not_applied":
+        criterion = criteria[note.subject]
+        return f"Criterion {criterion.text!r} could not be applied."
+    if note.kind == "synthesis_fallback":
+        return "The deterministic synthesis fallback was used."
+    if note.kind == "reconciliation_unresolved":
+        return "Reconciliation left an unresolved gap or conflict."
+    if note.kind == "validation_not_passed":
+        return f"Validation status is {note.subject}."
+    if note.kind == "clarification_required":
+        return "More information is required before execution."
+    raise AssertionError(f"unhandled note kind {note.kind!r}")
+
+
+def _discard_moderator_prose(value: Any, path: str = "") -> tuple[Any, list[str]]:
+    """Remove prose/controller-owned fields before strict selection decoding."""
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        discarded: list[str] = []
+        for key, item in value.items():
+            field_path = f"{path}.{key}" if path else key
+            controller_owned = not path and key in {
+                "text",
+                "lines",
+                "records",
+                "failures",
+                "unverified",
+            }
+            if key == "text" or controller_owned:
+                discarded.append(field_path)
+                continue
+            nested, nested_discarded = _discard_moderator_prose(item, field_path)
+            cleaned[key] = nested
+            discarded.extend(nested_discarded)
+        return cleaned, discarded
+    if isinstance(value, list):
+        cleaned_items: list[Any] = []
+        discarded = []
+        for index, item in enumerate(value):
+            cleaned, nested_discarded = _discard_moderator_prose(
+                item, f"{path}[{index}]"
+            )
+            cleaned_items.append(cleaned)
+            discarded.extend(nested_discarded)
+        return cleaned_items, discarded
+    return copy.deepcopy(value), []
+
+
+def _render_answer_lines(
+    records: list[Any],
+    claims: list[Claim],
+    validation_status: str,
+    rendered_notes: list[str],
+    failures: list[TypedError],
+) -> list[str]:
+    """Render every user-facing line from controller-validated structures."""
+    noun = "record" if len(records) == 1 else "records"
+    lines = [f"{len(records)} selected {noun}; validation {validation_status}."]
+    for claim in claims:
+        record = records[claim.record_index]
+        assert isinstance(record, dict)
+        fields = "; ".join(
+            f"{name}: {_render_value(record[name])}" for name in claim.fields
+        )
+        lines.append(f"Record {claim.record_index + 1} — {fields}.")
+    lines.extend(rendered_notes)
+    lines.extend(f"Failure: {failure.code}." for failure in failures)
+    return lines
+
+
 class _RunState:
     """Run state, event sequence and the single terminal result for one run.
 
@@ -335,10 +456,14 @@ class _RunState:
         self.lock = threading.RLock()
         self.cancel_requested = threading.Event()
         self.events: list[Event] = []
-        self.late_events: list[Event] = []  # after the terminal event; logged, not stored
+        self.late_events: list[
+            Event
+        ] = []  # after the terminal event; logged, not stored
         self.sessions: dict[str, str] = {}  # handle -> subtask_id, still open
         self.sessions_opened = 0
-        self.closing = False  # set once run-end cleanup starts; no session may register after
+        self.closing = (
+            False  # set once run-end cleanup starts; no session may register after
+        )
         self.interpreted: InterpretedRequest | None = None
         self.gate: GateDecision | None = None
         self.plan: Plan | None = None
@@ -354,7 +479,9 @@ class _RunState:
     def finished(self) -> bool:
         return self.result is not None
 
-    def note(self, type: str, message: str, data: dict[str, Any] | None = None) -> Event:
+    def note(
+        self, type: str, message: str, data: dict[str, Any] | None = None
+    ) -> Event:
         """Emit while the stream is open; after the terminal event keep the
         event in memory and log it.  Nothing may follow the terminal event on
         disk, but what a worker thread does after the run ended must still be
@@ -373,14 +500,23 @@ class _RunState:
                 data=dict(data or {}),
             )
             self.late_events.append(event)
-        log.warning("run %s: %s after the terminal event: %s %s",
-                    self.run_id, type, message, event.data)
+        log.warning(
+            "run %s: %s after the terminal event: %s %s",
+            self.run_id,
+            type,
+            message,
+            event.data,
+        )
         return event
 
-    def emit(self, type: str, message: str, data: dict[str, Any] | None = None) -> Event:
+    def emit(
+        self, type: str, message: str, data: dict[str, Any] | None = None
+    ) -> Event:
         with self.lock:
             if self.result is not None:
-                raise RuntimeError(f"run {self.run_id}: cannot emit after the terminal event")
+                raise RuntimeError(
+                    f"run {self.run_id}: cannot emit after the terminal event"
+                )
             self.sequence += 1
             event = Event(
                 run_id=self.run_id,
@@ -398,7 +534,9 @@ class _RunState:
     def transition(self, state: str) -> None:
         with self.lock:
             if self.result is not None or state not in TRANSITIONS.get(self.state, ()):
-                raise RuntimeError(f"run {self.run_id}: illegal transition {self.state} -> {state}")
+                raise RuntimeError(
+                    f"run {self.run_id}: illegal transition {self.state} -> {state}"
+                )
             self.state = state
             self.emit("stage_changed", state)
             self.store.save_snapshot(self.run_id, self.snapshot())
@@ -426,7 +564,9 @@ class _RunState:
                 raise RuntimeError("result belongs to another run")
             terminal = TERMINAL_STATE_FOR_STATUS[result.status]
             if terminal == "completed" and self.state != "publishing":
-                raise RuntimeError(f"run {self.run_id}: success is only legal from publishing")
+                raise RuntimeError(
+                    f"run {self.run_id}: success is only legal from publishing"
+                )
             self.state = terminal
             summary = {
                 "status": result.status,
@@ -488,7 +628,9 @@ class Controller:
         if type(max_concurrency) is not int:
             raise ValueError("max_concurrency must be an integer from 1 to 4")
         if max_actions < 1 or max_seconds <= 0 or max_concurrency < 1:
-            raise ValueError("max_actions, max_seconds and max_concurrency must be positive")
+            raise ValueError(
+                "max_actions, max_seconds and max_concurrency must be positive"
+            )
         if max_concurrency > MAX_SUBAGENTS:
             raise ValueError(f"max_concurrency must be at most {MAX_SUBAGENTS}")
         self.toolbox = toolbox
@@ -501,7 +643,9 @@ class Controller:
         self._interpret = interpret
         self._gate = gate
         self._plan = plan
-        self._observer = moderator if isinstance(moderator, interfaces.ProgressObserver) else None
+        self._observer = (
+            moderator if isinstance(moderator, interfaces.ProgressObserver) else None
+        )
         self._runs: dict[str, _RunState] = {}
 
     # ------------------------------------------------------------------ public
@@ -563,12 +707,18 @@ class Controller:
     ) -> RunResult:
         # 1. interpret
         state.transition("interpreting")
-        state.interpreted = self._stage_interpret(state, text_or_interpreted, request_id)
-        state.emit("interpreted", f"{len(state.interpreted.intents)} intent(s)", {
-            "intents": len(state.interpreted.intents),
-            "missing_required": len(state.interpreted.missing_required),
-            "ambiguities": len(state.interpreted.ambiguities),
-        })
+        state.interpreted = self._stage_interpret(
+            state, text_or_interpreted, request_id
+        )
+        state.emit(
+            "interpreted",
+            f"{len(state.interpreted.intents)} intent(s)",
+            {
+                "intents": len(state.interpreted.intents),
+                "missing_required": len(state.interpreted.missing_required),
+                "ambiguities": len(state.interpreted.ambiguities),
+            },
+        )
         self._check_run_limits(state)
 
         # 2. gate
@@ -577,23 +727,39 @@ class Controller:
         state.gate = gate(state.interpreted)
         if not isinstance(state.gate, GateDecision):
             state.gate = GateDecision.from_dict(state.gate)
-        state.emit("gate_decided", state.gate.decision, {
-            "rule_id": state.gate.rule_id, "reason": state.gate.reason,
-            "questions": list(state.gate.questions),
-        })
+        state.emit(
+            "gate_decided",
+            state.gate.decision,
+            {
+                "rule_id": state.gate.rule_id,
+                "reason": state.gate.reason,
+                "questions": list(state.gate.questions),
+            },
+        )
         if state.gate.decision == "clarify":
-            return self._result(state, "needs_input", error=TypedError(
-                code="NEEDS_INPUT", message=state.gate.reason, retryable=True,
-            ), answer=FinalAnswer(
-                text=" ".join(state.gate.questions) or state.gate.reason,
-                unverified=list(state.gate.questions),
-            ))
+            return self._result(
+                state,
+                "needs_input",
+                error=TypedError(
+                    code="NEEDS_INPUT",
+                    message=state.gate.reason,
+                    retryable=True,
+                ),
+                answer=FinalAnswer(
+                    lines=list(state.gate.questions) or [state.gate.reason],
+                    notes=[Note("clarification_required", "gate")],
+                ),
+            )
         if state.gate.decision == "reject":
-            return self._result(state, "failed", error=TypedError(
-                code=GATE_REJECT_CODES.get(state.gate.rule_id, "INVALID_INPUT"),
-                message=f"{state.gate.rule_id}: {state.gate.reason}",
-                retryable=False,
-            ))
+            return self._result(
+                state,
+                "failed",
+                error=TypedError(
+                    code=GATE_REJECT_CODES.get(state.gate.rule_id, "INVALID_INPUT"),
+                    message=f"{state.gate.rule_id}: {state.gate.reason}",
+                    retryable=False,
+                ),
+            )
         self._check_run_limits(state)
 
         # 3. plan
@@ -609,15 +775,25 @@ class Controller:
                 f"{state.request_id!r}; a run has exactly one request identity",
                 code="INVALID_INPUT",
             )
-        state.subtasks = {s.subtask_id: _SubtaskState(subtask=s) for s in state.plan.subtasks}
-        state.emit("plan_created", f"{len(state.plan.subtasks)} subtask(s)", {
-            "plan_id": state.plan.plan_id,
-            "subtasks": [
-                {"subtask_id": s.subtask_id, "operation": s.operation,
-                 "depends_on": list(s.depends_on), "concurrency_group": s.concurrency_group}
-                for s in state.plan.subtasks
-            ],
-        })
+        state.subtasks = {
+            s.subtask_id: _SubtaskState(subtask=s) for s in state.plan.subtasks
+        }
+        state.emit(
+            "plan_created",
+            f"{len(state.plan.subtasks)} subtask(s)",
+            {
+                "plan_id": state.plan.plan_id,
+                "subtasks": [
+                    {
+                        "subtask_id": s.subtask_id,
+                        "operation": s.operation,
+                        "depends_on": list(s.depends_on),
+                        "concurrency_group": s.concurrency_group,
+                    }
+                    for s in state.plan.subtasks
+                ],
+            },
+        )
         self._check_run_limits(state)
 
         # 4. match
@@ -631,10 +807,12 @@ class Controller:
         self._check_run_limits(state)
 
         accepted = [st for st in state.subtasks.values() if st.status == _ACCEPTED]
-        failures = [st.failure for st in state.subtasks.values() if st.failure is not None]
+        failures = [
+            st.failure for st in state.subtasks.values() if st.failure is not None
+        ]
         records: list[Any] = []
         evidence: list[str] = []
-        unverified: list[str] = []
+        controller_notes: list[Note] = []
         for st in accepted:
             assert st.report is not None
             records.extend(_records_of(st.report))
@@ -645,7 +823,7 @@ class Controller:
         # 8. reconcile, multi-subtask runs only
         if len(state.plan.subtasks) > 1 and accepted:
             state.transition("reconciling")
-            records, unverified = self._stage_reconcile(state, accepted, records)
+            records, controller_notes = self._stage_reconcile(state, accepted, records)
             self._check_run_limits(state)
 
         # 9. validate
@@ -656,7 +834,7 @@ class Controller:
         # 10. synthesize
         state.transition("synthesizing")
         state.answer = self._stage_synthesize(
-            state, accepted, records, evidence, failures, unverified
+            state, accepted, records, evidence, failures, controller_notes
         )
         self._check_run_limits(state)
 
@@ -664,24 +842,38 @@ class Controller:
         state.transition("publishing")
         if not accepted:
             # nothing came back: the first subtask failure is the run's failure
-            return self._result(state, "failed", error=failures[0] if failures else TypedError(
-                code="EXTRACTION_FAILED", message="no subtask produced a report",
-                retryable=False,
-            ))
+            return self._result(
+                state,
+                "failed",
+                error=failures[0]
+                if failures
+                else TypedError(
+                    code="EXTRACTION_FAILED",
+                    message="no subtask produced a report",
+                    retryable=False,
+                ),
+            )
         if state.validation["status"] != "passed":
-            return self._result(state, "failed", error=TypedError(
-                code="VALIDATION_FAILED",
-                message=f"validation {state.validation['status']}",
-                retryable=state.validation["status"] == "inconclusive",
-                evidence_refs=list(evidence),
-            ))
+            return self._result(
+                state,
+                "failed",
+                error=TypedError(
+                    code="VALIDATION_FAILED",
+                    message=f"validation {state.validation['status']}",
+                    retryable=state.validation["status"] == "inconclusive",
+                    evidence_refs=list(evidence),
+                ),
+            )
         if failures:
             return self._result(state, "failed", error=failures[0])
         self._stage_compile(state, accepted)
         return self._result(state, "succeeded")
 
     def _stage_interpret(
-        self, state: _RunState, text_or_interpreted: str | InterpretedRequest, request_id: str
+        self,
+        state: _RunState,
+        text_or_interpreted: str | InterpretedRequest,
+        request_id: str,
     ) -> InterpretedRequest:
         if isinstance(text_or_interpreted, InterpretedRequest):
             return text_or_interpreted
@@ -705,7 +897,9 @@ class Controller:
         try:
             skills = list(self.store.skills())
         except Exception as exc:  # noqa: BLE001
-            state.emit("skills_unavailable", f"store.skills raised {type(exc).__name__}")
+            state.emit(
+                "skills_unavailable", f"store.skills raised {type(exc).__name__}"
+            )
             skills = []
         for st in state.subtasks.values():
             decision, reason, skill = "explore", "", None
@@ -722,10 +916,16 @@ class Controller:
                 st.mode, st.bound_procedure = "explore", None
                 if decision == "reuse":
                     reason = reason or "reuse without a skill falls back to explore"
-            state.emit("match_decided", f"{st.subtask_id}: {st.mode}", {
-                "subtask_id": st.subtask_id, "mode": st.mode, "reason": reason,
-                "skill_id": (st.bound_procedure or {}).get("skill_id"),
-            })
+            state.emit(
+                "match_decided",
+                f"{st.subtask_id}: {st.mode}",
+                {
+                    "subtask_id": st.subtask_id,
+                    "mode": st.mode,
+                    "reason": reason,
+                    "skill_id": (st.bound_procedure or {}).get("skill_id"),
+                },
+            )
 
     # ---------------------------------------------------------------- dispatch
 
@@ -738,7 +938,9 @@ class Controller:
         try:
             while pending or running:
                 if state.cancel_requested.is_set() or budget_breached:
-                    reason = "run budget exceeded" if budget_breached else "run cancelled"
+                    reason = (
+                        "run budget exceeded" if budget_breached else "run cancelled"
+                    )
                     for st in pending:
                         self._cancel_subtask(state, st, reason)
                     pending = []
@@ -748,19 +950,25 @@ class Controller:
                 # cancel dependents of failed or cancelled subtasks
                 for st in list(pending):
                     blocked = [
-                        dep for dep in st.subtask.depends_on
+                        dep
+                        for dep in st.subtask.depends_on
                         if state.subtasks[dep].status in (_FAILED, _CANCELLED)
                     ]
                     if blocked:
                         pending.remove(st)
-                        self._cancel_subtask(state, st, f"dependency {blocked[0]} did not succeed")
+                        self._cancel_subtask(
+                            state, st, f"dependency {blocked[0]} did not succeed"
+                        )
 
                 # start everything that is ready, within the caps
                 busy_groups = {st.subtask.concurrency_group for st in running.values()}
                 for st in list(pending):
                     if len(running) >= self.max_concurrency:
                         break
-                    deps_ok = all(state.subtasks[d].status == _ACCEPTED for d in st.subtask.depends_on)
+                    deps_ok = all(
+                        state.subtasks[d].status == _ACCEPTED
+                        for d in st.subtask.depends_on
+                    )
                     if not deps_ok or st.subtask.concurrency_group in busy_groups:
                         continue
                     pending.remove(st)
@@ -772,17 +980,26 @@ class Controller:
                 if not running:
                     if pending:  # nothing ready and nothing running: unschedulable
                         for st in pending:
-                            self._cancel_subtask(state, st, "no schedulable path to this subtask")
+                            self._cancel_subtask(
+                                state, st, "no schedulable path to this subtask"
+                            )
                         pending = []
                     break
 
                 remaining = self.max_seconds - state.elapsed()
-                done, _ = wait(running, timeout=max(remaining, 0.0), return_when=FIRST_COMPLETED)
+                done, _ = wait(
+                    running, timeout=max(remaining, 0.0), return_when=FIRST_COMPLETED
+                )
                 if not done:
                     budget_breached = True
-                    state.emit("budget_exceeded", "run exceeded max_seconds", {
-                        "max_seconds": self.max_seconds, "elapsed_seconds": round(state.elapsed(), 3),
-                    })
+                    state.emit(
+                        "budget_exceeded",
+                        "run exceeded max_seconds",
+                        {
+                            "max_seconds": self.max_seconds,
+                            "elapsed_seconds": round(state.elapsed(), 3),
+                        },
+                    )
                     # The run does not wait for a worker that is still inside
                     # run_subtask: each one is failed now, its session is
                     # closed, and whatever it returns later is ignored.
@@ -794,26 +1011,48 @@ class Controller:
                     st = running.pop(future)
                     exc = future.exception()
                     if exc is not None:
-                        self._fail_subtask(state, st, _unexpected(exc, st.subtask_id, st.subtask_id))
+                        self._fail_subtask(
+                            state, st, _unexpected(exc, st.subtask_id, st.subtask_id)
+                        )
                     elif st.status == _RUNNING:
-                        self._fail_subtask(state, st, TypedError(
-                            code="EXTRACTION_FAILED", message="subtask ended without a decision",
-                            retryable=False, step_id=st.subtask_id,
-                        ))
+                        self._fail_subtask(
+                            state,
+                            st,
+                            TypedError(
+                                code="EXTRACTION_FAILED",
+                                message="subtask ended without a decision",
+                                retryable=False,
+                                step_id=st.subtask_id,
+                            ),
+                        )
         finally:
             # After a breach the pool is not waited for: waiting on a hung
             # worker would hold the run open past max_seconds.
             pool.shutdown(wait=not budget_breached, cancel_futures=True)
         if budget_breached:
-            raise _Finished(self._result(state, "failed", error=TypedError(
-                code="BUDGET_EXCEEDED",
-                message=f"run exceeded max_seconds={self.max_seconds:g}",
-                retryable=False,
-            )))
+            raise _Finished(
+                self._result(
+                    state,
+                    "failed",
+                    error=TypedError(
+                        code="BUDGET_EXCEEDED",
+                        message=f"run exceeded max_seconds={self.max_seconds:g}",
+                        retryable=False,
+                    ),
+                )
+            )
         if state.cancel_requested.is_set():
-            raise _Finished(self._result(state, "cancelled", error=TypedError(
-                code="CANCELLED", message="run cancelled", retryable=False,
-            )))
+            raise _Finished(
+                self._result(
+                    state,
+                    "cancelled",
+                    error=TypedError(
+                        code="CANCELLED",
+                        message="run cancelled",
+                        retryable=False,
+                    ),
+                )
+            )
 
     def _execute_subtask(self, state: _RunState, st: _SubtaskState) -> None:
         """Open a session, run the subtask, take the report through intake.
@@ -824,14 +1063,30 @@ class Controller:
         try:
             if self._abandoned(state, st):
                 return
-            self._observe(state, st, state.emit("subtask_started", sid, {
-                "subtask_id": sid, "mode": st.mode, "preferred_tool": st.subtask.preferred_tool,
-            }))
+            self._observe(
+                state,
+                st,
+                state.emit(
+                    "subtask_started",
+                    sid,
+                    {
+                        "subtask_id": sid,
+                        "mode": st.mode,
+                        "preferred_tool": st.subtask.preferred_tool,
+                    },
+                ),
+            )
             if st.stop_requested is not None:
-                self._fail_subtask(state, st, TypedError(
-                    code="CANCELLED", message=f"stopped by moderator: {st.stop_requested}",
-                    retryable=False, step_id=sid,
-                ))
+                self._fail_subtask(
+                    state,
+                    st,
+                    TypedError(
+                        code="CANCELLED",
+                        message=f"stopped by moderator: {st.stop_requested}",
+                        retryable=False,
+                        step_id=sid,
+                    ),
+                )
                 return
             if not self._resolve_inputs(state, st):
                 return
@@ -888,23 +1143,38 @@ class Controller:
                     report.findings, source["field"], source["subtask_id"]
                 )
         except ContractError as exc:
-            self._fail_subtask(state, st, TypedError(
-                code="PRECONDITION_FAILED", message=f"{sid}: {exc}",
-                retryable=False, step_id=sid,
-            ))
+            self._fail_subtask(
+                state,
+                st,
+                TypedError(
+                    code="PRECONDITION_FAILED",
+                    message=f"{sid}: {exc}",
+                    retryable=False,
+                    step_id=sid,
+                ),
+            )
             return False
-        parameters = dict(subtask.parameters) if isinstance(subtask.parameters, dict) else {}
+        parameters = (
+            dict(subtask.parameters) if isinstance(subtask.parameters, dict) else {}
+        )
         parameters.update(resolved)
         st.subtask = dataclasses.replace(subtask, parameters=parameters)
-        state.emit("subtask_inputs_resolved", sid, {
-            "subtask_id": sid,
-            "bindings": {
-                parameter: dict(source) for parameter, source in subtask.inputs_from.items()
+        state.emit(
+            "subtask_inputs_resolved",
+            sid,
+            {
+                "subtask_id": sid,
+                "bindings": {
+                    parameter: dict(source)
+                    for parameter, source in subtask.inputs_from.items()
+                },
             },
-        })
+        )
         return True
 
-    def _run_worker(self, state: _RunState, st: _SubtaskState, subtask: Subtask) -> WorkerReport | None:
+    def _run_worker(
+        self, state: _RunState, st: _SubtaskState, subtask: Subtask
+    ) -> WorkerReport | None:
         """Run the worker once on the lent session; ``None`` when the subtask
         failed (already recorded)."""
         sid = st.subtask_id
@@ -914,7 +1184,9 @@ class Controller:
             self.max_seconds - state.elapsed(),
         )
         if remaining_actions <= 0 or remaining_seconds <= 0:
-            self._fail_subtask(state, st, self._budget_error(st, "budget exhausted before start"))
+            self._fail_subtask(
+                state, st, self._budget_error(st, "budget exhausted before start")
+            )
             return None
         subtask_input = SubtaskInput(
             run_id=state.run_id,
@@ -936,17 +1208,26 @@ class Controller:
             outcome = getattr(raw, "outcome", None)
             if isinstance(raw, dict):
                 outcome = raw.get("outcome")
-            state.note("late_report_ignored", sid, {
-                "subtask_id": sid, "outcome": outcome if isinstance(outcome, str) else None,
-                "reason": "report arrived after the run stopped waiting for this subtask",
-            })
+            state.note(
+                "late_report_ignored",
+                sid,
+                {
+                    "subtask_id": sid,
+                    "outcome": outcome if isinstance(outcome, str) else None,
+                    "reason": "report arrived after the run stopped waiting for this subtask",
+                },
+            )
             return None
 
         # schema check, and the binding to this request and the lent session
         try:
-            report = raw if isinstance(raw, WorkerReport) else WorkerReport.from_dict(raw)
+            report = (
+                raw if isinstance(raw, WorkerReport) else WorkerReport.from_dict(raw)
+            )
             if report.subtask_id != sid:
-                raise ContractError(f"report subtask_id {report.subtask_id!r} is not {sid!r}")
+                raise ContractError(
+                    f"report subtask_id {report.subtask_id!r} is not {sid!r}"
+                )
             if report.request_id != state.request_id:
                 raise ContractError(
                     f"report request_id {report.request_id!r} is not this run's "
@@ -955,51 +1236,94 @@ class Controller:
             if report.session_handle is not None and report.session_handle != st.handle:
                 # The foreign handle is named nowhere: not adopted, not closed,
                 # not written to an event.
-                raise ContractError("report returned a session handle that is not the lent one")
+                raise ContractError(
+                    "report returned a session handle that is not the lent one"
+                )
         except ContractError as exc:
-            self._fail_subtask(state, st, TypedError(
-                code="EXTRACTION_FAILED", message=f"report failed schema check: {exc}",
-                retryable=False, step_id=sid,
-            ))
+            self._fail_subtask(
+                state,
+                st,
+                TypedError(
+                    code="EXTRACTION_FAILED",
+                    message=f"report failed schema check: {exc}",
+                    retryable=False,
+                    step_id=sid,
+                ),
+            )
             return None
         st.report = report
         self.store.save_report(state.run_id, _strip_handle(report))
 
         # budgets (stage 6): actions from the report, wall clock from the controller
-        count = report.metrics.get("browser_action_count") if isinstance(report.metrics, dict) else None
+        count = (
+            report.metrics.get("browser_action_count")
+            if isinstance(report.metrics, dict)
+            else None
+        )
         if isinstance(count, int) and not isinstance(count, bool):
             st.actions_used += max(count, 0)
         elapsed = time.monotonic() - (st.started or time.monotonic())
-        self._observe(state, st, state.emit("subtask_report_received", sid, {
-            "subtask_id": sid, "outcome": report.outcome,
-            "browser_action_count": count, "elapsed_seconds": round(elapsed, 3),
-            "preferred_tool": subtask.preferred_tool,
-        }))
+        self._observe(
+            state,
+            st,
+            state.emit(
+                "subtask_report_received",
+                sid,
+                {
+                    "subtask_id": sid,
+                    "outcome": report.outcome,
+                    "browser_action_count": count,
+                    "elapsed_seconds": round(elapsed, 3),
+                    "preferred_tool": subtask.preferred_tool,
+                },
+            ),
+        )
         if st.actions_used > self.max_actions:
-            self._fail_subtask(state, st, self._budget_error(
-                st, f"{st.actions_used} browser actions exceed max_actions={self.max_actions}"))
+            self._fail_subtask(
+                state,
+                st,
+                self._budget_error(
+                    st,
+                    f"{st.actions_used} browser actions exceed max_actions={self.max_actions}",
+                ),
+            )
             return None
         if elapsed > self.max_seconds:
-            self._fail_subtask(state, st, self._budget_error(
-                st, f"{elapsed:.1f}s exceed max_seconds={self.max_seconds:g}"))
+            self._fail_subtask(
+                state,
+                st,
+                self._budget_error(
+                    st, f"{elapsed:.1f}s exceed max_seconds={self.max_seconds:g}"
+                ),
+            )
             return None
         if st.stop_requested is not None:
-            self._fail_subtask(state, st, TypedError(
-                code="CANCELLED", message=f"stopped by moderator: {st.stop_requested}",
-                retryable=False, step_id=sid,
-            ))
+            self._fail_subtask(
+                state,
+                st,
+                TypedError(
+                    code="CANCELLED",
+                    message=f"stopped by moderator: {st.stop_requested}",
+                    retryable=False,
+                    step_id=sid,
+                ),
+            )
             return None
         return report
 
     def _budget_error(self, st: _SubtaskState, detail: str) -> TypedError:
         return TypedError(
-            code="BUDGET_EXCEEDED", message=f"{st.subtask_id}: {detail}",
-            retryable=False, step_id=st.subtask_id,
+            code="BUDGET_EXCEEDED",
+            message=f"{st.subtask_id}: {detail}",
+            retryable=False,
+            step_id=st.subtask_id,
         )
 
     # ------------------------------------------------------------------ intake
 
-    def _intake(self, state: _RunState, st: _SubtaskState, report: WorkerReport) -> None:
+    def _intake(
+        self, state: _RunState, st: _SubtaskState, report: WorkerReport
+    ) -> None:
         """Stage 7: assess, then execute the decision under the controller's caps.
 
         Bounded: at most one verification and one retry per subtask, so the
@@ -1009,9 +1333,14 @@ class Controller:
         current = st.subtask
         for _ in range(4):
             if self._abandoned(state, st):
-                state.note("late_report_ignored", sid, {
-                    "subtask_id": sid, "reason": "intake stopped: the run no longer waits for this subtask",
-                })
+                state.note(
+                    "late_report_ignored",
+                    sid,
+                    {
+                        "subtask_id": sid,
+                        "reason": "intake stopped: the run no longer waits for this subtask",
+                    },
+                )
                 return
             if st.force_verify and not st.verify_used:
                 self._verify(state, st, report, None)
@@ -1024,52 +1353,89 @@ class Controller:
                     if accepted:
                         st.status = _ACCEPTED
                 if not accepted:
-                    state.note("late_report_ignored", sid, {
-                        "subtask_id": sid, "reason": "accepted after the run stopped waiting for it",
-                    })
+                    state.note(
+                        "late_report_ignored",
+                        sid,
+                        {
+                            "subtask_id": sid,
+                            "reason": "accepted after the run stopped waiting for it",
+                        },
+                    )
                     return
-                state.emit("subtask_accepted", sid, {
-                    "subtask_id": sid, "reason": decision.reason,
-                    "evidence_refs": list(decision.evidence_refs),
-                })
+                state.emit(
+                    "subtask_accepted",
+                    sid,
+                    {
+                        "subtask_id": sid,
+                        "reason": decision.reason,
+                        "evidence_refs": list(decision.evidence_refs),
+                    },
+                )
                 return
             if decision.decision == "verify":
                 if st.verify_used:
-                    self._fail_subtask(state, st, TypedError(
-                        code="EXTRACTION_FAILED",
-                        message=f"{sid}: verification cap reached; still unconfirmed: {decision.reason}",
-                        retryable=False, step_id=sid, evidence_refs=list(decision.evidence_refs),
-                    ))
+                    self._fail_subtask(
+                        state,
+                        st,
+                        TypedError(
+                            code="EXTRACTION_FAILED",
+                            message=f"{sid}: verification cap reached; still unconfirmed: {decision.reason}",
+                            retryable=False,
+                            step_id=sid,
+                            evidence_refs=list(decision.evidence_refs),
+                        ),
+                    )
                     return
                 self._verify(state, st, report, decision)
                 continue
             if decision.decision == "retry_other_path":
                 if st.retry_used:
-                    failure = self._carried_failure(report, sid, decision.reason, "retry cap reached")
+                    failure = self._carried_failure(
+                        report, sid, decision.reason, "retry cap reached"
+                    )
                     self._fail_subtask(state, st, failure)
                     return
                 st.retry_used = True
                 current = dataclasses.replace(
                     current, preferred_tool=_OTHER_TOOL[current.preferred_tool]
                 )
-                state.emit("subtask_retried", sid, {
-                    "subtask_id": sid, "preferred_tool": current.preferred_tool,
-                    "reason": decision.reason,
-                })
+                state.emit(
+                    "subtask_retried",
+                    sid,
+                    {
+                        "subtask_id": sid,
+                        "preferred_tool": current.preferred_tool,
+                        "reason": decision.reason,
+                    },
+                )
                 retried = self._run_worker(state, st, current)
                 if retried is None:
                     return
                 report = retried
                 continue
             # fail
-            self._fail_subtask(state, st, self._carried_failure(report, sid, decision.reason, "moderator failed the report"))
+            self._fail_subtask(
+                state,
+                st,
+                self._carried_failure(
+                    report, sid, decision.reason, "moderator failed the report"
+                ),
+            )
             return
-        self._fail_subtask(state, st, TypedError(
-            code="EXTRACTION_FAILED", message=f"{sid}: intake did not converge",
-            retryable=False, step_id=sid,
-        ))
+        self._fail_subtask(
+            state,
+            st,
+            TypedError(
+                code="EXTRACTION_FAILED",
+                message=f"{sid}: intake did not converge",
+                retryable=False,
+                step_id=sid,
+            ),
+        )
 
-    def _assess(self, state: _RunState, st: _SubtaskState, report: WorkerReport) -> ModeratorDecision | None:
+    def _assess(
+        self, state: _RunState, st: _SubtaskState, report: WorkerReport
+    ) -> ModeratorDecision | None:
         sid = st.subtask_id
         try:
             with state.lock:
@@ -1083,21 +1449,36 @@ class Controller:
             if decision.stage != "assess":
                 raise ContractError(f"assess_report returned stage {decision.stage!r}")
         except ContractError as exc:
-            self._fail_subtask(state, st, TypedError(
-                code="EXTRACTION_FAILED", message=f"{sid}: moderator decision invalid: {exc}",
-                retryable=False, step_id=sid,
-            ))
+            self._fail_subtask(
+                state,
+                st,
+                TypedError(
+                    code="EXTRACTION_FAILED",
+                    message=f"{sid}: moderator decision invalid: {exc}",
+                    retryable=False,
+                    step_id=sid,
+                ),
+            )
             return None
         except Exception as exc:  # noqa: BLE001
             self._fail_subtask(state, st, _unexpected(exc, f"{sid} assess_report", sid))
             return None
-        state.emit("report_assessed", f"{sid}: {decision.decision}", {
-            "subtask_id": sid, "decision": decision.decision, "reason": decision.reason,
-        })
+        state.emit(
+            "report_assessed",
+            f"{sid}: {decision.decision}",
+            {
+                "subtask_id": sid,
+                "decision": decision.decision,
+                "reason": decision.reason,
+            },
+        )
         return decision
 
     def _verify(
-        self, state: _RunState, st: _SubtaskState, report: WorkerReport,
+        self,
+        state: _RunState,
+        st: _SubtaskState,
+        report: WorkerReport,
         decision: ModeratorDecision | None,
     ) -> None:
         """One read-only verification on the lent session; its result is added
@@ -1111,43 +1492,74 @@ class Controller:
         if decision is not None and isinstance(decision.next_action, dict):
             question = decision.next_action.get("question")
         if not isinstance(question, str) or not question.strip():
-            question = "Confirm each of the following on the current page: " + "; ".join(
-                st.subtask.success_conditions
+            question = (
+                "Confirm each of the following on the current page: "
+                + "; ".join(st.subtask.success_conditions)
             )
-        tool = st.subtask.preferred_tool if not st.retry_used else _OTHER_TOOL[st.subtask.preferred_tool]
+        tool = (
+            st.subtask.preferred_tool
+            if not st.retry_used
+            else _OTHER_TOOL[st.subtask.preferred_tool]
+        )
         observation = self.toolbox.observe(st.handle)
-        interpret = self.toolbox.vision_interpret if tool == "vision" else self.toolbox.dom_interpret
+        interpret = (
+            self.toolbox.vision_interpret
+            if tool == "vision"
+            else self.toolbox.dom_interpret
+        )
         answer = interpret(st.handle, question)
         if not isinstance(report.evidence, dict):
             report.evidence = {}
-        report.evidence.setdefault("verifications", []).append({
-            "observation_id": observation, "tool": tool, "question": question,
-            "answer": answer, "success_conditions": list(st.subtask.success_conditions),
-        })
+        report.evidence.setdefault("verifications", []).append(
+            {
+                "observation_id": observation,
+                "tool": tool,
+                "question": question,
+                "answer": answer,
+                "success_conditions": list(st.subtask.success_conditions),
+            }
+        )
         self.store.save_report(state.run_id, _strip_handle(report))
-        state.emit("subtask_verified", sid, {
-            "subtask_id": sid, "observation_id": observation, "tool": tool,
-        })
+        state.emit(
+            "subtask_verified",
+            sid,
+            {
+                "subtask_id": sid,
+                "observation_id": observation,
+                "tool": tool,
+            },
+        )
 
     @staticmethod
-    def _carried_failure(report: WorkerReport, sid: str, reason: str, fallback: str) -> TypedError:
+    def _carried_failure(
+        report: WorkerReport, sid: str, reason: str, fallback: str
+    ) -> TypedError:
         """The report's own typed failure, unchanged; else one built from the reason."""
         if report.typed_failures:
             return report.typed_failures[0]
         return TypedError(
-            code="EXTRACTION_FAILED", message=f"{sid}: {fallback}: {reason}",
-            retryable=False, step_id=sid,
+            code="EXTRACTION_FAILED",
+            message=f"{sid}: {fallback}: {reason}",
+            retryable=False,
+            step_id=sid,
         )
 
-    def _fail_subtask(self, state: _RunState, st: _SubtaskState, failure: TypedError) -> None:
+    def _fail_subtask(
+        self, state: _RunState, st: _SubtaskState, failure: TypedError
+    ) -> None:
         with state.lock:
             if st.status in (_FAILED, _CANCELLED, _ACCEPTED):
                 return
             st.status = _FAILED
             st.failure = failure
-        state.note("subtask_failed", f"{st.subtask_id}: {failure.code}", {
-            "subtask_id": st.subtask_id, "error": failure.to_dict(),
-        })
+        state.note(
+            "subtask_failed",
+            f"{st.subtask_id}: {failure.code}",
+            {
+                "subtask_id": st.subtask_id,
+                "error": failure.to_dict(),
+            },
+        )
 
     def _cancel_subtask(self, state: _RunState, st: _SubtaskState, reason: str) -> None:
         with state.lock:
@@ -1155,12 +1567,19 @@ class Controller:
                 return
             st.status = _CANCELLED
             st.failure = TypedError(
-                code="CANCELLED", message=f"{st.subtask_id}: {reason}",
-                retryable=False, step_id=st.subtask_id,
+                code="CANCELLED",
+                message=f"{st.subtask_id}: {reason}",
+                retryable=False,
+                step_id=st.subtask_id,
             )
-        state.emit("subtask_cancelled", st.subtask_id, {
-            "subtask_id": st.subtask_id, "reason": reason,
-        })
+        state.emit(
+            "subtask_cancelled",
+            st.subtask_id,
+            {
+                "subtask_id": st.subtask_id,
+                "reason": reason,
+            },
+        )
 
     @staticmethod
     def _abandoned(state: _RunState, st: _SubtaskState) -> bool:
@@ -1183,7 +1602,9 @@ class Controller:
             handle = st.handle
             if handle is not None:
                 state.sessions.pop(handle, None)
-        self._fail_subtask(state, st, self._budget_error(st, "run exceeded max_seconds"))
+        self._fail_subtask(
+            state, st, self._budget_error(st, "run exceeded max_seconds")
+        )
         if handle is not None:
             self._close_session(state, handle, st.subtask_id)
 
@@ -1198,45 +1619,70 @@ class Controller:
             if decision.stage != "observe":
                 return
         except Exception as exc:  # noqa: BLE001 - monitoring never breaks a run
-            state.emit("observer_failed", f"observe_progress raised {type(exc).__name__}")
+            state.emit(
+                "observer_failed", f"observe_progress raised {type(exc).__name__}"
+            )
             return
         if decision.decision == "flag":
             st.force_verify = True
         elif decision.decision == "stop_subtask":
             st.stop_requested = decision.reason or "stop_subtask"
         if decision.decision != "continue":
-            state.emit("observer_decided", f"{st.subtask_id}: {decision.decision}", {
-                "subtask_id": st.subtask_id, "decision": decision.decision, "reason": decision.reason,
-            })
+            state.emit(
+                "observer_decided",
+                f"{st.subtask_id}: {decision.decision}",
+                {
+                    "subtask_id": st.subtask_id,
+                    "decision": decision.decision,
+                    "reason": decision.reason,
+                },
+            )
 
     # ------------------------------------------------------ reconcile onwards
 
     def _stage_reconcile(
         self, state: _RunState, accepted: list[_SubtaskState], records: list[Any]
-    ) -> tuple[list[Any], list[str]]:
+    ) -> tuple[list[Any], list[Note]]:
         assert state.plan is not None
         reports = [st.report for st in accepted if st.report is not None]
         with state.lock:
             state.moderator_calls += 1
         # Copies: the accepted reports are the provenance the reconciled
         # records are checked against below, so the moderator cannot hold them.
-        decision = self.moderator.reconcile(state.plan, [copy.deepcopy(r) for r in reports])
+        decision = self.moderator.reconcile(
+            state.plan, [copy.deepcopy(r) for r in reports]
+        )
         if not isinstance(decision, ModeratorDecision):
             decision = ModeratorDecision.from_dict(decision)
         if decision.stage != "reconcile":
             raise ContractError(f"reconcile returned stage {decision.stage!r}")
-        state.emit("reconciled", decision.decision, {
-            "decision": decision.decision, "reason": decision.reason,
-        })
+        state.emit(
+            "reconciled",
+            decision.decision,
+            {
+                "decision": decision.decision,
+                "reason": decision.reason,
+            },
+        )
         if decision.decision == "fail":
-            raise _Finished(self._result(state, "failed", error=TypedError(
-                code="EXTRACTION_FAILED", message=f"reconcile failed: {decision.reason}",
-                retryable=False, evidence_refs=list(decision.evidence_refs),
-            )))
-        unverified: list[str] = []
+            raise _Finished(
+                self._result(
+                    state,
+                    "failed",
+                    error=TypedError(
+                        code="EXTRACTION_FAILED",
+                        message=f"reconcile failed: {decision.reason}",
+                        retryable=False,
+                        evidence_refs=list(decision.evidence_refs),
+                    ),
+                )
+            )
+        notes: list[Note] = []
         if decision.decision == "verify":
-            # Post-intake verification is not executed in this phase; the gap is stated.
-            unverified.append(f"unresolved after reconcile: {decision.reason}")
+            # Post-intake verification is not executed in this phase.  Its
+            # model-written reason remains internal; publication gets one typed
+            # controller-rendered note instead.
+            notes.append(Note("reconciliation_unresolved", "plan"))
         action = decision.next_action if isinstance(decision.next_action, dict) else {}
         merged = action.get("findings")
         if isinstance(merged, list):
@@ -1249,27 +1695,36 @@ class Controller:
                 raise ContractError(
                     f"reconciled record {index} is not one of the accepted reports' "
                     f"records: {_label(record)}",
-                    code="EXTRACTION_FAILED", evidence_refs=list(decision.evidence_refs),
+                    code="EXTRACTION_FAILED",
+                    evidence_refs=list(decision.evidence_refs),
                 )
             records = list(merged)
+        unresolved = False
         for key in ("gaps", "conflicts"):
             for entry in action.get(key) or []:
                 if isinstance(entry, dict):
-                    tag = entry.get("resolution") or entry.get("action") or "report_as_gap"
+                    tag = (
+                        entry.get("resolution")
+                        or entry.get("action")
+                        or "report_as_gap"
+                    )
                     if tag == "resolve_from_evidence":
                         continue
-                    text = entry.get("description") or entry.get("text") or str(entry)
-                else:
-                    text = str(entry)
-                unverified.append(f"{key[:-1]}: {text}")
-        return records, unverified
+                unresolved = True
+        if unresolved and not notes:
+            notes.append(Note("reconciliation_unresolved", "plan"))
+        return records, notes
 
     def _stage_validate(
         self, state: _RunState, accepted: list[_SubtaskState], evidence: list[str]
     ) -> dict[str, Any]:
         if not accepted:
-            validation = {"status": "inconclusive", "checks": [], "reason": "no accepted reports",
-                          "subtasks": {}}
+            validation = {
+                "status": "inconclusive",
+                "checks": [],
+                "reason": "no accepted reports",
+                "subtasks": {},
+            }
             state.emit("validated", "inconclusive", {"status": "inconclusive"})
             return validation
         per_subtask: dict[str, Any] = {}
@@ -1279,12 +1734,21 @@ class Controller:
             records, refs = _records_of(st.report), _evidence_of(st.report)
             if st.subtask.kind == "open":
                 result = self.ghost.validate(
-                    st.subtask, records, refs, report_context=self._report_context(state, st)
+                    st.subtask,
+                    records,
+                    refs,
+                    report_context=self._report_context(state, st),
                 )
             else:
                 result = self.ghost.validate(st.subtask, records, refs)
-            if not isinstance(result, dict) or result.get("status") not in ("passed", "failed", "inconclusive"):
-                raise ContractError(f"ghost.validate returned no status for {st.subtask_id}")
+            if not isinstance(result, dict) or result.get("status") not in (
+                "passed",
+                "failed",
+                "inconclusive",
+            ):
+                raise ContractError(
+                    f"ghost.validate returned no status for {st.subtask_id}"
+                )
             per_subtask[st.subtask_id] = result
             statuses.append(result["status"])
         if all(s == "passed" for s in statuses):
@@ -1307,9 +1771,20 @@ class Controller:
                     {"subtask_id": subtask_id, "check": name, "passed": passed}
                     for name, passed in raw.items()
                 )
-        validation = {"status": overall, "checks": checks, "subtasks": per_subtask,
-                      "evidence": list(evidence)}
-        state.emit("validated", overall, {"status": overall, "subtasks": {k: v["status"] for k, v in per_subtask.items()}})
+        validation = {
+            "status": overall,
+            "checks": checks,
+            "subtasks": per_subtask,
+            "evidence": list(evidence),
+        }
+        state.emit(
+            "validated",
+            overall,
+            {
+                "status": overall,
+                "subtasks": {k: v["status"] for k, v in per_subtask.items()},
+            },
+        )
         return validation
 
     @staticmethod
@@ -1321,11 +1796,14 @@ class Controller:
         """
         assert st.report is not None
         report = st.report
-        evidence = copy.deepcopy(report.evidence) if isinstance(report.evidence, dict) else {}
+        evidence = (
+            copy.deepcopy(report.evidence) if isinstance(report.evidence, dict) else {}
+        )
         evidence.pop("session_handle", None)
         handles = {handle for handle in (st.handle, report.session_handle) if handle}
         evidence = {
-            key: value for key, value in evidence.items()
+            key: value
+            for key, value in evidence.items()
             if not (isinstance(value, str) and value in handles)
         }
         return {
@@ -1336,70 +1814,166 @@ class Controller:
         }
 
     def _stage_synthesize(
-        self, state: _RunState, accepted: list[_SubtaskState], records: list[Any],
-        evidence: list[str], failures: list[TypedError], unverified: list[str],
+        self,
+        state: _RunState,
+        accepted: list[_SubtaskState],
+        records: list[Any],
+        evidence: list[str],
+        failures: list[TypedError],
+        controller_notes: list[Note],
     ) -> FinalAnswer:
         assert state.interpreted is not None and state.validation is not None
         with state.lock:
             state.moderator_calls += 1
-        # Copies: the validated records are the provenance the answer's records
-        # are checked against below, so the moderator cannot alter them in place.
-        answer = self.moderator.synthesize(
-            state.interpreted, copy.deepcopy(records), copy.deepcopy(state.validation),
-            list(evidence), list(failures)
+        # Copies: the validated records are the provenance the selection's
+        # records are checked against below, so the moderator cannot alter them
+        # in place.  The moderator returns selection only; controller-owned
+        # output fields from an older or adversarial implementation are dropped
+        # without ever being echoed into an event or result.
+        raw = self.moderator.synthesize(
+            state.interpreted,
+            copy.deepcopy(records),
+            copy.deepcopy(state.validation),
+            list(evidence),
+            list(failures),
         )
-        if not isinstance(answer, FinalAnswer):
-            answer = FinalAnswer.from_dict(answer)
-        # rule check: no claim without evidence
-        bare = [c.text for c in answer.claims if not isinstance(c, Claim) or not c.evidence_refs]
-        if bare:
+        discarded: list[str] = []
+        if isinstance(raw, AnswerSelection):
+            selection = copy.deepcopy(raw)
+        elif isinstance(raw, dict):
+            payload, discarded = _discard_moderator_prose(raw)
+            try:
+                selection = AnswerSelection.from_dict(payload)
+            except ContractError as exc:
+                raise ContractError(
+                    f"moderator selection is invalid: {exc}",
+                    code="EXTRACTION_FAILED",
+                    evidence_refs=list(evidence),
+                ) from exc
+        else:
+            discarded = []
             raise ContractError(
-                f"{len(bare)} claim(s) carry no evidence reference: {bare[0][:80]!r}",
-                code="EXTRACTION_FAILED", evidence_refs=list(evidence),
+                "moderator synthesize returned no structured selection",
+                code="EXTRACTION_FAILED",
+                evidence_refs=list(evidence),
             )
-        # rule check: every claim cites evidence of this run only.  The accepted
-        # set is what synthesize was handed plus every screenshot and
-        # verification of the accepted reports.
+        try:
+            # Re-decode even a direct dataclass result: callers can mutate a
+            # dataclass after ``__post_init__``, and the stage boundary must
+            # validate what it actually received.
+            selection = AnswerSelection.from_dict(selection.to_dict())
+        except ContractError as exc:
+            raise ContractError(
+                f"moderator selection is invalid: {exc}",
+                code="EXTRACTION_FAILED",
+                evidence_refs=list(evidence),
+            ) from exc
+        if discarded:
+            state.emit(
+                "moderator_output_discarded",
+                "controller-owned moderator output fields were discarded",
+                {"fields": sorted(discarded)},
+            )
+
+        selected_records: list[Any] = []
+        for index in selection.record_indices:
+            if index >= len(records):
+                raise ContractError(
+                    "moderator selected a record outside the validated record set",
+                    code="EXTRACTION_FAILED",
+                    evidence_refs=list(evidence),
+                )
+            selected_records.append(copy.deepcopy(records[index]))
+
+        # Evidence belongs to the controller.  It is derived from the selected
+        # record after the moderator's index/field choices have been validated.
         allowed = set(evidence)
         for st in accepted:
             if st.report is not None:
                 allowed.update(_evidence_of(st.report))
-        for index, claim in enumerate(answer.claims):
-            foreign = [
-                ref for ref in claim.evidence_refs
-                if not isinstance(ref, str) or ref not in allowed
-            ]
-            if foreign:
+        claims: list[Claim] = []
+        for index, claim in enumerate(selection.claims):
+            if claim.record_index >= len(selected_records):
                 raise ContractError(
-                    f"claim {index} cites evidence that is not from this run: "
-                    f"{foreign[0]!r} in claim {claim.text[:80]!r}",
-                    code="EXTRACTION_FAILED", evidence_refs=list(evidence),
+                    f"claim {index} names a record outside the selected records",
+                    code="EXTRACTION_FAILED",
+                    evidence_refs=list(evidence),
                 )
-        # rule check: the answer's records are the validated records, possibly
-        # reordered, filtered or truncated, never added to or altered.
-        unsupplied = _first_unsupplied(answer.records, records)
-        if unsupplied is not None:
-            index, record = unsupplied
+            record = selected_records[claim.record_index]
+            if not isinstance(record, dict):
+                raise ContractError(
+                    f"claim {index} names a record that has no selectable fields",
+                    code="EXTRACTION_FAILED",
+                    evidence_refs=list(evidence),
+                )
+            for name in claim.fields:
+                if name in _INTERNAL_RECORD_FIELDS or name not in record:
+                    raise ContractError(
+                        f"claim {index} names a field outside its validated record",
+                        code="EXTRACTION_FAILED",
+                        evidence_refs=list(evidence),
+                    )
+            observation = record.get("source_observation_id")
+            if not isinstance(observation, str) or observation not in allowed:
+                raise ContractError(
+                    f"claim {index} has no run evidence on its validated record",
+                    code="EXTRACTION_FAILED",
+                    evidence_refs=list(evidence),
+                )
+            claims.append(Claim(claim.record_index, list(claim.fields)))
+        if [claim.record_index for claim in claims] != list(
+            range(len(selected_records))
+        ):
             raise ContractError(
-                f"answer record {index} is not one of the validated records: {_label(record)}",
-                code="EXTRACTION_FAILED", evidence_refs=list(evidence),
+                "claims must name every selected record exactly once and in selected order",
+                code="EXTRACTION_FAILED",
+                evidence_refs=list(evidence),
             )
-        # rule check: failures and gaps stated plainly
-        stated = {(f.code, f.message) for f in answer.failures}
-        for failure in failures:
-            if (failure.code, failure.message) not in stated:
-                answer.failures.append(failure)
-        for note in unverified:
-            if note not in answer.unverified:
-                answer.unverified.append(note)
-        if state.validation["status"] != "passed" and records:
-            note = f"validation {state.validation['status']}: records are not validated"
-            if note not in answer.unverified:
-                answer.unverified.append(note)
-        state.emit("synthesized", f"{len(answer.claims)} claim(s)", {
-            "claims": len(answer.claims), "records": len(answer.records),
-            "failures": len(answer.failures), "unverified": len(answer.unverified),
-        })
+
+        criteria = _criterion_subjects(state.interpreted)
+        notes: list[Note] = []
+        for index, note in enumerate(selection.notes):
+            if note.kind == "criterion_not_applied":
+                valid = note.subject in criteria
+            elif note.kind == "synthesis_fallback":
+                valid = note.subject in _SYNTHESIS_FALLBACK_SUBJECTS
+            else:
+                valid = False
+            if not valid:
+                raise ContractError(
+                    f"note {index} has a subject outside the controller's closed set",
+                    code="EXTRACTION_FAILED",
+                    evidence_refs=list(evidence),
+                )
+            notes.append(note)
+        notes.extend(copy.deepcopy(controller_notes))
+        status = state.validation["status"]
+        if status != "passed":
+            notes.append(Note("validation_not_passed", status))
+            claims = []
+            selected_records = []
+        notes = list({(note.kind, note.subject): note for note in notes}.values())
+        rendered_notes = [_render_note(note, criteria) for note in notes]
+        lines = _render_answer_lines(
+            selected_records, claims, status, rendered_notes, failures
+        )
+        answer = FinalAnswer(
+            lines=lines,
+            claims=claims,
+            records=selected_records,
+            failures=copy.deepcopy(failures),
+            notes=notes,
+        )
+        state.emit(
+            "synthesized",
+            f"{len(answer.claims)} claim(s)",
+            {
+                "claims": len(answer.claims),
+                "records": len(answer.records),
+                "failures": len(answer.failures),
+                "notes": len(answer.notes),
+            },
+        )
         return answer
 
     def _stage_compile(self, state: _RunState, accepted: list[_SubtaskState]) -> None:
@@ -1413,42 +1987,79 @@ class Controller:
                 skill = dict(skill)
                 skill.pop("session_handle", None)
                 self.store.save_skill(skill)
-                state.emit("skill_candidate_created", st.subtask_id, {
-                    "subtask_id": st.subtask_id, "skill_id": skill.get("skill_id"),
-                    "status": skill.get("status"),
-                })
+                state.emit(
+                    "skill_candidate_created",
+                    st.subtask_id,
+                    {
+                        "subtask_id": st.subtask_id,
+                        "skill_id": skill.get("skill_id"),
+                        "status": skill.get("status"),
+                    },
+                )
             except Exception as exc:  # noqa: BLE001
-                state.emit("compile_failed", f"{st.subtask_id}: {type(exc).__name__}", {
-                    "subtask_id": st.subtask_id, "exception": type(exc).__name__,
-                })
+                state.emit(
+                    "compile_failed",
+                    f"{st.subtask_id}: {type(exc).__name__}",
+                    {
+                        "subtask_id": st.subtask_id,
+                        "exception": type(exc).__name__,
+                    },
+                )
 
     # ----------------------------------------------------------------- helpers
 
     def _check_run_limits(self, state: _RunState) -> None:
         if state.cancel_requested.is_set():
-            raise _Finished(self._result(state, "cancelled", error=TypedError(
-                code="CANCELLED", message="run cancelled", retryable=False,
-            )))
+            raise _Finished(
+                self._result(
+                    state,
+                    "cancelled",
+                    error=TypedError(
+                        code="CANCELLED",
+                        message="run cancelled",
+                        retryable=False,
+                    ),
+                )
+            )
         if state.elapsed() > self.max_seconds:
-            state.emit("budget_exceeded", "run exceeded max_seconds", {
-                "max_seconds": self.max_seconds, "elapsed_seconds": round(state.elapsed(), 3),
-            })
-            raise _Finished(self._result(state, "failed", error=TypedError(
-                code="BUDGET_EXCEEDED",
-                message=f"run exceeded max_seconds={self.max_seconds:g}",
-                retryable=False,
-            )))
+            state.emit(
+                "budget_exceeded",
+                "run exceeded max_seconds",
+                {
+                    "max_seconds": self.max_seconds,
+                    "elapsed_seconds": round(state.elapsed(), 3),
+                },
+            )
+            raise _Finished(
+                self._result(
+                    state,
+                    "failed",
+                    error=TypedError(
+                        code="BUDGET_EXCEEDED",
+                        message=f"run exceeded max_seconds={self.max_seconds:g}",
+                        retryable=False,
+                    ),
+                )
+            )
 
     def _result(
-        self, state: _RunState, status: str, *, error: TypedError | None = None,
+        self,
+        state: _RunState,
+        status: str,
+        *,
+        error: TypedError | None = None,
         answer: FinalAnswer | None = None,
     ) -> RunResult:
         reports = [
-            _strip_handle(st.report) for st in state.subtasks.values() if st.report is not None
+            _strip_handle(st.report)
+            for st in state.subtasks.values()
+            if st.report is not None
         ]
         metrics = {
             "elapsed_seconds": round(state.elapsed(), 3),
-            "browser_action_count": sum(st.actions_used for st in state.subtasks.values()),
+            "browser_action_count": sum(
+                st.actions_used for st in state.subtasks.values()
+            ),
             "moderator_calls": state.moderator_calls,
             "sessions_opened": state.sessions_opened,
             "subtasks": {sid: st.status for sid, st in state.subtasks.items()},
@@ -1469,9 +2080,14 @@ class Controller:
         )
 
     def _failed(self, state: _RunState, error: TypedError) -> RunResult:
-        state.emit("stage_failed", f"{state.state}: {error.code}", {
-            "stage": state.state, "error": error.to_dict(),
-        })
+        state.emit(
+            "stage_failed",
+            f"{state.state}: {error.code}",
+            {
+                "stage": state.state,
+                "error": error.to_dict(),
+            },
+        )
         return self._result(state, "failed", error=error)
 
     def _close_sessions(self, state: _RunState) -> None:
@@ -1491,11 +2107,20 @@ class Controller:
             state.note("session_closed", sid, {"subtask_id": sid})
         except Exception as exc:  # noqa: BLE001
             try:
-                state.note("session_close_failed", f"{sid}: {type(exc).__name__}", {
-                    "subtask_id": sid, "exception": type(exc).__name__,
-                })
-            except Exception:  # noqa: BLE001 - the store is already failing
-                pass
+                state.note(
+                    "session_close_failed",
+                    f"{sid}: {type(exc).__name__}",
+                    {
+                        "subtask_id": sid,
+                        "exception": type(exc).__name__,
+                    },
+                )
+            except Exception as note_exc:  # noqa: BLE001 - the store is already failing
+                log.warning(
+                    "run %s: could not record stage failure: %s",
+                    state.run_id,
+                    type(note_exc).__name__,
+                )
 
     @staticmethod
     def _import(module: str, name: str) -> Callable[..., Any]:

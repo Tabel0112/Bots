@@ -50,7 +50,9 @@ def parameter(name, value, *, source="text_span", confidence=0.95, span=None):
     }
 
 
-def intent(parameters, *, site_id="demo-catalog", operation="search_products", confidence=0.94):
+def intent(
+    parameters, *, site_id="demo-catalog", operation="search_products", confidence=0.94
+):
     return {
         "site_id": site_id,
         "operation": operation,
@@ -113,7 +115,9 @@ def payload(intents=(), missing_required=(), ambiguities=()):
     }
 
 
-def run(text, parsed, *, request_id="request-test-1", model=None, status="ok", raw_text=None):
+def run(
+    text, parsed, *, request_id="request-test-1", model=None, status="ok", raw_text=None
+):
     # The boundary never carries parsed content on a non-ok status, so neither
     # does the fake: a truncated or refused call has nothing to read.
     client = FakeModelClient(
@@ -164,7 +168,7 @@ class InterpreterTest(unittest.TestCase):
                 )
             ]
         )
-        interpreted, client = run(TEXT, parsed)
+        interpreted, _client = run(TEXT, parsed)
 
         self.assertEqual(interpreted.request_id, "request-test-1")
         self.assertEqual(interpreted.raw_text, TEXT)
@@ -190,16 +194,16 @@ class InterpreterTest(unittest.TestCase):
         )
 
     def test_request_shape_sent_to_the_model(self):
-        parsed = payload(intents=[intent([parameter("query", "headphones", span=(5, 15))])])
+        parsed = payload(
+            intents=[intent([parameter("query", "headphones", span=(5, 15))])]
+        )
         _, client = run(TEXT, parsed)
         self.assertEqual(len(client.calls), 1)
         call = client.calls[0]
 
         # Exactly the boundary's four arguments; the model name is the client's
         # business, so the interpreter does not pass one.
-        self.assertEqual(
-            sorted(call), ["max_tokens", "output_model", "system", "user"]
-        )
+        self.assertEqual(sorted(call), ["max_tokens", "output_model", "system", "user"])
         self.assertEqual(call["max_tokens"], MAX_TOKENS)
         self.assertEqual(MAX_TOKENS, 4096)
         # The user turn is the request text, unwrapped and unprefixed.
@@ -221,7 +225,9 @@ class InterpreterTest(unittest.TestCase):
                         parameter("max_price", 150, span=(22, 26)),
                     ]
                 ),
-                intent([parameter("query", "keyboards", span=(47, 56))], confidence=0.88),
+                intent(
+                    [parameter("query", "keyboards", span=(47, 56))], confidence=0.88
+                ),
             ]
         )
         interpreted, _ = run(COMPOUND, parsed)
@@ -241,7 +247,9 @@ class InterpreterTest(unittest.TestCase):
         parsed = payload(
             intents=[intent([parameter("max_price", 20, source="structured")])],
             missing_required=[
-                missing(0, "query", "What product should I search the demo catalog for?")
+                missing(
+                    0, "query", "What product should I search the demo catalog for?"
+                )
             ],
             ambiguities=["'cheap' is not a price the catalog can filter on."],
         )
@@ -295,7 +303,9 @@ class InterpreterTest(unittest.TestCase):
         self.assertIsNone(client.results[0].parsed)
 
     def test_truncated_response_is_an_extraction_failure(self):
-        parsed = payload(intents=[intent([parameter("query", "headphones", span=(5, 15))])])
+        parsed = payload(
+            intents=[intent([parameter("query", "headphones", span=(5, 15))])]
+        )
         with self.assertRaises(ContractError) as caught:
             run(TEXT, parsed, status="truncated")
         self.assertEqual(caught.exception.code, "EXTRACTION_FAILED")
@@ -303,7 +313,7 @@ class InterpreterTest(unittest.TestCase):
 
     def test_invalid_response_is_an_extraction_failure(self):
         with self.assertRaises(ContractError) as caught:
-            run(TEXT, None, status="invalid", raw_text="{\"intents\": ")
+            run(TEXT, None, status="invalid", raw_text='{"intents": ')
         self.assertEqual(caught.exception.code, "EXTRACTION_FAILED")
 
     def test_an_ok_result_with_no_payload_is_an_extraction_failure(self):
@@ -334,7 +344,9 @@ class InterpreterTest(unittest.TestCase):
         self.assertEqual(len(interpreted.ambiguities), 1)
         self.assertIn("query", interpreted.ambiguities[0])
         # The parameter whose span did match is untouched.
-        self.assertEqual(interpreted.intents[0].parameters["max_price"].source, "text_span")
+        self.assertEqual(
+            interpreted.intents[0].parameters["max_price"].source, "text_span"
+        )
 
     def test_span_out_of_range_or_absent_is_downgraded(self):
         parsed = payload(
@@ -405,7 +417,9 @@ class InterpreterTest(unittest.TestCase):
         not reach the artifact when a client was injected, because the injected
         client is what actually answered.
         """
-        parsed = payload(intents=[intent([parameter("query", "headphones", span=(5, 15))])])
+        parsed = payload(
+            intents=[intent([parameter("query", "headphones", span=(5, 15))])]
+        )
         with mock.patch.dict(os.environ, {"ARGUS_MODEL": "not-the-one-that-answered"}):
             interpreted, _ = run(TEXT, parsed)
         self.assertEqual(interpreted.model, MODEL)
@@ -418,7 +432,9 @@ class InterpreterTest(unittest.TestCase):
 
     def test_no_client_builds_an_openai_compatible_one_for_the_model(self):
         """``client=None`` is the only path that constructs a real client."""
-        parsed = payload(intents=[intent([parameter("query", "headphones", span=(5, 15))])])
+        parsed = payload(
+            intents=[intent([parameter("query", "headphones", span=(5, 15))])]
+        )
         built: list = []
 
         def factory(model=None):
@@ -446,7 +462,9 @@ class InterpreterTest(unittest.TestCase):
     # -- input guards ----------------------------------------------------- #
 
     def test_empty_text_is_rejected_before_any_call(self):
-        client = FakeModelClient(ModelResult(status="ok", parsed=payload(), model=MODEL))
+        client = FakeModelClient(
+            ModelResult(status="ok", parsed=payload(), model=MODEL)
+        )
         for bad in ("", "   "):
             with self.assertRaises(ContractError) as caught:
                 interpret(bad, "request-test-1", client=client)
@@ -454,7 +472,9 @@ class InterpreterTest(unittest.TestCase):
         self.assertEqual(client.calls, [])
 
     def test_missing_request_id_is_rejected(self):
-        client = FakeModelClient(ModelResult(status="ok", parsed=payload(), model=MODEL))
+        client = FakeModelClient(
+            ModelResult(status="ok", parsed=payload(), model=MODEL)
+        )
         with self.assertRaises(ContractError) as caught:
             interpret(TEXT, "", client=client)
         self.assertEqual(caught.exception.code, "INVALID_INPUT")
@@ -462,7 +482,9 @@ class InterpreterTest(unittest.TestCase):
 
     def test_empty_interpretation_is_returned_not_repaired(self):
         # Nothing supported in the text: the gate turns this into G1.
-        interpreted, _ = run("what is the weather", payload(ambiguities=["no supported site"]))
+        interpreted, _ = run(
+            "what is the weather", payload(ambiguities=["no supported site"])
+        )
         self.assertEqual(interpreted.intents, [])
         self.assertEqual(interpreted.ambiguities, ["no supported site"])
 
@@ -509,9 +531,7 @@ class InterpreterTest(unittest.TestCase):
         self.assertIn("target domain", interpreted.ambiguities[0])
 
     def test_open_intent_with_a_malformed_domain_is_dropped(self):
-        parsed = payload(
-            intents=[open_intent(target_domain="jobs example com/../etc")]
-        )
+        parsed = payload(intents=[open_intent(target_domain="jobs example com/../etc")])
         interpreted, _ = run("Find jobs somewhere", parsed)
 
         self.assertIsNone(interpreted.intents[0].target_domain)
@@ -535,7 +555,9 @@ class InterpreterTest(unittest.TestCase):
                     [parameter("query", "software engineering", span=(17, 37))],
                     criteria=[
                         criterion("best", "rank", span=(9, 13), confidence=0.4),
-                        criterion("10", "limit", parameter=10, span=(14, 16), confidence=0.99),
+                        criterion(
+                            "10", "limit", parameter=10, span=(14, 16), confidence=0.99
+                        ),
                     ],
                 )
             ]
@@ -562,23 +584,39 @@ class InterpreterTest(unittest.TestCase):
                     [parameter("query", "software engineering", span=(27, 47))],
                     criteria=[
                         criterion(
-                            "highest salary", "rank", parameter="salary",
-                            span=(9, 23), confidence=0.99,
+                            "highest salary",
+                            "rank",
+                            parameter="salary",
+                            span=(9, 23),
+                            confidence=0.99,
                         ),
                         criterion(
-                            "remote only", "filter", parameter="remote",
-                            span=(54, 65), confidence=0.97,
+                            "remote only",
+                            "filter",
+                            parameter="remote",
+                            span=(54, 65),
+                            confidence=0.97,
                         ),
                     ],
-                    expected_record_shape=("title", "company", "url", "salary", "remote"),
+                    expected_record_shape=(
+                        "title",
+                        "company",
+                        "url",
+                        "salary",
+                        "remote",
+                    ),
                 )
             ]
         )
         interpreted, _ = run(text, parsed)
 
         rank, remote = interpreted.intents[0].criteria
-        self.assertEqual((rank.kind, rank.parameter, rank.span), ("rank", "salary", (9, 23)))
-        self.assertEqual((remote.kind, remote.parameter, remote.span), ("filter", "remote", (54, 65)))
+        self.assertEqual(
+            (rank.kind, rank.parameter, rank.span), ("rank", "salary", (9, 23))
+        )
+        self.assertEqual(
+            (remote.kind, remote.parameter, remote.span), ("filter", "remote", (54, 65))
+        )
         # Each criterion cites its own words, and both citations verify.
         self.assertEqual(text[9:23], "highest salary")
         self.assertEqual(text[54:65], "remote only")
@@ -651,10 +689,15 @@ class InterpreterTest(unittest.TestCase):
                     criteria=[
                         # "Find" is not where "highest salary" came from.
                         criterion(
-                            "highest salary", "rank", parameter="salary",
-                            span=(0, 4), confidence=0.99,
+                            "highest salary",
+                            "rank",
+                            parameter="salary",
+                            span=(0, 4),
+                            confidence=0.99,
                         ),
-                        criterion("10", "limit", parameter=10, span=(24, 26), confidence=0.99),
+                        criterion(
+                            "10", "limit", parameter=10, span=(24, 26), confidence=0.99
+                        ),
                     ]
                 )
             ]

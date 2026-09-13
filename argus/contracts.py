@@ -16,7 +16,8 @@ Message                      Produced by
 :class:`SubtaskInput`        stage 5, dispatch
 :class:`WorkerReport`        a subagent, read at stage 7, report intake
 :class:`ModeratorDecision`   stages 7, 8 and 10, the moderator
-:class:`FinalAnswer`         stage 10, synthesize
+:class:`AnswerSelection`     stage 10, moderator selection
+:class:`FinalAnswer`         stage 10, controller rendering
 :class:`Event`               every stage, appended to the run event stream
 :class:`RunResult`           stage 11, publish (the single terminal result)
 ===========================  ==========================================
@@ -28,48 +29,53 @@ from __future__ import annotations
 
 import copy
 import math
+from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
-from typing import Any, ClassVar, Mapping
+from typing import Any, ClassVar
 
 __all__ = [
-    "SCHEMA_VERSION",
-    "MAX_CONCURRENT_WORKERS",
-    "MAX_OPEN_SUBTASKS",
-    "MAX_OPEN_DEPTH",
-    "ERROR_CODES",
-    "PARAMETER_SOURCES",
-    "INTENT_KINDS",
     "CRITERION_KINDS",
-    "PLANNED_BY_VALUES",
+    "ERROR_CODES",
     "GATE_DECISIONS",
-    "MODERATOR_STAGES",
-    "PREFERRED_TOOLS",
-    "SUBTASK_MODES",
-    "RUN_STATUSES",
-    "ContractError",
-    "Message",
-    "TypedError",
-    "ParameterOrigin",
-    "Criterion",
-    "Intent",
-    "MissingParameter",
-    "InterpretedRequest",
-    "GateDecision",
-    "Subtask",
-    "Plan",
-    "Budget",
-    "SubtaskInput",
-    "WorkerReport",
-    "ModeratorDecision",
+    "INTENT_KINDS",
+    "MAX_CONCURRENT_WORKERS",
+    "MAX_OPEN_DEPTH",
+    "MAX_OPEN_SUBTASKS",
     "MODERATOR_DECISIONS",
+    "MODERATOR_STAGES",
+    "NOTE_KINDS",
+    "PARAMETER_SOURCES",
+    "PLANNED_BY_VALUES",
+    "PREFERRED_TOOLS",
+    "RUN_STATUSES",
+    "SCHEMA_VERSION",
+    "SUBTASK_MODES",
+    "SYNTHESIS_FALLBACK_SUBJECTS",
+    "AnswerSelection",
+    "Budget",
     "Claim",
-    "FinalAnswer",
+    "ContractError",
+    "Criterion",
     "Event",
+    "FinalAnswer",
+    "GateDecision",
+    "Intent",
+    "InterpretedRequest",
+    "Message",
+    "MissingParameter",
+    "ModeratorDecision",
+    "Note",
+    "ParameterOrigin",
+    "Plan",
     "RunResult",
+    "Subtask",
+    "SubtaskInput",
+    "TypedError",
+    "WorkerReport",
 ]
 
 #: Version of the message shapes in this module.  Bump it when a field changes.
-SCHEMA_VERSION = "0.4-argus-draft"
+SCHEMA_VERSION = "0.5-argus-draft"
 
 #: Local VLM capacity and the separate MVP open-plan size budget.
 MAX_CONCURRENT_WORKERS = 4
@@ -114,7 +120,7 @@ PLANNED_BY_VALUES = ("deterministic", "model")
 GATE_DECISIONS = ("accept", "clarify", "reject")
 
 #: Stages at which the moderator returns a ModeratorDecision.  Stage 10
-#: (synthesize) returns a FinalAnswer instead, so it is not listed here.
+#: (synthesize) returns an AnswerSelection instead, so it is not listed here.
 MODERATOR_STAGES = ("assess", "reconcile", "observe")
 
 #: Allowed ``decision`` values per stage.  The controller enforces the caps
@@ -133,6 +139,26 @@ SUBTASK_MODES = ("explore", "reuse")
 
 #: Statuses of a run; "running" is the in-progress snapshot, the rest are terminal.
 RUN_STATUSES = ("running", "succeeded", "failed", "cancelled", "needs_input")
+
+#: Structured caveats the moderator or controller may attach to an answer.
+#: Their subjects are checked against run-owned closed sets by the controller;
+#: neither field is rendered verbatim.
+NOTE_KINDS = (
+    "criterion_not_applied",
+    "synthesis_fallback",
+    "reconciliation_unresolved",
+    "validation_not_passed",
+    "clarification_required",
+)
+
+#: Closed reasons a model-backed moderator may use when its deterministic
+#: synthesis fallback produced the selection.
+SYNTHESIS_FALLBACK_SUBJECTS = (
+    "model_refused",
+    "model_truncated",
+    "model_invalid",
+    "selection_invalid",
+)
 
 
 class ContractError(ValueError):
@@ -159,7 +185,7 @@ class ContractError(ValueError):
         self.evidence_refs = list(evidence_refs or [])
 
     @property
-    def typed_error(self) -> "TypedError":
+    def typed_error(self) -> TypedError:
         """The failure as a :class:`TypedError` for the run result."""
         return TypedError(
             code=self.code,
@@ -188,17 +214,23 @@ def _check_choice(owner: str, name: str, value: Any, allowed: tuple[str, ...]) -
         )
 
 
-def _check_open_context(owner: str, target_domain: Any, goal: Any,
-                        criteria: Any, expected_record_shape: Any) -> None:
+def _check_open_context(
+    owner: str, target_domain: Any, goal: Any, criteria: Any, expected_record_shape: Any
+) -> None:
     """Check optional context without deciding whether an intent can execute."""
     for name, value in (("target_domain", target_domain), ("goal", goal)):
         if value is not None and not isinstance(value, str):
             raise ContractError(f"{owner}.{name} must be a string or null")
-    if not isinstance(criteria, list) or any(not isinstance(c, Criterion) for c in criteria):
+    if not isinstance(criteria, list) or any(
+        not isinstance(c, Criterion) for c in criteria
+    ):
         raise ContractError(f"{owner}.criteria must be a list of Criterion messages")
-    if (not isinstance(expected_record_shape, list)
-            or any(not isinstance(name, str) or not name.strip() for name in expected_record_shape)):
-        raise ContractError(f"{owner}.expected_record_shape must be a list of nonempty field names")
+    if not isinstance(expected_record_shape, list) or any(
+        not isinstance(name, str) or not name.strip() for name in expected_record_shape
+    ):
+        raise ContractError(
+            f"{owner}.expected_record_shape must be a list of nonempty field names"
+        )
 
 
 class Message:
@@ -229,14 +261,20 @@ class Message:
     def from_dict(cls, data: Any):
         """Build the message from JSON data, rejecting anything unexpected."""
         if not isinstance(data, Mapping):
-            raise ContractError(f"{cls.__name__}: expected an object, got {type(data).__name__}")
+            raise ContractError(
+                f"{cls.__name__}: expected an object, got {type(data).__name__}"
+            )
         known = {f.name for f in fields(cls)}
         unknown = sorted(set(data) - known)
         if unknown:
-            raise ContractError(f"{cls.__name__}: unknown field(s) {', '.join(unknown)}")
+            raise ContractError(
+                f"{cls.__name__}: unknown field(s) {', '.join(unknown)}"
+            )
         missing = [name for name in cls.required_fields() if name not in data]
         if missing:
-            raise ContractError(f"{cls.__name__}: missing required field(s) {', '.join(missing)}")
+            raise ContractError(
+                f"{cls.__name__}: missing required field(s) {', '.join(missing)}"
+            )
         kwargs = {
             f.name: cls._decode_field(f.name, data[f.name])
             for f in fields(cls)
@@ -326,9 +364,14 @@ class Criterion(Message):
         _check_choice("Criterion", "kind", self.kind, CRITERION_KINDS)
         if not isinstance(self.text, str) or not self.text.strip():
             raise ContractError("Criterion.text must be a nonempty string")
-        if (type(self.confidence) not in (int, float)
-                or not 0 <= self.confidence <= 1 or not math.isfinite(self.confidence)):
-            raise ContractError("Criterion.confidence must be a finite number from 0 to 1")
+        if (
+            type(self.confidence) not in (int, float)
+            or not 0 <= self.confidence <= 1
+            or not math.isfinite(self.confidence)
+        ):
+            raise ContractError(
+                "Criterion.confidence must be a finite number from 0 to 1"
+            )
         if self.span is not None:
             if not isinstance(self.span, (list, tuple)):
                 raise ContractError("Criterion.span must be two integers or null")
@@ -367,8 +410,13 @@ class Intent(Message):
 
     def __post_init__(self) -> None:
         _check_choice("Intent", "kind", self.kind, INTENT_KINDS)
-        _check_open_context("Intent", self.target_domain, self.goal,
-                            self.criteria, self.expected_record_shape)
+        _check_open_context(
+            "Intent",
+            self.target_domain,
+            self.goal,
+            self.criteria,
+            self.expected_record_shape,
+        )
 
 
 @dataclass
@@ -454,23 +502,39 @@ class Subtask(Message):
     criteria: list[Criterion] = field(default_factory=list)
     expected_record_shape: list[str] = field(default_factory=list)
 
-    _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {"criteria": ("list", Criterion)}
+    _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {
+        "criteria": ("list", Criterion)
+    }
 
     def __post_init__(self) -> None:
         _check_choice("Subtask", "preferred_tool", self.preferred_tool, PREFERRED_TOOLS)
         _check_choice("Subtask", "kind", self.kind, INTENT_KINDS)
-        _check_open_context("Subtask", self.target_domain, self.goal,
-                            self.criteria, self.expected_record_shape)
+        _check_open_context(
+            "Subtask",
+            self.target_domain,
+            self.goal,
+            self.criteria,
+            self.expected_record_shape,
+        )
         if not isinstance(self.inputs_from, dict):
             raise ContractError("Subtask.inputs_from must be an object")
         for parameter, source in self.inputs_from.items():
             if not isinstance(parameter, str) or not parameter.strip():
-                raise ContractError("Subtask.inputs_from keys must be nonempty parameter names")
-            if (not isinstance(source, dict) or set(source) != {"subtask_id", "field"}
-                    or any(not isinstance(v, str) or not v.strip() for v in source.values())):
-                raise ContractError("Subtask.inputs_from entries require only nonempty subtask_id and field")
+                raise ContractError(
+                    "Subtask.inputs_from keys must be nonempty parameter names"
+                )
+            if (
+                not isinstance(source, dict)
+                or set(source) != {"subtask_id", "field"}
+                or any(not isinstance(v, str) or not v.strip() for v in source.values())
+            ):
+                raise ContractError(
+                    "Subtask.inputs_from entries require only nonempty subtask_id and field"
+                )
             if source["subtask_id"] not in self.depends_on:
-                raise ContractError("Subtask.inputs_from must name a declared dependency")
+                raise ContractError(
+                    "Subtask.inputs_from must name a declared dependency"
+                )
 
 
 @dataclass
@@ -483,7 +547,10 @@ class Plan(Message):
     created_at: str
     planned_by: str = "deterministic"
     caps: dict[str, int] = field(
-        default_factory=lambda: {"max_subtasks": MAX_OPEN_SUBTASKS, "max_depth": MAX_OPEN_DEPTH}
+        default_factory=lambda: {
+            "max_subtasks": MAX_OPEN_SUBTASKS,
+            "max_depth": MAX_OPEN_DEPTH,
+        }
     )
 
     _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {"subtasks": ("list", Subtask)}
@@ -499,17 +566,26 @@ class Plan(Message):
         Registry-only plans retain their existing sequential-work behavior.
         Graph/depth validation remains the planner's responsibility.
         """
-        if not isinstance(self.caps, dict) or set(self.caps) != {"max_subtasks", "max_depth"}:
+        if not isinstance(self.caps, dict) or set(self.caps) != {
+            "max_subtasks",
+            "max_depth",
+        }:
             raise ContractError("Plan.caps requires only max_subtasks and max_depth")
-        for name, ceiling in (("max_subtasks", MAX_OPEN_SUBTASKS), ("max_depth", MAX_OPEN_DEPTH)):
+        for name, ceiling in (
+            ("max_subtasks", MAX_OPEN_SUBTASKS),
+            ("max_depth", MAX_OPEN_DEPTH),
+        ):
             value = self.caps[name]
             if type(value) is not int or value < 1:
                 raise ContractError(f"Plan.caps.{name} must be a positive integer")
             if value > ceiling:
-                raise ContractError(f"Plan.caps.{name} must be at most {ceiling}", code="PLAN_TOO_LARGE")
-        if (self.planned_by == "model" or any(s.kind == "open" for s in self.subtasks)):
-            if len(self.subtasks) > self.caps["max_subtasks"]:
-                raise ContractError("Open plan exceeds max_subtasks", code="PLAN_TOO_LARGE")
+                raise ContractError(
+                    f"Plan.caps.{name} must be at most {ceiling}", code="PLAN_TOO_LARGE"
+                )
+        if (
+            self.planned_by == "model" or any(s.kind == "open" for s in self.subtasks)
+        ) and len(self.subtasks) > self.caps["max_subtasks"]:
+            raise ContractError("Open plan exceeds max_subtasks", code="PLAN_TOO_LARGE")
 
 
 @dataclass
@@ -605,41 +681,105 @@ class ModeratorDecision(Message):
     def __post_init__(self) -> None:
         _check_choice("ModeratorDecision", "stage", self.stage, MODERATOR_STAGES)
         _check_choice(
-            f"ModeratorDecision[{self.stage}]", "decision", self.decision,
+            f"ModeratorDecision[{self.stage}]",
+            "decision",
+            self.decision,
             MODERATOR_DECISIONS[self.stage],
         )
 
 
 @dataclass
 class Claim(Message):
-    """One statement in the final answer with the evidence behind it.
+    """A structured reference to fields of one selected, validated record.
 
-    The controller's rule check after stage 10 fails the run if any claim has no
-    evidence reference.
+    ``record_index`` indexes the selected-record order.  The moderator chooses
+    the index and fields only; the controller validates both against the
+    selected validated record.  No model-written prose or evidence reference is
+    part of a claim.
     """
 
-    text: str
-    evidence_refs: list[str] = field(default_factory=list)
+    record_index: int
+    fields: list[str]
+
+    def __post_init__(self) -> None:
+        if type(self.record_index) is not int or self.record_index < 0:
+            raise ContractError("Claim.record_index must be a non-negative integer")
+        if (
+            not isinstance(self.fields, list)
+            or not self.fields
+            or any(
+                not isinstance(name, str) or not name.strip() for name in self.fields
+            )
+        ):
+            raise ContractError("Claim.fields must be a nonempty list of field names")
+        if len(set(self.fields)) != len(self.fields):
+            raise ContractError("Claim.fields must not contain duplicates")
+
+
+@dataclass
+class Note(Message):
+    """A typed caveat whose subject is validated and rendered by the controller."""
+
+    kind: str
+    subject: str
+
+    def __post_init__(self) -> None:
+        _check_choice("Note", "kind", self.kind, NOTE_KINDS)
+        if not isinstance(self.subject, str) or not self.subject:
+            raise ContractError("Note.subject must be a nonempty string")
+
+
+@dataclass
+class AnswerSelection(Message):
+    """Stage 10 moderator output: selection only, never user-facing prose."""
+
+    record_indices: list[int] = field(default_factory=list)
+    claims: list[Claim] = field(default_factory=list)
+    notes: list[Note] = field(default_factory=list)
+
+    _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {
+        "claims": ("list", Claim),
+        "notes": ("list", Note),
+    }
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.record_indices, list) or any(
+            type(index) is not int or index < 0 for index in self.record_indices
+        ):
+            raise ContractError(
+                "AnswerSelection.record_indices must be non-negative integers"
+            )
+        if len(set(self.record_indices)) != len(self.record_indices):
+            raise ContractError(
+                "AnswerSelection.record_indices must not contain duplicates"
+            )
 
 
 @dataclass
 class FinalAnswer(Message):
-    """Stage 10 output: what the user is told.
+    """Controller-rendered stage 10 output.
 
-    ``failures`` repeats the typed failures unchanged and ``unverified`` names
-    what the run could not confirm, so an honest partial result is expressible.
+    ``lines`` are derived only from validated records, typed notes, validation
+    state and controller-owned failures.  The moderator never supplies them.
     """
 
-    text: str
+    lines: list[str]
     claims: list[Claim] = field(default_factory=list)
     records: list[Any] = field(default_factory=list)
     failures: list[TypedError] = field(default_factory=list)
-    unverified: list[str] = field(default_factory=list)
+    notes: list[Note] = field(default_factory=list)
 
     _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {
         "claims": ("list", Claim),
         "failures": ("list", TypedError),
+        "notes": ("list", Note),
     }
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.lines, list) or any(
+            not isinstance(line, str) or not line for line in self.lines
+        ):
+            raise ContractError("FinalAnswer.lines must be a list of nonempty strings")
 
 
 @dataclass

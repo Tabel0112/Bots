@@ -10,16 +10,17 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
-from argus import interfaces
 from argus.contracts import (
+    AnswerSelection,
     Claim,
     ContractError,
-    FinalAnswer,
     GateDecision,
     Intent,
     InterpretedRequest,
     ModeratorDecision,
+    Note,
     ParameterOrigin,
     Plan,
     Subtask,
@@ -29,11 +30,14 @@ from argus.contracts import (
 from argus.controller import TERMINAL, Controller
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
-REPORT_FIXTURE = json.loads((EXAMPLES / "worker_report.json").read_text(encoding="utf-8"))
+REPORT_FIXTURE = json.loads(
+    (EXAMPLES / "worker_report.json").read_text(encoding="utf-8")
+)
 SECRET = "provider said: quota exhausted for key sk-live-123"
 
 
 # ----------------------------------------------------------------- builders
+
 
 def intent(query, max_price=None):
     parameters = {"query": ParameterOrigin(query, "text_span", 0.9, (0, len(query)))}
@@ -44,32 +48,54 @@ def intent(query, max_price=None):
 
 def interpreted(*intents, request_id="request-t"):
     return InterpretedRequest(
-        request_id=request_id, raw_text="find things", intents=list(intents or [intent("headphones", 150)]),
-        model="test", interpreted_at="2026-09-12T00:00:00Z",
+        request_id=request_id,
+        raw_text="find things",
+        intents=list(intents or [intent("headphones", 150)]),
+        model="test",
+        interpreted_at="2026-09-12T00:00:00Z",
     )
 
 
 def subtask(subtask_id, depends_on=(), group=None, query="headphones"):
     return Subtask(
-        subtask_id=subtask_id, intent_index=0, site_id="demo-catalog",
-        operation="search_products", parameters={"query": query, "currency": "USD", "max_results": 5},
-        concurrency_group=group or f"group-{subtask_id}", output_schema_id="product-list.v1",
+        subtask_id=subtask_id,
+        intent_index=0,
+        site_id="demo-catalog",
+        operation="search_products",
+        parameters={"query": query, "currency": "USD", "max_results": 5},
+        concurrency_group=group or f"group-{subtask_id}",
+        output_schema_id="product-list.v1",
         depends_on=list(depends_on),
         success_conditions=["results present or explicit empty state"],
     )
 
 
-def open_subtask(subtask_id, depends_on=(), inputs_from=None, *, operation="search",
-                 shape=("title", "url"), group=None):
+def open_subtask(
+    subtask_id,
+    depends_on=(),
+    inputs_from=None,
+    *,
+    operation="search",
+    shape=("title", "url"),
+    group=None,
+):
     """An open-world subtask on an allowed public domain; the in-test ghost
     checks no URLs, so the fixture's demo-catalog records are fine as findings."""
     return Subtask(
-        subtask_id=subtask_id, intent_index=0, site_id="jobs.example.com", operation=operation,
-        parameters={"query": "engineer"}, concurrency_group=group or f"group-{subtask_id}",
-        output_schema_id="open-records.v1", depends_on=list(depends_on),
+        subtask_id=subtask_id,
+        intent_index=0,
+        site_id="jobs.example.com",
+        operation=operation,
+        parameters={"query": "engineer"},
+        concurrency_group=group or f"group-{subtask_id}",
+        output_schema_id="open-records.v1",
+        depends_on=list(depends_on),
         success_conditions=["results present or explicit empty state"],
-        inputs_from=dict(inputs_from or {}), kind="open", target_domain="jobs.example.com",
-        goal="find engineering jobs", expected_record_shape=list(shape),
+        inputs_from=dict(inputs_from or {}),
+        kind="open",
+        target_domain="jobs.example.com",
+        goal="find engineering jobs",
+        expected_record_shape=list(shape),
     )
 
 
@@ -88,17 +114,30 @@ def accept_gate(_interpreted):
 
 
 def record(i, observation="observation-000.png"):
-    return {"title": f"Item {i}", "price": 10.0 * i, "currency": "USD",
-            "url": f"https://demo-catalog.invalid/products/{i}", "source_observation_id": observation}
+    return {
+        "title": f"Item {i}",
+        "price": 10.0 * i,
+        "currency": "USD",
+        "url": f"https://demo-catalog.invalid/products/{i}",
+        "source_observation_id": observation,
+    }
 
 
-def report_for(subtask_input, *, outcome="succeeded", records=None, actions=1,
-               typed_failures=(), screenshots=("observation-000.png",)):
+def report_for(
+    subtask_input,
+    *,
+    outcome="succeeded",
+    records=None,
+    actions=1,
+    typed_failures=(),
+    screenshots=("observation-000.png",),
+):
     data = json.loads(json.dumps(REPORT_FIXTURE))
     data.update(
         request_id=subtask_input.request_id or subtask_input.run_id,
         subtask_id=subtask_input.subtask.subtask_id,
-        subtask=subtask_input.subtask.operation, outcome=outcome,
+        subtask=subtask_input.subtask.operation,
+        outcome=outcome,
         findings=records if records is not None else [record(1), record(2)],
     )
     data["evidence"]["screenshots"] = list(screenshots)
@@ -110,6 +149,7 @@ def report_for(subtask_input, *, outcome="succeeded", records=None, actions=1,
 
 
 # -------------------------------------------------------------------- fakes
+
 
 class FakeToolbox:
     """Records sessions and calls; ``behaviour(subtask_input)`` decides the report."""
@@ -150,7 +190,9 @@ class FakeToolbox:
         with self.lock:
             self.inputs.append(subtask_input)
             self.open_during_run.append(set(self.open))
-            assert subtask_input.session_handle in self.open, "worker got a closed session"
+            assert subtask_input.session_handle in self.open, (
+                "worker got a closed session"
+            )
             self.active += 1
             self.max_active = max(self.max_active, self.active)
         try:
@@ -177,7 +219,9 @@ class FakeModerator:
     """``script`` maps subtask_id to the assess decisions to return in order;
     the last one repeats.  Unscripted subtasks are accepted."""
 
-    def __init__(self, script=None, claims_without_evidence=False, reconcile_decision="merged"):
+    def __init__(
+        self, script=None, claims_without_evidence=False, reconcile_decision="merged"
+    ):
         self.script = {k: list(v) for k, v in (script or {}).items()}
         self.claims_without_evidence = claims_without_evidence
         self.reconcile_decision = reconcile_decision
@@ -188,31 +232,54 @@ class FakeModerator:
 
     def assess_report(self, subtask, report, success_conditions):
         with self.lock:
-            self.assess_calls.append((subtask.subtask_id, report, list(success_conditions)))
+            self.assess_calls.append(
+                (subtask.subtask_id, report, list(success_conditions))
+            )
             queue = self.script.get(subtask.subtask_id)
-            decision = "accept" if not queue else (queue.pop(0) if len(queue) > 1 else queue[0])
-        return ModeratorDecision("assess", decision, f"scripted {decision}", ["observation-000.png"])
+            decision = (
+                "accept"
+                if not queue
+                else (queue.pop(0) if len(queue) > 1 else queue[0])
+            )
+        return ModeratorDecision(
+            "assess", decision, f"scripted {decision}", ["observation-000.png"]
+        )
 
     def reconcile(self, plan, reports):
         self.reconcile_calls.append((plan, reports))
         findings = [
-            r for report in reports
-            for r in (report.findings if isinstance(report.findings, list)
-                      else (report.findings or {}).get("records", []))
+            r
+            for report in reports
+            for r in (
+                report.findings
+                if isinstance(report.findings, list)
+                else (report.findings or {}).get("records", [])
+            )
         ]
         return ModeratorDecision(
-            "reconcile", self.reconcile_decision, "merged in test",
-            next_action={"findings": findings, "gaps": ["second page not checked"], "conflicts": []},
+            "reconcile",
+            self.reconcile_decision,
+            "merged in test",
+            next_action={
+                "findings": findings,
+                "gaps": ["second page not checked"],
+                "conflicts": [],
+            },
         )
 
     def synthesize(self, interpreted, records, validation, evidence, failures):
-        self.synthesize_calls.append((interpreted, records, validation, evidence, failures))
+        self.synthesize_calls.append(
+            (interpreted, records, validation, evidence, failures)
+        )
         claims = [
-            Claim(f"{r['title']} costs {r['price']}", [] if self.claims_without_evidence else [r["source_observation_id"]])
-            for r in records
+            Claim(index, [name for name in record if name != "source_observation_id"])
+            for index, record in enumerate(records)
         ]
-        text = f"{len(records)} records; validation {validation.get('status')}; {len(failures)} failure(s)"
-        return FinalAnswer(text=text, claims=claims, records=list(records), failures=list(failures))
+        if self.claims_without_evidence and claims:
+            claims[0].fields.append("not_a_validated_field")
+        return AnswerSelection(
+            record_indices=list(range(len(records))), claims=claims, notes=[]
+        )
 
 
 #: Marks a validate call made in the three-argument form (no keyword at all).
@@ -234,12 +301,18 @@ class FakeGhost:
     def validate(self, subtask, records, evidence, *, report_context=NO_CONTEXT):
         self.validate_calls.append((subtask.subtask_id, records, evidence))
         self.contexts[subtask.subtask_id] = report_context
-        return {"status": self.validation, "checks": [{"check_id": "c1", "status": self.validation}]}
+        return {
+            "status": self.validation,
+            "checks": [{"check_id": "c1", "status": self.validation}],
+        }
 
     def compile(self, report, subtask):
         self.compile_calls.append((report, subtask))
-        return {"skill_id": f"skill-{subtask.subtask_id}", "status": "candidate",
-                "operation": subtask.operation}
+        return {
+            "skill_id": f"skill-{subtask.subtask_id}",
+            "status": "candidate",
+            "operation": subtask.operation,
+        }
 
 
 class MemoryStore:
@@ -298,20 +371,37 @@ class ObservingModerator(FakeModerator):
     def observe_progress(self, snapshot, event):
         self.observed.append(event.type)
         if event.type == "subtask_started":
-            return ModeratorDecision("observe", self.observe_decision, "observer says so")
+            return ModeratorDecision(
+                "observe", self.observe_decision, "observer says so"
+            )
         return ModeratorDecision("observe", "continue", "fine")
 
 
 # -------------------------------------------------------------------- tests
 
+
 class ControllerTestCase(unittest.TestCase):
-    def build(self, toolbox=None, moderator=None, ghost=None, plan=None, gate=accept_gate, **kwargs):
+    def build(
+        self,
+        toolbox=None,
+        moderator=None,
+        ghost=None,
+        plan=None,
+        gate=accept_gate,
+        **kwargs,
+    ):
         self.toolbox = toolbox or FakeToolbox()
         self.moderator = moderator or FakeModerator()
         self.ghost = ghost or FakeGhost()
         self.store = MemoryStore()
         self.controller = Controller(
-            self.toolbox, self.moderator, self.ghost, self.store, gate=gate, plan=plan, **kwargs
+            self.toolbox,
+            self.moderator,
+            self.ghost,
+            self.store,
+            gate=gate,
+            plan=plan,
+            **kwargs,
         )
         return self.controller
 
@@ -324,17 +414,28 @@ class ControllerTestCase(unittest.TestCase):
 
     def assert_event_stream_is_sound(self, result):
         sequences = [e["sequence"] for e in self.events]
-        self.assertEqual(sequences, list(range(1, len(sequences) + 1)), "sequence not strictly increasing")
+        self.assertEqual(
+            sequences,
+            list(range(1, len(sequences) + 1)),
+            "sequence not strictly increasing",
+        )
         self.assertTrue(all(e["run_id"] == result.run_id for e in self.events))
         terminal = [e for e in self.events if e["stage"] in TERMINAL]
         self.assertEqual(len(terminal), 1, "exactly one terminal event")
         self.assertIs(terminal[0], self.events[-1])
         self.assertEqual(terminal[0]["type"], f"run_{terminal[0]['stage']}")
         self.assertEqual(terminal[0]["data"]["status"], result.status)
-        self.assertEqual(self.store.run(result.run_id), result.to_dict(), "result written with terminal event")
+        self.assertEqual(
+            self.store.run(result.run_id),
+            result.to_dict(),
+            "result written with terminal event",
+        )
         self.assertEqual(self.toolbox.open, set(), "every session closed")
         closes = [i for i, e in enumerate(self.events) if e["type"] == "session_closed"]
-        self.assertTrue(all(i < len(self.events) - 1 for i in closes), "sessions closed before terminal event")
+        self.assertTrue(
+            all(i < len(self.events) - 1 for i in closes),
+            "sessions closed before terminal event",
+        )
         for report in result.reports:
             self.assertIsNone(report.session_handle)
         for saved in self.store.reports[result.run_id].values():
@@ -345,7 +446,9 @@ class ControllerTestCase(unittest.TestCase):
         self.assertNotIn(SECRET, blob)
         self.assertNotIn("Traceback", blob)
         for handle in self.toolbox.opened:
-            self.assertNotIn(handle, json.dumps(self.events), "session handle in events")
+            self.assertNotIn(
+                handle, json.dumps(self.events), "session handle in events"
+            )
 
 
 class SingleSubtaskTests(ControllerTestCase):
@@ -360,19 +463,36 @@ class SingleSubtaskTests(ControllerTestCase):
         self.assertEqual(len(result.answer.claims), 2)
         self.assertEqual(result.metrics["subtasks"], {"subtask-1": "accepted"})
         self.assertEqual(self.toolbox.closed, ["session-1"])
-        self.assertEqual(len(self.moderator.reconcile_calls), 0, "no reconcile for one subtask")
+        self.assertEqual(
+            len(self.moderator.reconcile_calls), 0, "no reconcile for one subtask"
+        )
         self.assertEqual(len(self.ghost.compile_calls), 1)
         self.assertEqual(self.store.saved_skills[0]["status"], "candidate")
         stages = [e["message"] for e in self.events if e["type"] == "stage_changed"]
-        self.assertEqual(stages, ["interpreting", "gating", "planning", "matching", "dispatching",
-                                  "validating", "synthesizing", "publishing"])
+        self.assertEqual(
+            stages,
+            [
+                "interpreting",
+                "gating",
+                "planning",
+                "matching",
+                "dispatching",
+                "validating",
+                "synthesizing",
+                "publishing",
+            ],
+        )
         [inp] = self.toolbox.inputs
         self.assertEqual(inp.budget.max_actions, 30)
         self.assertEqual(inp.mode, "explore")
         self.assertEqual(inp.session_handle, "session-1")
 
     def test_clarify_ends_as_needs_input_without_executing(self):
-        self.build(gate=lambda _i: GateDecision("clarify", "G4", "query missing", ["Which product?"]))
+        self.build(
+            gate=lambda _i: GateDecision(
+                "clarify", "G4", "query missing", ["Which product?"]
+            )
+        )
         result = self.execute()
         self.assertEqual(result.status, "needs_input")
         self.assertEqual(result.error.code, "NEEDS_INPUT")
@@ -388,13 +508,21 @@ class SingleSubtaskTests(ControllerTestCase):
         self.assertIn("G2", result.error.message)
 
     def test_moderator_fail_carries_the_typed_failure_unchanged(self):
-        failure = TypedError("AUTH_REQUIRED", "login wall", False, "step-000", ["observation-000.png"])
-        toolbox = FakeToolbox(lambda inp: report_for(inp, outcome="failed", records=[], typed_failures=[failure]))
+        failure = TypedError(
+            "AUTH_REQUIRED", "login wall", False, "step-000", ["observation-000.png"]
+        )
+        toolbox = FakeToolbox(
+            lambda inp: report_for(
+                inp, outcome="failed", records=[], typed_failures=[failure]
+            )
+        )
         self.build(toolbox, FakeModerator({"subtask-1": ["fail"]}))
         result = self.execute()
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error, failure)
-        self.assertEqual(result.answer.failures, [failure], "synthesize still explains the failure")
+        self.assertEqual(
+            result.answer.failures, [failure], "synthesize still explains the failure"
+        )
         self.assertEqual(self.ghost.validate_calls, [])
         self.assertEqual(self.ghost.compile_calls, [])
 
@@ -434,8 +562,11 @@ class ConcurrencyTests(ControllerTestCase):
             barrier.wait()
             return report_for(inp)
 
-        self.build(FakeToolbox(behaviour), max_concurrency=4,
-                   plan=plan_of(*(subtask(str(i)) for i in range(4))))
+        self.build(
+            FakeToolbox(behaviour),
+            max_concurrency=4,
+            plan=plan_of(*(subtask(str(i)) for i in range(4))),
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(self.toolbox.max_active, 4)
@@ -464,15 +595,22 @@ class ConcurrencyTests(ControllerTestCase):
         result = self.execute(interpreted(intent("mice", 40), intent("keyboards", 120)))
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(len(self.toolbox.inputs), 2)
-        self.assertEqual(self.toolbox.max_active, 2, "both workers ran at the same time")
-        self.assertTrue(any(len(open_set) == 2 for open_set in self.toolbox.open_during_run),
-                        "both sessions open before either closed")
+        self.assertEqual(
+            self.toolbox.max_active, 2, "both workers ran at the same time"
+        )
+        self.assertTrue(
+            any(len(open_set) == 2 for open_set in self.toolbox.open_during_run),
+            "both sessions open before either closed",
+        )
         first_close = self.toolbox.timeline.index(("close", self.toolbox.closed[0]))
-        opens_before = [t for t in self.toolbox.timeline[:first_close] if t[0] == "open"]
+        opens_before = [
+            t for t in self.toolbox.timeline[:first_close] if t[0] == "open"
+        ]
         self.assertEqual(len(opens_before), 2)
         self.assertEqual(len(self.moderator.reconcile_calls), 1)
         self.assertEqual(len(result.answer.records), 4, "reconciled findings used")
-        self.assertIn("gap: second page not checked", result.answer.unverified)
+        self.assertIn(Note("reconciliation_unresolved", "plan"), result.answer.notes)
+        self.assertNotIn("second page not checked", "\n".join(result.answer.lines))
         self.assertEqual(len(self.ghost.validate_calls), 2)
 
     def test_same_group_subtasks_are_serialised(self):
@@ -483,7 +621,9 @@ class ConcurrencyTests(ControllerTestCase):
         self.assertEqual(len(self.toolbox.inputs), 2)
 
     def test_max_concurrency_bounds_open_sessions(self):
-        self.build(plan=plan_of(subtask("a"), subtask("b"), subtask("c")), max_concurrency=2)
+        self.build(
+            plan=plan_of(subtask("a"), subtask("b"), subtask("c")), max_concurrency=2
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded")
         self.assertLessEqual(self.toolbox.max_active, 2)
@@ -491,26 +631,41 @@ class ConcurrencyTests(ControllerTestCase):
 
     def test_dependent_subtask_is_cancelled_when_dependency_fails(self):
         failure = TypedError("PRECONDITION_FAILED", "catalog offline", False)
-        toolbox = FakeToolbox(lambda inp: report_for(
-            inp, outcome="failed" if inp.subtask.subtask_id == "a" else "succeeded",
-            typed_failures=[failure] if inp.subtask.subtask_id == "a" else [],
-        ))
-        self.build(toolbox, FakeModerator({"a": ["fail"]}),
-                   plan=plan_of(subtask("a"), subtask("b", ["a"]), subtask("c")))
+        toolbox = FakeToolbox(
+            lambda inp: report_for(
+                inp,
+                outcome="failed" if inp.subtask.subtask_id == "a" else "succeeded",
+                typed_failures=[failure] if inp.subtask.subtask_id == "a" else [],
+            )
+        )
+        self.build(
+            toolbox,
+            FakeModerator({"a": ["fail"]}),
+            plan=plan_of(subtask("a"), subtask("b", ["a"]), subtask("c")),
+        )
         result = self.execute()
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error, failure)
-        self.assertEqual(result.metrics["subtasks"], {"a": "failed", "b": "cancelled", "c": "accepted"})
-        self.assertEqual(sorted(i.subtask.subtask_id for i in self.toolbox.inputs), ["a", "c"])
+        self.assertEqual(
+            result.metrics["subtasks"],
+            {"a": "failed", "b": "cancelled", "c": "accepted"},
+        )
+        self.assertEqual(
+            sorted(i.subtask.subtask_id for i in self.toolbox.inputs), ["a", "c"]
+        )
         cancelled = [e for e in self.events if e["type"] == "subtask_cancelled"]
         self.assertEqual(cancelled[0]["data"]["subtask_id"], "b")
         codes = sorted(f.code for f in result.answer.failures)
         self.assertEqual(codes, ["CANCELLED", "PRECONDITION_FAILED"])
-        self.assertEqual(len(result.answer.records), 2, "independent sibling's records kept")
+        self.assertEqual(
+            len(result.answer.records), 2, "independent sibling's records kept"
+        )
 
     def test_dependent_subtask_starts_only_after_dependency_accepted(self):
         order = []
-        toolbox = FakeToolbox(lambda inp: (order.append(inp.subtask.subtask_id), report_for(inp))[1])
+        toolbox = FakeToolbox(
+            lambda inp: (order.append(inp.subtask.subtask_id), report_for(inp))[1]
+        )
         self.build(toolbox, plan=plan_of(subtask("a"), subtask("b", ["a"])))
         result = self.execute()
         self.assertEqual(result.status, "succeeded")
@@ -532,7 +687,9 @@ class IntakeTests(ControllerTestCase):
         self.assertIn("observation-verify-1", result.validation["evidence"])
 
     def test_verify_is_capped_at_one(self):
-        self.build(moderator=FakeModerator({"subtask-1": ["verify", "verify", "accept"]}))
+        self.build(
+            moderator=FakeModerator({"subtask-1": ["verify", "verify", "accept"]})
+        )
         result = self.execute()
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
@@ -546,21 +703,36 @@ class IntakeTests(ControllerTestCase):
         def behaviour(inp):
             calls.append(inp)
             if inp.subtask.preferred_tool == "dom":
-                return report_for(inp, outcome="failed", records=[],
-                                  typed_failures=[TypedError("TARGET_NOT_FOUND", "no search box", True)])
+                return report_for(
+                    inp,
+                    outcome="failed",
+                    records=[],
+                    typed_failures=[
+                        TypedError("TARGET_NOT_FOUND", "no search box", True)
+                    ],
+                )
             return report_for(inp)
 
-        self.build(FakeToolbox(behaviour), FakeModerator({"subtask-1": ["retry_other_path", "accept"]}))
+        self.build(
+            FakeToolbox(behaviour),
+            FakeModerator({"subtask-1": ["retry_other_path", "accept"]}),
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded")
         self.assertEqual([c.subtask.preferred_tool for c in calls], ["dom", "vision"])
         self.assertEqual({c.session_handle for c in calls}, {"session-1"})
-        self.assertEqual(self.toolbox.opened, ["session-1"], "no second session for the retry")
+        self.assertEqual(
+            self.toolbox.opened, ["session-1"], "no second session for the retry"
+        )
         self.assertEqual(result.metrics["browser_action_count"], 2)
 
     def test_retry_other_path_is_capped_at_one(self):
         failure = TypedError("TARGET_NOT_FOUND", "no search box", True)
-        toolbox = FakeToolbox(lambda inp: report_for(inp, outcome="failed", records=[], typed_failures=[failure]))
+        toolbox = FakeToolbox(
+            lambda inp: report_for(
+                inp, outcome="failed", records=[], typed_failures=[failure]
+            )
+        )
         self.build(toolbox, FakeModerator({"subtask-1": ["retry_other_path"]}))
         result = self.execute()
         self.assertEqual(result.status, "failed")
@@ -569,7 +741,9 @@ class IntakeTests(ControllerTestCase):
         self.assertEqual(len(self.moderator.assess_calls), 2)
 
     def test_schema_invalid_report_fails_the_subtask(self):
-        self.build(FakeToolbox(lambda inp: {"schema_version": "x", "outcome": "succeeded"}))
+        self.build(
+            FakeToolbox(lambda inp: {"schema_version": "x", "outcome": "succeeded"})
+        )
         result = self.execute()
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
@@ -580,6 +754,7 @@ class IntakeTests(ControllerTestCase):
             report = report_for(inp)
             report.subtask_id = "someone-else"
             return report
+
         self.build(FakeToolbox(behaviour))
         result = self.execute()
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
@@ -592,11 +767,16 @@ class ValidationAndSynthesisTests(ControllerTestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "VALIDATION_FAILED")
         self.assertEqual(result.validation["status"], "failed")
-        self.assertEqual(len(self.moderator.synthesize_calls), 1, "synthesize explains the failure")
+        self.assertEqual(
+            len(self.moderator.synthesize_calls), 1, "synthesize explains the failure"
+        )
         self.assertIsNotNone(result.answer)
         self.assertEqual(self.moderator.synthesize_calls[0][2]["status"], "failed")
-        self.assertTrue(any("not validated" in u for u in result.answer.unverified))
-        self.assertEqual(self.ghost.compile_calls, [], "no compile after failed validation")
+        self.assertIn(Note("validation_not_passed", "failed"), result.answer.notes)
+        self.assertEqual(result.answer.records, [])
+        self.assertEqual(
+            self.ghost.compile_calls, [], "no compile after failed validation"
+        )
         self.assertEqual(self.store.saved_skills, [])
 
     def test_inconclusive_validation_is_not_success(self):
@@ -607,18 +787,19 @@ class ValidationAndSynthesisTests(ControllerTestCase):
         self.assertTrue(result.error.retryable)
         self.assertEqual(self.ghost.compile_calls, [])
 
-    def test_claim_without_evidence_fails_the_run(self):
+    def test_claim_with_an_unvalidated_field_fails_the_run(self):
         self.build(moderator=FakeModerator(claims_without_evidence=True))
         result = self.execute()
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
-        self.assertIn("no evidence reference", result.error.message)
+        self.assertIn("outside its validated record", result.error.message)
         self.assertEqual(self.ghost.compile_calls, [])
 
     def test_compile_failure_does_not_change_the_result(self):
         class BrokenCompileGhost(FakeGhost):
             def compile(self, report, subtask):
                 raise RuntimeError(SECRET)
+
         self.build(ghost=BrokenCompileGhost())
         result = self.execute()
         self.assertEqual(result.status, "succeeded")
@@ -633,23 +814,40 @@ class BudgetTests(ControllerTestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "BUDGET_EXCEEDED")
         self.assertEqual(result.error.step_id, "subtask-1")
-        self.assertEqual(self.moderator.assess_calls, [], "breach decided by the controller, not the moderator")
+        self.assertEqual(
+            self.moderator.assess_calls,
+            [],
+            "breach decided by the controller, not the moderator",
+        )
         self.assertEqual(result.metrics["subtasks"], {"subtask-1": "failed"})
 
     def test_retry_shares_the_action_budget(self):
-        toolbox = FakeToolbox(lambda inp: report_for(
-            inp, actions=20, outcome="failed", records=[],
-            typed_failures=[TypedError("TARGET_NOT_FOUND", "nope", True)]))
-        self.build(toolbox, FakeModerator({"subtask-1": ["retry_other_path", "accept"]}), max_actions=30)
+        toolbox = FakeToolbox(
+            lambda inp: report_for(
+                inp,
+                actions=20,
+                outcome="failed",
+                records=[],
+                typed_failures=[TypedError("TARGET_NOT_FOUND", "nope", True)],
+            )
+        )
+        self.build(
+            toolbox,
+            FakeModerator({"subtask-1": ["retry_other_path", "accept"]}),
+            max_actions=30,
+        )
         result = self.execute()
         self.assertEqual(result.error.code, "BUDGET_EXCEEDED")
         self.assertEqual(len(self.toolbox.inputs), 2)
-        self.assertEqual(self.toolbox.inputs[1].budget.max_actions, 10, "retry gets the remainder")
+        self.assertEqual(
+            self.toolbox.inputs[1].budget.max_actions, 10, "retry gets the remainder"
+        )
 
     def test_run_wall_clock_breach(self):
         def slow(inp):
             time.sleep(0.15)
             return report_for(inp)
+
         self.build(FakeToolbox(slow), max_seconds=0.05)
         result = self.execute()
         self.assertEqual(result.status, "failed")
@@ -662,8 +860,13 @@ class BudgetTests(ControllerTestCase):
         def slow(inp):
             time.sleep(0.15)
             return report_for(inp)
-        self.build(FakeToolbox(slow), plan=plan_of(subtask("a"), subtask("b"), subtask("c")),
-                   max_seconds=0.05, max_concurrency=1)
+
+        self.build(
+            FakeToolbox(slow),
+            plan=plan_of(subtask("a"), subtask("b"), subtask("c")),
+            max_seconds=0.05,
+            max_concurrency=1,
+        )
         result = self.execute()
         self.assertEqual(result.error.code, "BUDGET_EXCEEDED")
         self.assertEqual(result.metrics["subtasks"]["c"], "cancelled")
@@ -674,6 +877,7 @@ class RobustnessTests(ControllerTestCase):
     def test_sessions_closed_when_run_subtask_raises(self):
         def boom(inp):
             raise RuntimeError(SECRET)
+
         self.build(FakeToolbox(boom))
         result = self.execute()
         self.assertEqual(result.status, "failed")
@@ -685,6 +889,7 @@ class RobustnessTests(ControllerTestCase):
         class ExplodingModerator(FakeModerator):
             def assess_report(self, subtask, report, success_conditions):
                 raise ValueError(SECRET)
+
         self.build(moderator=ExplodingModerator())
         result = self.execute()
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
@@ -695,6 +900,7 @@ class RobustnessTests(ControllerTestCase):
         class ExplodingGhost(FakeGhost):
             def validate(self, subtask, records, evidence):
                 raise KeyError(SECRET)
+
         self.build(ghost=ExplodingGhost())
         result = self.execute()
         self.assertEqual(result.status, "failed")
@@ -707,6 +913,7 @@ class RobustnessTests(ControllerTestCase):
             def close_session(self, handle):
                 super().close_session(handle)
                 raise OSError(SECRET)
+
         self.build(StickyToolbox())
         result = self.execute()
         self.assertEqual(result.status, "succeeded")
@@ -716,6 +923,7 @@ class RobustnessTests(ControllerTestCase):
         class WrongStageModerator(FakeModerator):
             def assess_report(self, subtask, report, success_conditions):
                 return ModeratorDecision("reconcile", "merged", "wrong stage")
+
         self.build(moderator=WrongStageModerator())
         result = self.execute()
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
@@ -726,6 +934,7 @@ class RobustnessTests(ControllerTestCase):
             self.controller.cancel("run-x")  # unknown run: no effect
             self.controller.cancel("run-cancel-me")
             return GateDecision("accept", "G0", "ok")
+
         self.build(gate=cancel_on_start)
         result = self.execute(run_id="run-cancel-me")
         self.assertEqual(result.status, "cancelled")
@@ -742,6 +951,7 @@ class RobustnessTests(ControllerTestCase):
             return original(name, *args, **kwargs)
 
         import argus.controller as controller_module
+
         controller_module.importlib.import_module = fake_import
         try:
             result = self.execute("find headphones")
@@ -757,6 +967,7 @@ class RobustnessTests(ControllerTestCase):
         def interpret(text, request_id):
             seen.append((text, request_id))
             return interpreted()
+
         self.build(interpret=interpret)
         result = self.execute("find headphones under $150")
         self.assertEqual(result.status, "succeeded")
@@ -776,55 +987,92 @@ class RobustnessTests(ControllerTestCase):
 class OpenWorldDataFlowTests(ControllerTestCase):
     """``inputs_from`` transfer between subtasks and the open-world validate call."""
 
-    URLS = [record(1)["url"], record(2)["url"]]
+    URLS: ClassVar[list[str]] = [record(1)["url"], record(2)["url"]]
 
     def input_for(self, subtask_id):
         [inp] = [i for i in self.toolbox.inputs if i.subtask.subtask_id == subtask_id]
         return inp
 
     def test_chain_transfers_the_url_list_in_order(self):
-        self.build(plan=plan_of(
-            open_subtask("search"),
-            open_subtask("details", ["search"], bind("result_urls", "search", "url"), operation="open_results"),
-        ))
+        self.build(
+            plan=plan_of(
+                open_subtask("search"),
+                open_subtask(
+                    "details",
+                    ["search"],
+                    bind("result_urls", "search", "url"),
+                    operation="open_results",
+                ),
+            )
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
-        self.assertEqual([i.subtask.subtask_id for i in self.toolbox.inputs], ["search", "details"])
+        self.assertEqual(
+            [i.subtask.subtask_id for i in self.toolbox.inputs], ["search", "details"]
+        )
         details = self.input_for("details").subtask
-        self.assertEqual(details.parameters, {"query": "engineer", "result_urls": self.URLS})
+        self.assertEqual(
+            details.parameters, {"query": "engineer", "result_urls": self.URLS}
+        )
         self.assertNotIn("result_urls", self.input_for("search").subtask.parameters)
         # The plan itself is what was planned, not what was resolved.
         self.assertEqual(result.plan.subtasks[1].parameters, {"query": "engineer"})
         resolved = [e for e in self.events if e["type"] == "subtask_inputs_resolved"]
         self.assertEqual([e["data"]["subtask_id"] for e in resolved], ["details"])
-        self.assertEqual(resolved[0]["data"]["bindings"], bind("result_urls", "search", "url"))
-        self.assertEqual(result.metrics["subtasks"], {"search": "accepted", "details": "accepted"})
+        self.assertEqual(
+            resolved[0]["data"]["bindings"], bind("result_urls", "search", "url")
+        )
+        self.assertEqual(
+            result.metrics["subtasks"], {"search": "accepted", "details": "accepted"}
+        )
 
     def test_an_empty_upstream_list_transfers_as_an_empty_list(self):
-        toolbox = FakeToolbox(lambda inp: report_for(
-            inp, records=[] if inp.subtask.subtask_id == "search" else None))
-        self.build(toolbox, plan=plan_of(
-            open_subtask("search"),
-            open_subtask("details", ["search"], bind("result_urls", "search", "url"), operation="open_results"),
-        ))
+        toolbox = FakeToolbox(
+            lambda inp: report_for(
+                inp, records=[] if inp.subtask.subtask_id == "search" else None
+            )
+        )
+        self.build(
+            toolbox,
+            plan=plan_of(
+                open_subtask("search"),
+                open_subtask(
+                    "details",
+                    ["search"],
+                    bind("result_urls", "search", "url"),
+                    operation="open_results",
+                ),
+            ),
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
-        self.assertEqual(self.input_for("details").subtask.parameters["result_urls"], [])
+        self.assertEqual(
+            self.input_for("details").subtask.parameters["result_urls"], []
+        )
 
     def test_a_missing_field_fails_the_subtask_and_cancels_its_dependents(self):
-        self.build(plan=plan_of(
-            open_subtask("a", shape=("title", "url", "salary")),
-            open_subtask("b", ["a"], bind("salaries", "a", "salary")),
-            open_subtask("c", ["b"], bind("titles", "b", "title")),
-        ))
+        self.build(
+            plan=plan_of(
+                open_subtask("a", shape=("title", "url", "salary")),
+                open_subtask("b", ["a"], bind("salaries", "a", "salary")),
+                open_subtask("c", ["b"], bind("titles", "b", "title")),
+            )
+        )
         result = self.execute()
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "PRECONDITION_FAILED")
         self.assertEqual(result.error.step_id, "b")
         self.assertIn("salary", result.error.message)
-        self.assertEqual(result.metrics["subtasks"], {"a": "accepted", "b": "failed", "c": "cancelled"})
+        self.assertEqual(
+            result.metrics["subtasks"],
+            {"a": "accepted", "b": "failed", "c": "cancelled"},
+        )
         self.assertEqual([i.subtask.subtask_id for i in self.toolbox.inputs], ["a"])
-        self.assertEqual(self.toolbox.opened, ["session-1"], "no session is opened for a subtask that cannot start")
+        self.assertEqual(
+            self.toolbox.opened,
+            ["session-1"],
+            "no session is opened for a subtask that cannot start",
+        )
         cancelled = [e["data"] for e in self.events if e["type"] == "subtask_cancelled"]
         self.assertEqual(cancelled[0]["subtask_id"], "c")
         self.assertIn("b", cancelled[0]["reason"])
@@ -833,28 +1081,48 @@ class OpenWorldDataFlowTests(ControllerTestCase):
 
     def test_a_findings_mapping_transfers_a_field_and_the_whole_object(self):
         page = {"records": [record(1)], "next_page": "https://jobs.example.com/page/2"}
-        toolbox = FakeToolbox(lambda inp: report_for(
-            inp, records=page if inp.subtask.subtask_id == "index" else None))
-        self.build(toolbox, plan=plan_of(
-            open_subtask("index", shape=("title", "url", "next_page")),
-            open_subtask("page", ["index"], {
-                **bind("page_url", "index", "next_page"), **bind("everything", "index", "findings"),
-            }),
-        ))
+        toolbox = FakeToolbox(
+            lambda inp: report_for(
+                inp, records=page if inp.subtask.subtask_id == "index" else None
+            )
+        )
+        self.build(
+            toolbox,
+            plan=plan_of(
+                open_subtask("index", shape=("title", "url", "next_page")),
+                open_subtask(
+                    "page",
+                    ["index"],
+                    {
+                        **bind("page_url", "index", "next_page"),
+                        **bind("everything", "index", "findings"),
+                    },
+                ),
+            ),
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
         params = self.input_for("page").subtask.parameters
         self.assertEqual(params["page_url"], "https://jobs.example.com/page/2")
         self.assertEqual(params["everything"], page)
-        self.assertIsNot(params["everything"], page, "a copy, so the worker cannot edit the report")
+        self.assertIsNot(
+            params["everything"], page, "a copy, so the worker cannot edit the report"
+        )
 
     def test_binding_values_read_nothing_but_the_named_field(self):
         from argus.controller import _bound_value
+
         self.assertEqual(_bound_value([record(1), record(2)], "url", "a"), self.URLS)
         self.assertEqual(_bound_value([], "url", "a"), [])
         self.assertEqual(_bound_value({"k": 1}, "findings", "a"), {"k": 1})
         self.assertIsNone(_bound_value(None, "findings", "a"))
-        for findings in (None, "text", [record(1), "loose"], [{"title": "x"}], {"other": 1}):
+        for findings in (
+            None,
+            "text",
+            [record(1), "loose"],
+            [{"title": "x"}],
+            {"other": 1},
+        ):
             with self.subTest(findings=findings):
                 with self.assertRaises(ContractError) as caught:
                     _bound_value(findings, "url", "a")
@@ -866,11 +1134,14 @@ class OpenWorldDataFlowTests(ControllerTestCase):
             report.evidence["session_handle"] = inp.session_handle
             report.evidence["handle_again"] = inp.session_handle
             return report
+
         self.build(FakeToolbox(behaviour), plan=plan_of(open_subtask("s")))
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
         context = self.ghost.contexts["s"]
-        self.assertEqual(set(context), {"run_id", "subtask_id", "evidence", "empty_state"})
+        self.assertEqual(
+            set(context), {"run_id", "subtask_id", "evidence", "empty_state"}
+        )
         self.assertEqual(context["run_id"], result.run_id)
         self.assertEqual(context["subtask_id"], "s")
         self.assertIs(context["empty_state"], False)
@@ -880,7 +1151,10 @@ class OpenWorldDataFlowTests(ControllerTestCase):
         self.assertNotIn("session-1", json.dumps(context))
 
     def test_open_validate_reports_an_explicit_empty_state(self):
-        self.build(FakeToolbox(lambda inp: report_for(inp, records=[])), plan=plan_of(open_subtask("s")))
+        self.build(
+            FakeToolbox(lambda inp: report_for(inp, records=[])),
+            plan=plan_of(open_subtask("s")),
+        )
         self.execute()
         self.assertIs(self.ghost.contexts["s"]["empty_state"], True)
 
@@ -899,11 +1173,26 @@ class OpenWorldDataFlowTests(ControllerTestCase):
             time.sleep(0.01)
             return report_for(inp)
 
-        self.build(FakeToolbox(behaviour), max_concurrency=2, plan=plan_of(
-            open_subtask("a"), open_subtask("b"),
-            open_subtask("c", ["a"], bind("result_urls", "a", "url"), operation="open_results"),
-            open_subtask("d", ["b"], bind("result_urls", "b", "url"), operation="open_results"),
-        ))
+        self.build(
+            FakeToolbox(behaviour),
+            max_concurrency=2,
+            plan=plan_of(
+                open_subtask("a"),
+                open_subtask("b"),
+                open_subtask(
+                    "c",
+                    ["a"],
+                    bind("result_urls", "a", "url"),
+                    operation="open_results",
+                ),
+                open_subtask(
+                    "d",
+                    ["b"],
+                    bind("result_urls", "b", "url"),
+                    operation="open_results",
+                ),
+            ),
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
         self.assertEqual(self.toolbox.max_active, 2)
@@ -911,13 +1200,24 @@ class OpenWorldDataFlowTests(ControllerTestCase):
         self.assertLess(order.index("a"), order.index("c"))
         self.assertLess(order.index("b"), order.index("d"))
         for leaf in ("c", "d"):
-            self.assertEqual(self.input_for(leaf).subtask.parameters["result_urls"], self.URLS)
+            self.assertEqual(
+                self.input_for(leaf).subtask.parameters["result_urls"], self.URLS
+            )
 
     def test_the_chain_runs_one_at_a_time_under_a_cap_of_one(self):
-        self.build(max_concurrency=1, plan=plan_of(
-            open_subtask("a"), open_subtask("b"),
-            open_subtask("c", ["a"], bind("result_urls", "a", "url"), operation="open_results"),
-        ))
+        self.build(
+            max_concurrency=1,
+            plan=plan_of(
+                open_subtask("a"),
+                open_subtask("b"),
+                open_subtask(
+                    "c",
+                    ["a"],
+                    bind("result_urls", "a", "url"),
+                    operation="open_results",
+                ),
+            ),
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
         self.assertEqual(self.toolbox.max_active, 1)
@@ -927,34 +1227,55 @@ class OpenWorldDataFlowTests(ControllerTestCase):
 
     def test_a_retry_keeps_the_resolved_inputs(self):
         def behaviour(inp):
-            if inp.subtask.subtask_id == "details" and inp.subtask.preferred_tool == "dom":
-                return report_for(inp, outcome="failed", records=[],
-                                  typed_failures=[TypedError("TARGET_NOT_FOUND", "no list", True)])
+            if (
+                inp.subtask.subtask_id == "details"
+                and inp.subtask.preferred_tool == "dom"
+            ):
+                return report_for(
+                    inp,
+                    outcome="failed",
+                    records=[],
+                    typed_failures=[TypedError("TARGET_NOT_FOUND", "no list", True)],
+                )
             return report_for(inp)
-        self.build(FakeToolbox(behaviour), FakeModerator({"details": ["retry_other_path", "accept"]}),
-                   plan=plan_of(
-                       open_subtask("search"),
-                       open_subtask("details", ["search"], bind("result_urls", "search", "url"), operation="open_results"),
-                   ))
+
+        self.build(
+            FakeToolbox(behaviour),
+            FakeModerator({"details": ["retry_other_path", "accept"]}),
+            plan=plan_of(
+                open_subtask("search"),
+                open_subtask(
+                    "details",
+                    ["search"],
+                    bind("result_urls", "search", "url"),
+                    operation="open_results",
+                ),
+            ),
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
         attempts = [i for i in self.toolbox.inputs if i.subtask.subtask_id == "details"]
-        self.assertEqual([a.subtask.preferred_tool for a in attempts], ["dom", "vision"])
-        self.assertTrue(all(a.subtask.parameters["result_urls"] == self.URLS for a in attempts))
+        self.assertEqual(
+            [a.subtask.preferred_tool for a in attempts], ["dom", "vision"]
+        )
+        self.assertTrue(
+            all(a.subtask.parameters["result_urls"] == self.URLS for a in attempts)
+        )
 
 
 class TamperingModerator(FakeModerator):
-    """Synthesises like :class:`FakeModerator`, then ``tamper(answer)`` edits
-    the answer the way a fabricating moderator would."""
+    """Synthesises like :class:`FakeModerator`, then edits its selection."""
 
     def __init__(self, tamper, **kwargs):
         super().__init__(**kwargs)
         self.tamper = tamper
 
     def synthesize(self, interpreted, records, validation, evidence, failures):
-        answer = super().synthesize(interpreted, records, validation, evidence, failures)
-        self.tamper(answer)
-        return answer
+        selection = super().synthesize(
+            interpreted, records, validation, evidence, failures
+        )
+        replacement = self.tamper(selection)
+        return selection if replacement is None else replacement
 
 
 class InjectingModerator(FakeModerator):
@@ -972,84 +1293,108 @@ class InjectingModerator(FakeModerator):
 
 
 class SynthesisProvenanceTests(ControllerTestCase):
-    """Claims cite this run's evidence only; answer records are the validated ones."""
+    """The moderator selects validated records and fields, never prose."""
 
     def assert_failed_for_provenance(self, result, *named):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
         for text in named:
             self.assertIn(text, result.error.message)
-        self.assertEqual(self.ghost.compile_calls, [], "nothing compiled from a fabricated answer")
+        self.assertEqual(
+            self.ghost.compile_calls, [], "nothing compiled from a fabricated answer"
+        )
         self.assertEqual(self.store.saved_skills, [])
 
-    def test_a_claim_citing_foreign_evidence_fails_the_run(self):
-        def tamper(answer):
-            answer.claims.append(Claim("Item 3 costs 30.0", ["foreign-observation.png"]))
-        self.build(moderator=TamperingModerator(tamper))
-        result = self.execute()
-        self.assert_failed_for_provenance(result, "foreign-observation.png", "Item 3 costs 30.0")
+    def test_model_prose_is_discarded_and_never_published_or_logged(self):
+        poison = "is free and cures cancer"
 
-    def test_a_plausible_but_unaccepted_evidence_ref_fails_the_run(self):
-        # observation-001.png follows the worker's numbering, but this run's only
-        # observation is observation-000.png.
-        def tamper(answer):
-            answer.claims[0].evidence_refs = ["observation-001.png"]
-        self.build(moderator=TamperingModerator(tamper))
-        result = self.execute()
-        self.assertEqual(result.validation["evidence"], ["observation-000.png"])
-        self.assert_failed_for_provenance(result, "observation-001.png", "claim 0")
+        def tamper(selection):
+            payload = selection.to_dict()
+            payload["text"] = poison
+            payload["unverified"] = [poison]
+            payload["claims"][0]["text"] = poison
+            return payload
 
-    def test_a_record_not_among_the_validated_records_fails_the_run(self):
-        def tamper(answer):
-            answer.records.append(record(3))
         self.build(moderator=TamperingModerator(tamper))
         result = self.execute()
-        self.assert_failed_for_provenance(result, "Item 3", "not one of the validated records")
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertNotIn(poison, json.dumps(result.to_dict()))
+        self.assertNotIn(poison, json.dumps(self.events))
+        self.assertNotIn(poison, json.dumps(self.store.runs[result.run_id]))
+        self.assertEqual(
+            [
+                event["data"]["fields"]
+                for event in self.events
+                if event["type"] == "moderator_output_discarded"
+            ],
+            [["claims[0].text", "text", "unverified"]],
+        )
 
-    def test_an_altered_copy_of_a_validated_record_fails_the_run(self):
-        def tamper(answer):
-            answer.records[0] = dict(answer.records[0], price=1.0)
-        self.build(moderator=TamperingModerator(tamper))
-        result = self.execute()
-        self.assert_failed_for_provenance(result, "Item 1", "answer record 0")
+    def test_a_selected_index_outside_the_validated_records_fails(self):
+        def tamper(selection):
+            selection.record_indices[0] = 99
 
-    def test_a_record_altered_in_place_by_the_moderator_fails_the_run(self):
-        # The moderator gets copies, so editing what it was handed alters only
-        # its own answer, which then no longer matches the validated records.
-        def tamper(answer):
-            answer.records[1]["price"] = 999.0
         self.build(moderator=TamperingModerator(tamper))
         result = self.execute()
-        self.assert_failed_for_provenance(result, "Item 2")
+        self.assert_failed_for_provenance(result, "outside the validated record set")
 
-    def test_a_duplicated_record_counts_as_added(self):
-        def tamper(answer):
-            answer.records.append(answer.records[0])
+    def test_a_claim_index_outside_the_selection_fails(self):
+        def tamper(selection):
+            selection.claims[0].record_index = 99
+
         self.build(moderator=TamperingModerator(tamper))
         result = self.execute()
-        self.assert_failed_for_provenance(result, "answer record 2")
+        self.assert_failed_for_provenance(
+            result, "claim 0", "outside the selected records"
+        )
+
+    def test_a_claim_cannot_name_a_missing_field(self):
+        def tamper(selection):
+            selection.claims[0].fields = ["title", "cure"]
+
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assert_failed_for_provenance(
+            result, "claim 0", "outside its validated record"
+        )
+
+    def test_an_unknown_note_subject_fails_closed(self):
+        def tamper(selection):
+            selection.notes.append(Note("criterion_not_applied", "invented"))
+
+        self.build(moderator=TamperingModerator(tamper))
+        result = self.execute()
+        self.assert_failed_for_provenance(result, "outside the controller's closed set")
 
     def test_reordering_filtering_and_truncating_the_records_is_allowed(self):
-        def tamper(answer):
-            answer.records.reverse()
-            del answer.records[1:]
-            answer.claims = [c for c in answer.claims if c.text.startswith("Item 2")]
+        def tamper(selection):
+            selection.record_indices = [1]
+            selection.claims = [Claim(0, ["title", "price"])]
+
         self.build(moderator=TamperingModerator(tamper))
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
         self.assertEqual(result.answer.records, [record(2)])
-        self.assertEqual([c.text for c in result.answer.claims], ["Item 2 costs 20.0"])
+        self.assertEqual(result.answer.claims, [Claim(0, ["title", "price"])])
         self.assertEqual(len(self.ghost.compile_calls), 1)
 
 
 class ReconcileProvenanceTests(ControllerTestCase):
     """Reconciled records must each be one of the accepted reports' records."""
 
-    EVIL = {"title": "Evil job", "price": 0.0, "currency": "USD",
-            "url": "https://evil.invalid/x", "source_observation_id": "foreign.png"}
+    EVIL: ClassVar[dict[str, object]] = {
+        "title": "Evil job",
+        "price": 0.0,
+        "currency": "USD",
+        "url": "https://evil.invalid/x",
+        "source_observation_id": "foreign.png",
+    }
 
     def run_two(self, inject):
-        self.build(moderator=InjectingModerator(inject), plan=plan_of(subtask("a"), subtask("b")))
+        self.build(
+            moderator=InjectingModerator(inject),
+            plan=plan_of(subtask("a"), subtask("b")),
+        )
         return self.execute()
 
     def assert_failed_before_validation(self, result, *named):
@@ -1057,9 +1402,14 @@ class ReconcileProvenanceTests(ControllerTestCase):
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
         for text in named:
             self.assertIn(text, result.error.message)
-        self.assertEqual(result.metrics["subtasks"], {"a": "accepted", "b": "accepted"},
-                         "the worker reports themselves were accepted")
-        self.assertIsNone(result.validation, "validation never ran on the injected records")
+        self.assertEqual(
+            result.metrics["subtasks"],
+            {"a": "accepted", "b": "accepted"},
+            "the worker reports themselves were accepted",
+        )
+        self.assertIsNone(
+            result.validation, "validation never ran on the injected records"
+        )
         self.assertEqual(self.moderator.synthesize_calls, [])
         self.assertEqual(self.ghost.validate_calls, [])
         self.assertEqual(self.ghost.compile_calls, [])
@@ -1068,10 +1418,14 @@ class ReconcileProvenanceTests(ControllerTestCase):
 
     def test_reconcile_cannot_inject_a_record(self):
         result = self.run_two(lambda findings: findings.append(dict(self.EVIL)))
-        self.assert_failed_before_validation(result, "evil.invalid", "reconciled record 4")
+        self.assert_failed_before_validation(
+            result, "evil.invalid", "reconciled record 4"
+        )
 
     def test_reconcile_cannot_alter_a_record(self):
-        result = self.run_two(lambda findings: findings.__setitem__(0, dict(findings[0], price=999.0)))
+        result = self.run_two(
+            lambda findings: findings.__setitem__(0, dict(findings[0], price=999.0))
+        )
         self.assert_failed_before_validation(result, "Item 1", "reconciled record 0")
 
     def test_reconcile_cannot_alter_a_record_in_place(self):
@@ -1079,6 +1433,7 @@ class ReconcileProvenanceTests(ControllerTestCase):
         # a record it received never reaches the accepted reports.
         def mutate(findings):
             findings[0]["price"] = 999.0
+
         result = self.run_two(mutate)
         self.assert_failed_before_validation(result, "Item 1")
         for report in result.reports:
@@ -1089,10 +1444,13 @@ class ReconcileProvenanceTests(ControllerTestCase):
         def merge(findings):
             by_url = {r["url"]: r for r in findings}
             findings[:] = list(reversed(by_url.values()))
+
         result = self.run_two(merge)
         self.assertEqual(result.status, "succeeded", result.error)
         self.assertEqual(len(result.answer.records), 2)
-        self.assertEqual([r["title"] for r in result.answer.records], ["Item 2", "Item 1"])
+        self.assertEqual(
+            [r["title"] for r in result.answer.records], ["Item 2", "Item 1"]
+        )
 
 
 class HungWorkerTests(ControllerTestCase):
@@ -1100,7 +1458,9 @@ class HungWorkerTests(ControllerTestCase):
         release = threading.Event()
 
         def hang(inp):
-            release.wait(timeout=10)  # well past max_seconds; the test releases it later
+            release.wait(
+                timeout=10
+            )  # well past max_seconds; the test releases it later
             return report_for(inp)
 
         self.build(FakeToolbox(hang), max_seconds=0.2)
@@ -1115,10 +1475,16 @@ class HungWorkerTests(ControllerTestCase):
             self.assertEqual(result.metrics["subtasks"], {"subtask-1": "failed"})
             self.assertEqual(result.metrics["sessions_opened"], 1)
             self.assertEqual(result.reports, [], "no report from the hung worker")
-            self.assertEqual(self.toolbox.closed, ["session-1"], "the lent session was cut off")
+            self.assertEqual(
+                self.toolbox.closed, ["session-1"], "the lent session was cut off"
+            )
             types = [e["type"] for e in self.events]
-            self.assertLess(types.index("budget_exceeded"), types.index("subtask_failed"))
-            self.assertLess(types.index("subtask_failed"), types.index("session_closed"))
+            self.assertLess(
+                types.index("budget_exceeded"), types.index("subtask_failed")
+            )
+            self.assertLess(
+                types.index("subtask_failed"), types.index("session_closed")
+            )
             self.assertEqual(self.moderator.assess_calls, [])
             stored = json.loads(json.dumps(self.store.run(result.run_id)))
             events_before = list(self.events)
@@ -1132,10 +1498,20 @@ class HungWorkerTests(ControllerTestCase):
             time.sleep(0.01)
         self.assertEqual([e.type for e in state.late_events], ["late_report_ignored"])
         self.assertEqual(state.late_events[0].data["subtask_id"], "subtask-1")
-        self.assertEqual(self.store.run(result.run_id), stored, "the stored result changed")
-        self.assertEqual(self.store.reports[result.run_id], {}, "the late report was stored")
-        self.assertEqual(self.store.events(result.run_id), events_before, "an event followed the terminal one")
-        self.assertEqual(self.moderator.assess_calls, [], "the late report reached the moderator")
+        self.assertEqual(
+            self.store.run(result.run_id), stored, "the stored result changed"
+        )
+        self.assertEqual(
+            self.store.reports[result.run_id], {}, "the late report was stored"
+        )
+        self.assertEqual(
+            self.store.events(result.run_id),
+            events_before,
+            "an event followed the terminal one",
+        )
+        self.assertEqual(
+            self.moderator.assess_calls, [], "the late report reached the moderator"
+        )
         self.assertEqual(self.toolbox.closed, ["session-1"], "closed twice")
 
 
@@ -1147,25 +1523,36 @@ class RequestIdentityTests(ControllerTestCase):
         self.assertEqual(self.store.index, {"request-t": result.run_id})
         self.assertEqual(result.interpreted.request_id, "request-t")
         self.assertEqual(result.plan.request_id, "request-t")
-        self.assertEqual([r.request_id for r in result.reports], ["request-t", "request-t"])
+        self.assertEqual(
+            [r.request_id for r in result.reports], ["request-t", "request-t"]
+        )
         self.assertEqual({i.request_id for i in self.toolbox.inputs}, {"request-t"})
         self.assertEqual(
-            {r["request_id"] for r in self.store.reports[result.run_id].values()}, {"request-t"}
+            {r["request_id"] for r in self.store.reports[result.run_id].values()},
+            {"request-t"},
         )
 
-    def test_an_interpreted_request_with_another_id_is_refused_before_a_run_exists(self):
+    def test_an_interpreted_request_with_another_id_is_refused_before_a_run_exists(
+        self,
+    ):
         self.build()
-        for request in (interpreted(request_id="request-other"),
-                        interpreted(request_id="request-other").to_dict()):
+        for request in (
+            interpreted(request_id="request-other"),
+            interpreted(request_id="request-other").to_dict(),
+        ):
             with self.subTest(type=type(request).__name__):
                 with self.assertRaises(ContractError) as caught:
                     self.controller.run(request, "request-t")
                 self.assertEqual(caught.exception.code, "INVALID_INPUT")
-        self.assertEqual(self.store.runs, {}, "a run was created under a disputed identity")
+        self.assertEqual(
+            self.store.runs, {}, "a run was created under a disputed identity"
+        )
         self.assertEqual(self.toolbox.inputs, [])
 
     def test_an_interpreter_returning_another_id_fails_the_run(self):
-        self.build(interpret=lambda text, request_id: interpreted(request_id="request-other"))
+        self.build(
+            interpret=lambda text, request_id: interpreted(request_id="request-other")
+        )
         result = self.execute("find headphones")
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "INVALID_INPUT")
@@ -1173,7 +1560,13 @@ class RequestIdentityTests(ControllerTestCase):
 
     def test_a_plan_for_another_request_fails_the_run(self):
         def foreign(_request, plan_id):
-            return Plan(plan_id=plan_id, request_id="request-other", subtasks=[subtask("a")], created_at="t")
+            return Plan(
+                plan_id=plan_id,
+                request_id="request-other",
+                subtasks=[subtask("a")],
+                created_at="t",
+            )
+
         self.build(plan=foreign)
         result = self.execute()
         self.assertEqual(result.status, "failed")
@@ -1185,20 +1578,28 @@ class RequestIdentityTests(ControllerTestCase):
             report = report_for(inp)
             report.request_id = "request-foreign"
             return report
+
         self.build(FakeToolbox(behaviour))
         result = self.execute()
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error.code, "EXTRACTION_FAILED")
         self.assertIn("request_id 'request-foreign'", result.error.message)
-        self.assertEqual(self.moderator.assess_calls, [], "a foreign report reached the moderator")
+        self.assertEqual(
+            self.moderator.assess_calls, [], "a foreign report reached the moderator"
+        )
         self.assertEqual(result.reports, [])
-        self.assertEqual(self.store.reports[result.run_id], {}, "a foreign report was stored")
+        self.assertEqual(
+            self.store.reports[result.run_id], {}, "a foreign report was stored"
+        )
 
-    def test_a_report_with_a_foreign_session_handle_fails_intake_and_the_handle_is_never_closed(self):
+    def test_a_report_with_a_foreign_session_handle_fails_intake_and_the_handle_is_never_closed(
+        self,
+    ):
         def behaviour(inp):
             report = report_for(inp)
             report.session_handle = "session-stolen"
             return report
+
         self.build(FakeToolbox(behaviour))
         result = self.execute()
         self.assertEqual(result.status, "failed")
@@ -1209,7 +1610,9 @@ class RequestIdentityTests(ControllerTestCase):
         # the foreign handle would show up as session_close_failed.
         self.assertEqual(self.toolbox.closed, ["session-1"])
         self.assertFalse(any(e["type"] == "session_close_failed" for e in self.events))
-        self.assertNotIn("session-stolen", json.dumps(self.events) + json.dumps(result.to_dict()))
+        self.assertNotIn(
+            "session-stolen", json.dumps(self.events) + json.dumps(result.to_dict())
+        )
         self.assertEqual(self.store.reports[result.run_id], {})
 
     def test_a_report_returning_no_handle_is_still_bound_to_the_lent_session(self):
@@ -1217,10 +1620,17 @@ class RequestIdentityTests(ControllerTestCase):
             report = report_for(inp)
             report.session_handle = None
             return report
-        self.build(FakeToolbox(behaviour), FakeModerator({"subtask-1": ["verify", "accept"]}))
+
+        self.build(
+            FakeToolbox(behaviour), FakeModerator({"subtask-1": ["verify", "accept"]})
+        )
         result = self.execute()
         self.assertEqual(result.status, "succeeded", result.error)
-        self.assertEqual(self.toolbox.observe_calls, ["session-1"], "verification used the lent session")
+        self.assertEqual(
+            self.toolbox.observe_calls,
+            ["session-1"],
+            "verification used the lent session",
+        )
         self.assertEqual(self.toolbox.closed, ["session-1"])
 
 

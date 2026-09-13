@@ -6,12 +6,13 @@ from pathlib import Path
 
 from argus import interfaces
 from argus.contracts import (
+    AnswerSelection,
     Budget,
     ContractError,
     Criterion,
-    FinalAnswer,
     Intent,
     InterpretedRequest,
+    Note,
     ParameterOrigin,
     Plan,
     Subtask,
@@ -37,14 +38,26 @@ ORIGIN = "https://demo-catalog.invalid"
 DOMAIN = "jobs.example.com"
 CHAIN = json.loads((EXAMPLES / "plan_open_chain.json").read_text(encoding="utf-8"))
 STEP_FIELDS = {
-    "subtask_id", "intent_index", "operation", "depends_on", "inputs_from",
-    "concurrency_group", "success_conditions", "preferred_tool",
+    "subtask_id",
+    "intent_index",
+    "operation",
+    "depends_on",
+    "inputs_from",
+    "concurrency_group",
+    "success_conditions",
+    "preferred_tool",
 }
 
 
-def open_subtask(subtask_id="subtask-open-search", *, operation="search",
-                 query="software engineering", shape=OPEN_RECORD_SHAPE,
-                 target_domain=DOMAIN, **overrides):
+def open_subtask(
+    subtask_id="subtask-open-search",
+    *,
+    operation="search",
+    query="software engineering",
+    shape=OPEN_RECORD_SHAPE,
+    target_domain=DOMAIN,
+    **overrides,
+):
     fields = {
         "subtask_id": subtask_id,
         "intent_index": 0,
@@ -80,13 +93,27 @@ def context_for(report, *, run_id="run-1", empty_state=False):
 def open_interpreted(*criteria, request_id="request-open-t"):
     text = "Find the highest salary 10 software engineering jobs, remote only, on jobs.example.com"
     return InterpretedRequest(
-        request_id=request_id, raw_text=text, model="test", interpreted_at="2026-09-12T00:00:00Z",
-        intents=[Intent(
-            site_id=DOMAIN, operation="find_jobs", confidence=0.9, kind="open", target_domain=DOMAIN,
-            parameters={"query": ParameterOrigin("software engineering", "text_span", 0.9, (27, 47))},
-            goal="Find software engineering jobs", criteria=list(criteria),
-            expected_record_shape=list(OPEN_RECORD_SHAPE),
-        )],
+        request_id=request_id,
+        raw_text=text,
+        model="test",
+        interpreted_at="2026-09-12T00:00:00Z",
+        intents=[
+            Intent(
+                site_id=DOMAIN,
+                operation="find_jobs",
+                confidence=0.9,
+                kind="open",
+                target_domain=DOMAIN,
+                parameters={
+                    "query": ParameterOrigin(
+                        "software engineering", "text_span", 0.9, (27, 47)
+                    )
+                },
+                goal="Find software engineering jobs",
+                criteria=list(criteria),
+                expected_record_shape=list(OPEN_RECORD_SHAPE),
+            )
+        ],
     )
 
 
@@ -126,7 +153,9 @@ def subtask(
     return Subtask(**fields)
 
 
-def subtask_input(task=None, *, handle="fake-session-1", run_id="run-1", mode="explore"):
+def subtask_input(
+    task=None, *, handle="fake-session-1", run_id="run-1", mode="explore"
+):
     return SubtaskInput(
         run_id=run_id,
         subtask=task or subtask(),
@@ -144,7 +173,9 @@ def run(toolbox, task=None, *, run_id="run-1"):
 
 
 def interpreted():
-    data = json.loads((EXAMPLES / "interpreted_request.json").read_text(encoding="utf-8"))
+    data = json.loads(
+        (EXAMPLES / "interpreted_request.json").read_text(encoding="utf-8")
+    )
     return InterpretedRequest.from_dict(data)
 
 
@@ -232,7 +263,9 @@ class ObservationTests(unittest.TestCase):
         self.assertIn(question, toolbox.dom_interpret(handle, question))
         self.assertIn(question, toolbox.vision_interpret(handle, question))
         self.assertTrue(toolbox.dom_interpret(handle, question).startswith("dom:"))
-        self.assertTrue(toolbox.vision_interpret(handle, question).startswith("vision:"))
+        self.assertTrue(
+            toolbox.vision_interpret(handle, question).startswith("vision:")
+        )
 
 
 class SuccessfulReportTests(unittest.TestCase):
@@ -242,7 +275,9 @@ class SuccessfulReportTests(unittest.TestCase):
 
     def test_the_report_is_a_complete_worker_report(self):
         self.assertIsInstance(self.report, WorkerReport)
-        fixture_fields = set(json.loads((EXAMPLES / "worker_report.json").read_text(encoding="utf-8")))
+        fixture_fields = set(
+            json.loads((EXAMPLES / "worker_report.json").read_text(encoding="utf-8"))
+        )
         self.assertEqual(len(fixture_fields), 13)
         payload = self.report.to_dict()
         self.assertTrue(fixture_fields <= set(payload))
@@ -258,11 +293,16 @@ class SuccessfulReportTests(unittest.TestCase):
     def test_the_report_echoes_the_dispatched_request_id_and_the_lent_handle(self):
         task = subtask()
         handle = self.toolbox.open_session(task.site_id)
-        report = self.toolbox.run_subtask(SubtaskInput(
-            run_id="run-1", subtask=task, session_handle=handle,
-            budget=Budget(max_actions=30, max_seconds=120.0), mode="explore",
-            request_id="request-9",
-        ))
+        report = self.toolbox.run_subtask(
+            SubtaskInput(
+                run_id="run-1",
+                subtask=task,
+                session_handle=handle,
+                budget=Budget(max_actions=30, max_seconds=120.0),
+                mode="explore",
+                request_id="request-9",
+            )
+        )
         self.assertEqual(report.request_id, "request-9")
         self.assertEqual(report.session_handle, handle)
 
@@ -346,9 +386,7 @@ class ScriptedOutcomeTests(unittest.TestCase):
 
     def test_every_documented_outcome_is_covered(self):
         covered = {
-            name.removeprefix("test_")
-            for name in dir(self)
-            if name.startswith("test_")
+            name.removeprefix("test_") for name in dir(self) if name.startswith("test_")
         }
         self.assertTrue(set(SCRIPTED_OUTCOMES) <= covered)
 
@@ -451,31 +489,49 @@ class StubModeratorReconcileTests(unittest.TestCase):
         )
 
     def merged(self, *reports):
-        return StubModerator().reconcile(self.plan, list(reports)).next_action["findings"]
+        return (
+            StubModerator().reconcile(self.plan, list(reports)).next_action["findings"]
+        )
 
     def test_a_later_subtask_supersedes_the_earlier_record_for_the_same_url(self):
         """The search-then-open_results chain: one entry per job, the detailed one."""
         search = self.report_with(
             "subtask-1",
             [
-                {"title": "Staff Software Engineer", "url": f"{ORIGIN}/jobs/3",
-                 "source_observation_id": "observation-000.png"},
-                {"title": "Senior Software Engineer", "url": f"{ORIGIN}/jobs/1",
-                 "source_observation_id": "observation-000.png"},
+                {
+                    "title": "Staff Software Engineer",
+                    "url": f"{ORIGIN}/jobs/3",
+                    "source_observation_id": "observation-000.png",
+                },
+                {
+                    "title": "Senior Software Engineer",
+                    "url": f"{ORIGIN}/jobs/1",
+                    "source_observation_id": "observation-000.png",
+                },
             ],
         )
         details = self.report_with(
             "subtask-2",
             [
-                {"title": "Senior Software Engineer", "url": f"{ORIGIN}/jobs/1",
-                 "salary": 185000, "source_observation_id": "observation-002.png"},
-                {"title": "Staff Software Engineer", "url": f"{ORIGIN}/jobs/3",
-                 "salary": 210000, "source_observation_id": "observation-003.png"},
+                {
+                    "title": "Senior Software Engineer",
+                    "url": f"{ORIGIN}/jobs/1",
+                    "salary": 185000,
+                    "source_observation_id": "observation-002.png",
+                },
+                {
+                    "title": "Staff Software Engineer",
+                    "url": f"{ORIGIN}/jobs/3",
+                    "salary": 210000,
+                    "source_observation_id": "observation-003.png",
+                },
             ],
         )
         findings = self.merged(search, details)
-        self.assertEqual([record["url"] for record in findings],
-                         [f"{ORIGIN}/jobs/1", f"{ORIGIN}/jobs/3"])
+        self.assertEqual(
+            [record["url"] for record in findings],
+            [f"{ORIGIN}/jobs/1", f"{ORIGIN}/jobs/3"],
+        )
         self.assertEqual([record["salary"] for record in findings], [185000, 210000])
         self.assertEqual(
             [record["source_observation_id"] for record in findings],
@@ -489,7 +545,8 @@ class StubModeratorReconcileTests(unittest.TestCase):
             [{"url": f"{ORIGIN}/a"}, {"url": f"{ORIGIN}/b"}, {"url": f"{ORIGIN}/c"}],
         )
         later = self.report_with(
-            "subtask-2", [{"url": f"{ORIGIN}/c", "seen": 2}, {"url": f"{ORIGIN}/a", "seen": 2}]
+            "subtask-2",
+            [{"url": f"{ORIGIN}/c", "seen": 2}, {"url": f"{ORIGIN}/a", "seen": 2}],
         )
         findings = self.merged(earlier, later)
         self.assertEqual(
@@ -501,18 +558,26 @@ class StubModeratorReconcileTests(unittest.TestCase):
     def test_records_without_a_url_are_kept_as_they_are(self):
         first = self.report_with(
             "subtask-1",
-            [{"title": "No link here"}, {"title": "Blank link", "url": "  "},
-             "not even an object"],
+            [
+                {"title": "No link here"},
+                {"title": "Blank link", "url": "  "},
+                "not even an object",
+            ],
         )
         second = self.report_with(
-            "subtask-2", [{"title": "Also no link"}, {"title": "Blank link", "url": "  "}]
+            "subtask-2",
+            [{"title": "Also no link"}, {"title": "Blank link", "url": "  "}],
         )
         findings = self.merged(first, second)
         self.assertEqual(
             findings,
-            [{"title": "No link here"}, {"title": "Blank link", "url": "  "},
-             "not even an object",
-             {"title": "Also no link"}, {"title": "Blank link", "url": "  "}],
+            [
+                {"title": "No link here"},
+                {"title": "Blank link", "url": "  "},
+                "not even an object",
+                {"title": "Also no link"},
+                {"title": "Blank link", "url": "  "},
+            ],
         )
 
     def test_two_independent_subtasks_keep_all_their_records(self):
@@ -533,23 +598,33 @@ class StubModeratorSynthesizeTests(unittest.TestCase):
         self.task = subtask()
         self.report = run(FakeToolbox(), self.task)
         self.records = self.report.findings
-        self.validation = FakeGhost().validate(self.task, self.records, ["observation-000.png"])
+        self.validation = FakeGhost().validate(
+            self.task, self.records, ["observation-000.png"]
+        )
 
     def synthesize(self, records, *, evidence=("observation-000.png",), failures=()):
         return StubModerator().synthesize(
-            interpreted(), list(records), self.validation, list(evidence), list(failures)
+            interpreted(),
+            list(records),
+            self.validation,
+            list(evidence),
+            list(failures),
         )
 
-    def test_one_claim_per_record_citing_its_own_observation(self):
-        answer = self.synthesize(self.records)
-        self.assertIsInstance(answer, FinalAnswer)
-        self.assertEqual(len(answer.claims), len(self.records))
-        for claim, record in zip(answer.claims, self.records):
-            self.assertEqual(claim.evidence_refs, [record["source_observation_id"]])
-            self.assertIn(record["title"], claim.text)
+    def test_one_structured_claim_per_selected_record(self):
+        selection = self.synthesize(self.records)
+        self.assertIsInstance(selection, AnswerSelection)
+        self.assertEqual(selection.record_indices, list(range(len(self.records))))
+        self.assertEqual(len(selection.claims), len(self.records))
+        for index, claim in enumerate(selection.claims):
+            self.assertEqual(claim.record_index, index)
+            self.assertIn("title", claim.fields)
+            self.assertNotIn("source_observation_id", claim.fields)
 
-    def test_no_claim_is_emitted_without_an_evidence_ref(self):
-        anonymous = [dict(record, source_observation_id=None) for record in self.records]
+    def test_no_claim_is_selected_without_record_evidence(self):
+        anonymous = [
+            dict(record, source_observation_id=None) for record in self.records
+        ]
         cases = [
             (self.records, ()),
             (anonymous, ("observation-000.png",)),
@@ -559,23 +634,26 @@ class StubModeratorSynthesizeTests(unittest.TestCase):
         ]
         for records, evidence in cases:
             with self.subTest(records=len(records), evidence=len(evidence)):
-                answer = self.synthesize(records, evidence=evidence)
-                for claim in answer.claims:
-                    self.assertTrue(claim.evidence_refs)
-                    self.assertTrue(all(claim.evidence_refs))
+                selection = self.synthesize(records, evidence=evidence)
+                self.assertEqual(
+                    len(selection.claims),
+                    sum(
+                        isinstance(record, dict)
+                        and isinstance(record.get("source_observation_id"), str)
+                        for record in records
+                    ),
+                )
 
-    def test_a_record_without_evidence_falls_back_then_becomes_unverified(self):
-        anonymous = [dict(record, source_observation_id=None) for record in self.records]
-        fell_back = self.synthesize(anonymous, evidence=("observation-000.png",))
-        self.assertEqual(
-            [claim.evidence_refs for claim in fell_back.claims],
-            [["observation-000.png"]] * len(anonymous),
-        )
-        uncited = self.synthesize(anonymous, evidence=())
-        self.assertEqual(uncited.claims, [])
-        self.assertEqual(len(uncited.unverified), len(anonymous))
+    def test_a_record_without_its_own_evidence_is_not_selected(self):
+        anonymous = [
+            dict(record, source_observation_id=None) for record in self.records
+        ]
+        for evidence in (("observation-000.png",), ()):
+            selection = self.synthesize(anonymous, evidence=evidence)
+            self.assertEqual(selection.record_indices, [])
+            self.assertEqual(selection.claims, [])
 
-    def test_failures_are_listed_verbatim(self):
+    def test_failures_never_become_moderator_output(self):
         failure = TypedError(
             code="AUTH_REQUIRED",
             message="the catalog asked for a sign-in",
@@ -583,30 +661,34 @@ class StubModeratorSynthesizeTests(unittest.TestCase):
             step_id="step-002",
             evidence_refs=["observation-000.png"],
         )
-        answer = self.synthesize(self.records, failures=(failure,))
-        self.assertEqual(answer.failures, [failure])
-        self.assertIn("AUTH_REQUIRED: the catalog asked for a sign-in", answer.unverified)
+        selection = self.synthesize(self.records, failures=(failure,))
+        self.assertNotIn("failures", selection.to_dict())
+        self.assertNotIn("the catalog asked for a sign-in", str(selection.to_dict()))
 
-    def test_records_are_passed_through_and_the_answer_round_trips(self):
-        answer = self.synthesize(self.records)
-        self.assertEqual(answer.records, self.records)
-        self.assertEqual(FinalAnswer.from_dict(answer.to_dict()), answer)
+    def test_selection_round_trips_without_records_or_prose(self):
+        selection = self.synthesize(self.records)
+        self.assertEqual(selection.record_indices, [0, 1])
+        self.assertEqual(AnswerSelection.from_dict(selection.to_dict()), selection)
+        self.assertNotIn("records", selection.to_dict())
+        self.assertNotIn("text", selection.to_dict())
 
-    def test_a_failed_validation_is_named_unverified(self):
-        answer = StubModerator().synthesize(
+    def test_validation_is_not_moderator_output(self):
+        selection = StubModerator().synthesize(
             interpreted(),
             list(self.records),
             {"status": "failed", "checks": {}},
             ["observation-000.png"],
             [],
         )
-        self.assertIn("Validation status is 'failed', not 'passed'.", answer.unverified)
+        self.assertEqual(selection.notes, [])
 
 
 class FakeGhostMatchTests(unittest.TestCase):
     def test_match_always_explores(self):
         ghost = FakeGhost()
-        decision = ghost.match(subtask(), [{"skill_id": "demo-catalog.search-products"}])
+        decision = ghost.match(
+            subtask(), [{"skill_id": "demo-catalog.search-products"}]
+        )
         self.assertEqual(decision["decision"], "explore")
         self.assertEqual(decision["reason"], "no qualified skills in fake")
         self.assertIsNone(decision["skill"])
@@ -631,7 +713,9 @@ class FakeGhostValidateTests(unittest.TestCase):
     def test_fails_with_named_checks(self):
         cases = {
             "currency_usd": dict(self.records[0], currency="CAD"),
-            "url_on_site": dict(self.records[0], url="https://example-shop.invalid/p/1"),
+            "url_on_site": dict(
+                self.records[0], url="https://example-shop.invalid/p/1"
+            ),
             "price_within_max": dict(self.records[0], price=249.0),
             "title_present": dict(self.records[0], title=""),
             "price_present": dict(self.records[0], price="129.00"),
@@ -671,16 +755,16 @@ class FakeGhostCompileTests(unittest.TestCase):
             [step["action"] for step in skill["definition"]["steps"]],
             ["open_url", "type", "extract", "finished"],
         )
-        self.assertEqual(
-            skill["definition"]["output_schema_id"], "product-list.v1"
-        )
+        self.assertEqual(skill["definition"]["output_schema_id"], "product-list.v1")
         json.dumps(skill)  # a skill must be storable as JSON
 
     def test_compile_stores_no_session_handle(self):
         task = subtask()
         report = run(FakeToolbox(), task)
         self.assertEqual(report.session_handle, "fake-session-1")
-        self.assertNotIn("fake-session-1", json.dumps(FakeGhost().compile(report, task)))
+        self.assertNotIn(
+            "fake-session-1", json.dumps(FakeGhost().compile(report, task))
+        )
 
     def test_compile_returns_none_without_actions(self):
         task = subtask()
@@ -704,12 +788,25 @@ class FakePlannerClientTests(unittest.TestCase):
         self.assertEqual(search["inputs_from"], [])
         self.assertEqual(
             details["inputs_from"],
-            [{"parameter": "result_urls", "subtask_id": "subtask-open-search", "field": "url"}],
+            [
+                {
+                    "parameter": "result_urls",
+                    "subtask_id": "subtask-open-search",
+                    "field": "url",
+                }
+            ],
         )
         self.assertEqual(details["depends_on"], ["subtask-open-search"])
         self.assertEqual(
             client.calls,
-            [{"system": "system text", "user": "user text", "output_model": dict, "max_tokens": 4096}],
+            [
+                {
+                    "system": "system text",
+                    "user": "user text",
+                    "output_model": dict,
+                    "max_tokens": 4096,
+                }
+            ],
         )
 
     def test_status_override_returns_that_status_with_no_content(self):
@@ -727,14 +824,25 @@ class FakePlannerClientTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             FakePlannerClient({})
         with self.assertRaises(ContractError):
-            FakePlannerClient({"subtasks": [{"subtask_id": "s"}]})  # no intent_index etc.
+            FakePlannerClient(
+                {"subtasks": [{"subtask_id": "s"}]}
+            )  # no intent_index etc.
         with self.assertRaises(ContractError):
             FakePlannerClient({"subtasks": ["not an object"]})
 
     def test_omitted_optional_scheduling_fields_get_subtask_defaults(self):
-        client = FakePlannerClient({"subtasks": [
-            {"subtask_id": "s", "intent_index": 0, "operation": "search", "concurrency_group": "g"},
-        ]})
+        client = FakePlannerClient(
+            {
+                "subtasks": [
+                    {
+                        "subtask_id": "s",
+                        "intent_index": 0,
+                        "operation": "search",
+                        "concurrency_group": "g",
+                    },
+                ]
+            }
+        )
         [step] = client.parse_json("s", "u", dict, 1).parsed["subtasks"]
         self.assertEqual(step["depends_on"], [])
         self.assertEqual(step["inputs_from"], [])
@@ -766,7 +874,9 @@ class OpenWorldToolboxTests(unittest.TestCase):
         self.assertGreaterEqual(len(report.findings), 6)
         self.assertEqual(report.evidence["screenshots"], ["observation-000.png"])
         for record in report.findings:
-            self.assertEqual(set(record), set(OPEN_RECORD_SHAPE) | {"source_observation_id"})
+            self.assertEqual(
+                set(record), set(OPEN_RECORD_SHAPE) | {"source_observation_id"}
+            )
             self.assertTrue(record["url"].startswith(f"https://{DOMAIN}/"))
             self.assertIsInstance(record["salary"], (int, float))
             self.assertIsInstance(record["remote"], bool)
@@ -778,8 +888,12 @@ class OpenWorldToolboxTests(unittest.TestCase):
     def test_records_follow_the_subtasks_expected_record_shape(self):
         report = run(FakeToolbox(), open_subtask(shape=("title", "url", "rating")))
         for record in report.findings:
-            self.assertEqual(set(record), {"title", "url", "rating", "source_observation_id"})
-            self.assertIsNone(record["rating"], "a field the dataset lacks is present but empty")
+            self.assertEqual(
+                set(record), {"title", "url", "rating", "source_observation_id"}
+            )
+            self.assertIsNone(
+                record["rating"], "a field the dataset lacks is present but empty"
+            )
 
     def test_every_query_word_must_match(self):
         counts = {}
@@ -806,38 +920,61 @@ class OpenWorldToolboxTests(unittest.TestCase):
         self.assertEqual(report.findings, [])
         self.assertEqual(report.actions[0]["url"], "https://docs.example.org/search")
 
-    def test_open_results_returns_one_record_per_url_in_order_each_with_its_own_observation(self):
-        urls = [f"https://{DOMAIN}/jobs/3", f"https://{DOMAIN}/jobs/1", f"https://{DOMAIN}/jobs/999"]
-        task = open_subtask("subtask-open-details", operation="open_results",
-                            parameters={"result_urls": urls})
+    def test_open_results_returns_one_record_per_url_in_order_each_with_its_own_observation(
+        self,
+    ):
+        urls = [
+            f"https://{DOMAIN}/jobs/3",
+            f"https://{DOMAIN}/jobs/1",
+            f"https://{DOMAIN}/jobs/999",
+        ]
+        task = open_subtask(
+            "subtask-open-details",
+            operation="open_results",
+            parameters={"result_urls": urls},
+        )
         report = run(FakeToolbox(), task)
         self.assertEqual(report.outcome, "succeeded")
         self.assertEqual([r["url"] for r in report.findings], urls)
-        self.assertEqual([r["title"] for r in report.findings],
-                         ["Staff Software Engineer", "Senior Software Engineer", None])
+        self.assertEqual(
+            [r["title"] for r in report.findings],
+            ["Staff Software Engineer", "Senior Software Engineer", None],
+        )
         observations = [r["source_observation_id"] for r in report.findings]
-        self.assertEqual(len(set(observations)), 3, "each record cites its own observation")
-        self.assertEqual(report.evidence["screenshots"], ["observation-000.png"] + observations)
+        self.assertEqual(
+            len(set(observations)), 3, "each record cites its own observation"
+        )
+        self.assertEqual(
+            report.evidence["screenshots"], ["observation-000.png"] + observations
+        )
         self.assertEqual(
             [a["action"]["name"] for a in report.actions],
             ["open_url", "open_url", "open_url", "open_url", "extract", "finished"],
         )
         self.assertEqual([a["url"] for a in report.actions[1:4]], urls)
-        self.assertEqual([a["observation_after"] for a in report.actions[1:4]], observations)
+        self.assertEqual(
+            [a["observation_after"] for a in report.actions[1:4]], observations
+        )
 
     def test_open_results_without_urls_falls_back_to_a_search(self):
         task = open_subtask("subtask-open-details", operation="open_results")
         self.assertEqual(len(run(FakeToolbox(), task).findings), 6)
 
     def test_scripted_outcomes_apply_to_open_subtasks(self):
-        failed = run(FakeToolbox({"subtask-open-search": "auth_required"}), open_subtask())
+        failed = run(
+            FakeToolbox({"subtask-open-search": "auth_required"}), open_subtask()
+        )
         self.assertEqual(failed.outcome, "failed")
         self.assertIsNone(failed.findings)
         self.assertEqual(failed.typed_failures[0].code, "AUTH_REQUIRED")
-        self.assertEqual(failed.typed_failures[0].step_id, failed.failures[0]["step_id"])
+        self.assertEqual(
+            failed.typed_failures[0].step_id, failed.failures[0]["step_id"]
+        )
         empty = run(FakeToolbox({"subtask-open-search": "empty"}), open_subtask())
-        self.assertEqual((empty.outcome, empty.findings, empty.evidence["screenshots"]),
-                         ("succeeded", [], []))
+        self.assertEqual(
+            (empty.outcome, empty.findings, empty.evidence["screenshots"]),
+            ("succeeded", [], []),
+        )
         with self.assertRaises(RuntimeError):
             run(FakeToolbox({"subtask-open-search": "raise"}), open_subtask())
 
@@ -845,7 +982,10 @@ class OpenWorldToolboxTests(unittest.TestCase):
         toolbox = FakeToolbox()
         run(toolbox, open_subtask())
         self.assertEqual([c[0] for c in toolbox.calls], ["open_session", "run_subtask"])
-        self.assertEqual(toolbox.calls[1][1:], ("subtask-open-search", "explore", "dom", "fake-session-1"))
+        self.assertEqual(
+            toolbox.calls[1][1:],
+            ("subtask-open-search", "explore", "dom", "fake-session-1"),
+        )
 
     def test_observations_are_numbered_across_open_and_registry_runs(self):
         toolbox = FakeToolbox()
@@ -867,19 +1007,28 @@ class OpenWorldGhostTests(unittest.TestCase):
         if context == "default":
             context = self.context
         evidence = self.report.evidence["screenshots"] if evidence is None else evidence
-        return self.ghost.validate(task or self.task, records, evidence, report_context=context)
+        return self.ghost.validate(
+            task or self.task, records, evidence, report_context=context
+        )
 
     def test_passes_on_the_fakes_own_open_report(self):
         result = self.validate(self.records)
         self.assertEqual(result["status"], "passed", result["failed_checks"])
         self.assertEqual(
             set(result["checks"]),
-            {"records_are_objects", "records_cite_observations", "results_present_or_empty_state",
-             "query_visibly_applied", "urls_on_target_domain"},
+            {
+                "records_are_objects",
+                "records_cite_observations",
+                "results_present_or_empty_state",
+                "query_visibly_applied",
+                "urls_on_target_domain",
+            },
         )
         self.assertTrue(any("completeness" in note for note in result["unverified"]))
         self.assertIn("generic", result["scope"])
-        self.assertEqual(self.ghost.calls, [("validate", "subtask-open-search", len(self.records))])
+        self.assertEqual(
+            self.ghost.calls, [("validate", "subtask-open-search", len(self.records))]
+        )
 
     def test_the_open_report_passes_without_a_context_too(self):
         result = self.validate(self.records, context=None)
@@ -891,13 +1040,19 @@ class OpenWorldGhostTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["failed_checks"], ["records_cite_observations"])
         missing = [dict(self.records[0], source_observation_id=None)]
-        self.assertIn("records_cite_observations", self.validate(missing)["failed_checks"])
+        self.assertIn(
+            "records_cite_observations", self.validate(missing)["failed_checks"]
+        )
 
     def test_context_observations_count_as_cited(self):
         verified = [dict(self.records[0], source_observation_id="observation-fake-1")]
-        context = dict(self.context, evidence={
-            "screenshots": [], "verifications": [{"observation_id": "observation-fake-1"}],
-        })
+        context = dict(
+            self.context,
+            evidence={
+                "screenshots": [],
+                "verifications": [{"observation_id": "observation-fake-1"}],
+            },
+        )
         result = self.validate(verified, evidence=[], context=context)
         self.assertEqual(result["status"], "passed", result["failed_checks"])
 
@@ -922,8 +1077,10 @@ class OpenWorldGhostTests(unittest.TestCase):
         self.assertEqual(self.validate(sub)["status"], "passed")
         for bad in (None, 7, f"https://{DOMAIN}.evil.example.org/x", "not a url"):
             with self.subTest(url=bad):
-                self.assertIn("urls_on_target_domain",
-                              self.validate([dict(self.records[0], url=bad)])["failed_checks"])
+                self.assertIn(
+                    "urls_on_target_domain",
+                    self.validate([dict(self.records[0], url=bad)])["failed_checks"],
+                )
 
     def test_a_record_that_is_not_an_object_fails(self):
         result = self.validate(["Staff Software Engineer"])
@@ -936,8 +1093,14 @@ class OpenWorldGhostTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(
             set(result["checks"]),
-            {"records_are_objects", "title_present", "price_present", "currency_usd",
-             "url_on_site", "price_within_max"},
+            {
+                "records_are_objects",
+                "title_present",
+                "price_present",
+                "currency_usd",
+                "url_on_site",
+                "price_within_max",
+            },
         )
         self.assertNotIn("unverified", result)
 
@@ -948,78 +1111,96 @@ class StubModeratorCriteriaTests(unittest.TestCase):
         self.report = run(FakeToolbox(), self.task)
         self.records = self.report.findings
         self.validation = FakeGhost().validate(
-            self.task, self.records, self.report.evidence["screenshots"],
+            self.task,
+            self.records,
+            self.report.evidence["screenshots"],
             report_context=context_for(self.report),
         )
 
     def synthesize(self, *criteria, records=None):
         return StubModerator().synthesize(
-            open_interpreted(*criteria), list(self.records if records is None else records),
-            self.validation, ["observation-000.png"], [],
+            open_interpreted(*criteria),
+            list(self.records if records is None else records),
+            self.validation,
+            ["observation-000.png"],
+            [],
         )
 
     def test_filter_rank_and_limit_apply_in_that_order(self):
-        answer = self.synthesize(
+        selection = self.synthesize(
             criterion("limit", 3, "10"),
             criterion("rank", "salary", "highest salary"),
             criterion("filter", "remote", "remote only"),
         )
+        selected = [self.records[index] for index in selection.record_indices]
         self.assertEqual(
-            [(r["title"], r["salary"], r["remote"]) for r in answer.records],
-            [("Staff Software Engineer", 210000, True),
-             ("Senior Software Engineer", 185000, True),
-             ("Site Reliability Engineer", 160000, True)],
+            [(r["title"], r["salary"], r["remote"]) for r in selected],
+            [
+                ("Staff Software Engineer", 210000, True),
+                ("Senior Software Engineer", 185000, True),
+                ("Site Reliability Engineer", 160000, True),
+            ],
         )
-        self.assertEqual(len(answer.claims), 3)
-        for claim, record in zip(answer.claims, answer.records):
-            self.assertEqual(claim.evidence_refs, [record["source_observation_id"]])
-            self.assertIn(record["title"], claim.text)
-        self.assertEqual(answer.unverified, [])
-        self.assertEqual(FinalAnswer.from_dict(answer.to_dict()), answer)
+        self.assertEqual(len(selection.claims), 3)
+        self.assertEqual([claim.record_index for claim in selection.claims], [0, 1, 2])
+        self.assertTrue(all("title" in claim.fields for claim in selection.claims))
+        self.assertEqual(selection.notes, [])
+        self.assertEqual(AnswerSelection.from_dict(selection.to_dict()), selection)
 
     def test_without_criteria_records_are_passed_through(self):
-        answer = self.synthesize()
-        self.assertEqual(answer.records, self.records)
-        self.assertEqual(len(answer.claims), len(self.records))
+        selection = self.synthesize()
+        self.assertEqual(selection.record_indices, list(range(len(self.records))))
+        self.assertEqual(len(selection.claims), len(self.records))
 
     def test_a_criterion_whose_field_is_absent_is_named_unverified(self):
-        answer = self.synthesize(criterion("rank", "rating", "best rated"))
-        self.assertEqual(answer.records, self.records, "nothing was reordered")
-        [note] = answer.unverified
-        self.assertIn("'best rated'", note)
-        self.assertIn("was not applied", note)
-        self.assertIn("'rating'", note)
+        selection = self.synthesize(criterion("rank", "rating", "best rated"))
+        self.assertEqual(selection.record_indices, list(range(len(self.records))))
+        self.assertEqual(
+            selection.notes, [Note("criterion_not_applied", "intent-0:criterion-0")]
+        )
 
     def test_a_rank_without_a_field_is_unverified(self):
-        answer = self.synthesize(Criterion("best", "rank", None, None, 0.4))
-        [note] = answer.unverified
-        self.assertIn("'best'", note)
-        self.assertIn("names no record field", note)
-        self.assertEqual(answer.records, self.records)
+        selection = self.synthesize(Criterion("best", "rank", None, None, 0.4))
+        self.assertEqual(
+            selection.notes, [Note("criterion_not_applied", "intent-0:criterion-0")]
+        )
+        self.assertEqual(selection.record_indices, list(range(len(self.records))))
 
     def test_a_limit_must_be_a_non_negative_integer(self):
         for bad in ("ten", -1, True, 2.5):
             with self.subTest(limit=bad):
-                answer = self.synthesize(criterion("limit", bad, "some"))
-                self.assertEqual(len(answer.records), len(self.records))
-                self.assertTrue(any("was not applied" in n for n in answer.unverified))
-        self.assertEqual(len(self.synthesize(criterion("limit", 0)).records), 0)
+                selection = self.synthesize(criterion("limit", bad, "some"))
+                self.assertEqual(
+                    selection.record_indices, list(range(len(self.records)))
+                )
+                self.assertEqual(
+                    selection.notes,
+                    [Note("criterion_not_applied", "intent-0:criterion-0")],
+                )
+        self.assertEqual(self.synthesize(criterion("limit", 0)).record_indices, [])
 
     def test_a_filter_can_match_an_explicit_value(self):
-        answer = self.synthesize(criterion("filter", {"field": "company", "value": "Contoso"}, "at Contoso"))
-        self.assertEqual({r["company"] for r in answer.records}, {"Contoso"})
-        self.assertEqual(len(answer.records), 2)
+        selection = self.synthesize(
+            criterion("filter", {"field": "company", "value": "Contoso"}, "at Contoso")
+        )
+        selected = [self.records[index] for index in selection.record_indices]
+        self.assertEqual({r["company"] for r in selected}, {"Contoso"})
+        self.assertEqual(len(selected), 2)
 
     def test_criteria_are_skipped_when_there_are_no_records(self):
-        answer = self.synthesize(criterion("filter", "remote", "remote only"), records=[])
-        self.assertEqual(answer.records, [])
-        self.assertTrue(any("'remote'" in n for n in answer.unverified))
+        selection = self.synthesize(
+            criterion("filter", "remote", "remote only"), records=[]
+        )
+        self.assertEqual(selection.record_indices, [])
+        self.assertEqual(
+            selection.notes, [Note("criterion_not_applied", "intent-0:criterion-0")]
+        )
 
     def test_job_claims_name_the_fields_without_a_price_sentence(self):
         [claim] = self.synthesize(records=self.records[:1]).claims
-        self.assertNotIn("costs", claim.text)
-        self.assertIn("salary", claim.text)
-        self.assertIn(self.records[0]["url"], claim.text)
+        self.assertIn("salary", claim.fields)
+        self.assertIn("url", claim.fields)
+        self.assertNotIn("source_observation_id", claim.fields)
 
 
 if __name__ == "__main__":

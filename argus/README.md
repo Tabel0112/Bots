@@ -2,11 +2,12 @@
 
 Takes one request in plain language, decides whether it may run, plans it into
 subtasks, dispatches them to browser workers, judges and validates what comes
-back, and publishes exactly one terminal result with every claim cited to an
-observation from that run. The controller owns run state, stage transitions,
-budgets, browser sessions, the event stream and the terminal result; the
-moderator, the toolbox and Ghost are called through protocols and only return
-decisions.
+back, and publishes exactly one terminal result whose claims are structured
+field references to controller-selected, validated records carrying observations
+from that run. The controller owns run state, stage transitions,
+budgets, browser sessions, the event stream, final rendering and the terminal
+result; the moderator, the toolbox and Ghost are called through protocols and
+only return decisions or structured selections.
 
 Design: [docs/hackathon/ARGUS.md](../docs/hackathon/ARGUS.md) (stages, the
 open-world delta and the controller/moderator boundary) and
@@ -162,15 +163,20 @@ received changes only its own answer.
   reports' records: title='Evil job', url='https://evil.invalid/x'`) before
   validation runs. `StubModerator`'s merge by `url` passes because the
   superseding record is itself an accepted record.
-- **Synthesize (stage 10) is bound to this run's evidence.** The accepted
-  evidence set is the references passed to `synthesize` plus every screenshot
-  and verification observation of the accepted reports. Every `evidence_refs`
-  entry of every claim must be in it (a claim citing `foreign-observation.png`,
-  or a plausible-looking `observation-001.png` the run never took, fails the run
-  with `EXTRACTION_FAILED` naming the claim), and every entry of
-  `answer.records` must equal one of the validated records handed to
-  `synthesize` — reordered, filtered or truncated is fine; added, altered or
-  duplicated is not. A run never succeeds with a fabricated claim or record.
+- **Synthesize (stage 10) is selection, not writing.** The moderator returns
+  `AnswerSelection(record_indices, claims, notes)`: indices into the exact
+  validated record list in output order, `Claim(record_index, fields)` entries
+  that index the selected order, and typed `Note(kind, subject)` entries. It
+  returns no record copies, evidence references or prose. The controller
+  rejects duplicate or out-of-range record indices; claims that do not cover
+  the selection exactly once and in order; missing, duplicate or provenance-only
+  fields; records whose own `source_observation_id` is not evidence from this
+  run; and note subjects outside the current request's closed set. It derives
+  the selected records and renders every `FinalAnswer.lines` entry itself.
+  Known legacy prose fields (`text`, `unverified`, nested claim `text`) are
+  discarded before strict decoding, and an event records only their field
+  paths. The regression case `"is free and cures cancer"` appears in neither
+  the result, stored snapshot nor events.
 
 ## Request identity and report intake
 
@@ -179,7 +185,7 @@ raises `ContractError` (`INVALID_INPUT`) before creating a run when it is given
 an `InterpretedRequest` (or its dict) whose `request_id` differs from the
 argument; an interpreter or planner that returns another ID fails the run with
 the same code. Every `SubtaskInput` carries `request_id` (new in
-`0.4-argus-draft`, default `None` so older payloads load), and intake accepts a
+`0.5-argus-draft`, default `None` so older worker payloads load), and intake accepts a
 `WorkerReport` only if its `request_id` is the run's, its `subtask_id` is the
 one dispatched, and its `session_handle` is `None` or the lent handle. Anything
 else fails the schema check with `EXTRACTION_FAILED`; a foreign handle is never
@@ -254,7 +260,7 @@ request still calls the planner model.
 
 | File | Stage | Purpose |
 | --- | --- | --- |
-| `contracts.py` | all | The messages between stages (`0.4-argus-draft`), with strict JSON round-trips and the typed error codes. |
+| `contracts.py` | all | The messages between stages (`0.5-argus-draft`), including prose-free `AnswerSelection`, structured `Claim`/`Note`, strict JSON round-trips and typed error codes. |
 | `interfaces.py` | all | `Toolbox`, `Moderator`, `ProgressObserver`, `Ghost` and `Store` protocols. |
 | `model_client.py` | 1, 3 | The single model boundary: `ModelClient`, `ModelResult`, `OpenAICompatibleClient`. |
 | `registry.py` | 1-3 | Supported sites, operations, parameters, defaults, parameter validation and the open-world `DOMAIN_POLICY`. |
@@ -270,7 +276,7 @@ request still calls the planner model.
 ## Input, output and failures
 
 All output below was copied from the commands as they actually ran on
-2026-09-12; long sections are elided with `...`.
+2026-09-13; run IDs, timestamps and long sections are elided.
 
 ### Registry success
 
@@ -284,20 +290,18 @@ $ python3 -m argus --fake --interpreted argus/examples/interpreted_request.json 
   "status": "succeeded",
   ...
   "answer": {
-    "text": "2 record(s) for 'Find headphones under $150 in the demo catalog', each cited to an observation from this run.",
+    "lines": [
+      "2 selected records; validation passed.",
+      "Record 1 — title: \"Studio headphones\"; price: 129.0; currency: \"USD\"; url: \"https://demo-catalog.invalid/products/0\"; retrieved_at: \"...\".",
+      "Record 2 — title: \"Travel headphones\"; price: 79.0; currency: \"USD\"; url: \"https://demo-catalog.invalid/products/1\"; retrieved_at: \"...\"."
+    ],
     "claims": [
-      {
-        "text": "Studio headphones costs 129.0 USD at https://demo-catalog.invalid/products/0.",
-        "evidence_refs": ["observation-000.png"]
-      },
-      {
-        "text": "Travel headphones costs 79.0 USD at https://demo-catalog.invalid/products/1.",
-        "evidence_refs": ["observation-000.png"]
-      }
+      {"record_index": 0, "fields": ["title", "price", "currency", "url", "retrieved_at"]},
+      {"record_index": 1, "fields": ["title", "price", "currency", "url", "retrieved_at"]}
     ],
     "records": [ ... two product records ... ],
     "failures": [],
-    "unverified": []
+    "notes": []
   },
   ...
 }
@@ -334,9 +338,9 @@ $ python3 -m argus --fake --interpreted argus/examples/interpreted_request_open.
   "reports": [],
   "validation": null,
   "answer": {
-    "text": "What should 'best' mean? For example, highest salary, remote-only roles, or closest match to your experience.",
+    "lines": ["What should 'best' mean? For example, highest salary, remote-only roles, or closest match to your experience."],
     "claims": [], "records": [], "failures": [],
-    "unverified": ["What should 'best' mean? For example, highest salary, remote-only roles, or closest match to your experience."]
+    "notes": [{"kind": "clarification_required", "subject": "gate"}]
   },
   "metrics": { ..., "sessions_opened": 0, "subtasks": {} },
   "error": {"code": "NEEDS_INPUT", "message": "The ranking 'best' is too vague ...", "retryable": true, ...}
@@ -363,15 +367,19 @@ $ python3 -m argus --fake --interpreted argus/examples/interpreted_request_open_
   "status": "succeeded",
   ...
   "answer": {
-    "text": "4 record(s) for 'Find the highest salary 10 software engineering jobs, remote only, on jobs.example.com', each cited to an observation from this run.",
+    "lines": [
+      "4 selected records; validation passed.",
+      "Record 1 — title: \"Staff Software Engineer\"; company: \"Fabrikam\"; url: \"https://jobs.example.com/jobs/3\"; salary: 210000; remote: true.",
+      "... three more controller-rendered record lines ..."
+    ],
     "claims": [
-      {"text": "Staff Software Engineer: company Fabrikam, url https://jobs.example.com/jobs/3, salary 210000, remote True.", "evidence_refs": ["observation-004.png"]},
-      {"text": "Senior Software Engineer: company Northwind, url https://jobs.example.com/jobs/1, salary 185000, remote True.", "evidence_refs": ["observation-002.png"]},
-      {"text": "Site Reliability Engineer: company Contoso, url https://jobs.example.com/jobs/6, salary 160000, remote True.", "evidence_refs": ["observation-007.png"]},
-      {"text": "Frontend Software Engineer: company Adatum, url https://jobs.example.com/jobs/5, salary 132000, remote True.", "evidence_refs": ["observation-006.png"]}
+      {"record_index": 0, "fields": ["title", "company", "url", "salary", "remote"]},
+      {"record_index": 1, "fields": ["title", "company", "url", "salary", "remote"]},
+      {"record_index": 2, "fields": ["title", "company", "url", "salary", "remote"]},
+      {"record_index": 3, "fields": ["title", "company", "url", "salary", "remote"]}
     ],
     "records": [ ... the same four, unique by url ... ],
-    "failures": [], "unverified": []
+    "failures": [], "notes": []
   },
   "metrics": {"elapsed_seconds": 0.081, "browser_action_count": 13, "moderator_calls": 4, "sessions_opened": 2,
               "subtasks": {"subtask-open-search": "accepted", "subtask-open-details": "accepted"}, ...},
@@ -493,9 +501,10 @@ The three CLI commands above ran with the exit statuses and output shown.
   `runs/<run_id>/evidence/` stays empty.
 - **The moderator is a stub.** `StubModerator` judges by rules (succeeded plus
   some evidence means accept), reconciles by merging records on `url`, and
-  synthesises by applying the criteria the records actually carry — naming in
-  `unverified` any criterion whose field is absent. A run driven by it proves the
-  controller's plumbing, not that an answer is any good.
+  selects records/fields after applying the criteria they actually carry. An
+  unapplied criterion becomes a typed `criterion_not_applied` note whose subject
+  is the criterion's controller-generated ID. A run driven by it proves the
+  controller's plumbing, not that a selection is useful.
 - **Ghost is a fake.** `FakeGhost.match` always explores, so the reuse path and
   qualification are never exercised; validation passes vacuously when there are
   no records; `compile` writes a candidate skill whose `skill_id` is derived from
@@ -507,8 +516,9 @@ The three CLI commands above ran with the exit statuses and output shown.
 - **S5 is wording, not behaviour** (see above), and `domain_allowed` is a
   hostname preflight, not an address check.
 - `clarify` ends the run; there is no resume after the user answers.
-- A `reconcile` decision of `verify` is recorded in `answer.unverified`, not
-  executed. Only intake verification runs, at most once per subtask.
+- A `reconcile` decision of `verify` becomes a generic typed
+  `reconciliation_unresolved` note; its model-written reason remains internal
+  and is not rendered. Only intake verification runs, at most once per subtask.
 - **A hung worker thread can outlive the run.** `max_seconds` bounds the run:
   when the deadline passes with workers still inside `run_subtask`, each running
   subtask is failed with `BUDGET_EXCEEDED`, its lent session is closed through

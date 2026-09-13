@@ -40,12 +40,12 @@ BEST_QUESTION = (
 
 
 def origin(value, *, source="text_span", confidence=0.95, span=None):
-    return ParameterOrigin(
-        value=value, source=source, confidence=confidence, span=span
-    )
+    return ParameterOrigin(value=value, source=source, confidence=confidence, span=span)
 
 
-def intent(parameters, *, site_id="demo-catalog", operation="search_products", confidence=0.94):
+def intent(
+    parameters, *, site_id="demo-catalog", operation="search_products", confidence=0.94
+):
     return Intent(
         site_id=site_id,
         operation=operation,
@@ -132,7 +132,9 @@ class GateTest(unittest.TestCase):
         self.assertIn("example-shop", decision.reason)
 
     def test_g2_fires_for_any_intent_of_a_compound_request(self):
-        decision = gate(interpreted([good_intent(), good_intent(site_id="example-shop")]))
+        decision = gate(
+            interpreted([good_intent(), good_intent(site_id="example-shop")])
+        )
         self.assertDecision(decision, "reject", "G2")
 
     # -- G3 ---------------------------------------------------------------- #
@@ -158,7 +160,11 @@ class GateTest(unittest.TestCase):
         question = "What product should I search the demo catalog for?"
         decision = gate(
             interpreted(
-                [intent({"max_price": origin(20, source="structured", confidence=0.9)})],
+                [
+                    intent(
+                        {"max_price": origin(20, source="structured", confidence=0.9)}
+                    )
+                ],
                 missing_required=[MissingParameter(0, "query", question)],
             )
         )
@@ -193,7 +199,11 @@ class GateTest(unittest.TestCase):
             interpreted(
                 [
                     good_intent(
-                        parameters={"max_price": origin("cheap", confidence=0.9, span=None, source="structured")}
+                        parameters={
+                            "max_price": origin(
+                                "cheap", confidence=0.9, span=None, source="structured"
+                            )
+                        }
                     )
                 ]
             )
@@ -205,7 +215,13 @@ class GateTest(unittest.TestCase):
     def test_g5_out_of_scope_value(self):
         decision = gate(
             interpreted(
-                [good_intent(parameters={"max_price": origin(-10, confidence=0.9, span=(22, 26))})]
+                [
+                    good_intent(
+                        parameters={
+                            "max_price": origin(-10, confidence=0.9, span=(22, 26))
+                        }
+                    )
+                ]
             )
         )
         self.assertDecision(decision, "reject", "G5")
@@ -214,7 +230,15 @@ class GateTest(unittest.TestCase):
     def test_g5_fixed_value_may_not_be_changed(self):
         decision = gate(
             interpreted(
-                [good_intent(parameters={"currency": origin("CAD", source="structured", confidence=0.9)})]
+                [
+                    good_intent(
+                        parameters={
+                            "currency": origin(
+                                "CAD", source="structured", confidence=0.9
+                            )
+                        }
+                    )
+                ]
             )
         )
         self.assertDecision(decision, "reject", "G5")
@@ -227,8 +251,12 @@ class GateTest(unittest.TestCase):
                 [
                     good_intent(
                         parameters={
-                            "max_price": origin("cheap", source="structured", confidence=0.9),
-                            "colour": origin("red", source="structured", confidence=0.9),
+                            "max_price": origin(
+                                "cheap", source="structured", confidence=0.9
+                            ),
+                            "colour": origin(
+                                "red", source="structured", confidence=0.9
+                            ),
                         }
                     )
                 ]
@@ -241,7 +269,13 @@ class GateTest(unittest.TestCase):
     def test_g6_unknown_parameter_is_never_dropped_silently(self):
         decision = gate(
             interpreted(
-                [good_intent(parameters={"colour": origin("red", source="structured", confidence=0.9)})]
+                [
+                    good_intent(
+                        parameters={
+                            "colour": origin("red", source="structured", confidence=0.9)
+                        }
+                    )
+                ]
             )
         )
         self.assertDecision(decision, "reject", "G6")
@@ -254,8 +288,12 @@ class GateTest(unittest.TestCase):
                 [
                     good_intent(
                         parameters={
-                            "colour": origin("red", source="structured", confidence=0.9),
-                            "in_stock": origin(True, source="structured", confidence=0.9),
+                            "colour": origin(
+                                "red", source="structured", confidence=0.9
+                            ),
+                            "in_stock": origin(
+                                True, source="structured", confidence=0.9
+                            ),
                         }
                     )
                 ]
@@ -270,7 +308,13 @@ class GateTest(unittest.TestCase):
     def test_g7_low_confidence_required_parameter(self):
         decision = gate(
             interpreted(
-                [good_intent(parameters={"query": origin("headphones", confidence=0.3, span=(5, 15))})],
+                [
+                    good_intent(
+                        parameters={
+                            "query": origin("headphones", confidence=0.3, span=(5, 15))
+                        }
+                    )
+                ],
                 ambiguities=["'headphones' might have been 'earphones'."],
             )
         )
@@ -286,7 +330,9 @@ class GateTest(unittest.TestCase):
                 [
                     good_intent(
                         parameters={
-                            "query": origin("headphones", source="structured", confidence=0.0)
+                            "query": origin(
+                                "headphones", source="structured", confidence=0.0
+                            )
                         }
                     )
                 ],
@@ -298,7 +344,13 @@ class GateTest(unittest.TestCase):
     def test_g7_ignores_an_optional_parameter(self):
         decision = gate(
             interpreted(
-                [good_intent(parameters={"max_price": origin(150, confidence=0.1, span=(22, 26))})]
+                [
+                    good_intent(
+                        parameters={
+                            "max_price": origin(150, confidence=0.1, span=(22, 26))
+                        }
+                    )
+                ]
             )
         )
         self.assertDecision(decision, "accept", "G0")
@@ -309,7 +361,9 @@ class GateTest(unittest.TestCase):
                 [
                     good_intent(
                         parameters={
-                            "query": origin("headphones", confidence=CONFIDENCE_FLOOR, span=(5, 15))
+                            "query": origin(
+                                "headphones", confidence=CONFIDENCE_FLOOR, span=(5, 15)
+                            )
                         }
                     )
                 ]
@@ -337,7 +391,9 @@ class GateTest(unittest.TestCase):
                     good_intent(
                         parameters={
                             name: origin(value, source="default", confidence=1.0)
-                            for name, value in registry.defaults("search_products").items()
+                            for name, value in registry.defaults(
+                                "search_products"
+                            ).items()
                         }
                     )
                 ]
@@ -347,14 +403,18 @@ class GateTest(unittest.TestCase):
 
     def test_ambiguities_alone_do_not_block_a_confident_request(self):
         decision = gate(
-            interpreted([good_intent()], ambiguities=["the catalog may list refurbished units"])
+            interpreted(
+                [good_intent()], ambiguities=["the catalog may list refurbished units"]
+            )
         )
         self.assertDecision(decision, "accept", "G0")
 
     # -- shipped fixtures --------------------------------------------------- #
 
     def test_example_interpreted_request_is_accepted(self):
-        data = json.loads((EXAMPLES / "interpreted_request.json").read_text(encoding="utf-8"))
+        data = json.loads(
+            (EXAMPLES / "interpreted_request.json").read_text(encoding="utf-8")
+        )
         decision = gate(InterpretedRequest.from_dict(data))
         self.assertDecision(decision, "accept", "G0")
 
@@ -471,7 +531,13 @@ class GateTest(unittest.TestCase):
                     open_intent(
                         criteria=[
                             criterion("best", "rank", span=(9, 13), confidence=0.4),
-                            criterion("10", "limit", parameter=10, span=(14, 16), confidence=0.99),
+                            criterion(
+                                "10",
+                                "limit",
+                                parameter=10,
+                                span=(14, 16),
+                                confidence=0.99,
+                            ),
                         ]
                     )
                 ],
@@ -485,7 +551,11 @@ class GateTest(unittest.TestCase):
     def test_s4_uses_the_users_own_ranking_words(self):
         decision = gate(
             interpreted(
-                [open_intent(criteria=[criterion("most exciting", "rank", confidence=0.2)])],
+                [
+                    open_intent(
+                        criteria=[criterion("most exciting", "rank", confidence=0.2)]
+                    )
+                ],
                 raw_text="Find the most exciting jobs on jobs.example.com",
             )
         )
@@ -500,7 +570,14 @@ class GateTest(unittest.TestCase):
             interpreted(
                 [
                     open_intent(
-                        criteria=[criterion("best", "rank", span=(9, 13), confidence=CONFIDENCE_FLOOR)]
+                        criteria=[
+                            criterion(
+                                "best",
+                                "rank",
+                                span=(9, 13),
+                                confidence=CONFIDENCE_FLOOR,
+                            )
+                        ]
                     )
                 ],
                 raw_text=OPEN_TEXT,
@@ -514,7 +591,12 @@ class GateTest(unittest.TestCase):
                 [
                     open_intent(
                         criteria=[
-                            criterion("remote only", "filter", parameter="remote", confidence=0.2),
+                            criterion(
+                                "remote only",
+                                "filter",
+                                parameter="remote",
+                                confidence=0.2,
+                            ),
                             criterion("10", "limit", parameter=10, confidence=0.1),
                         ]
                     )
@@ -536,7 +618,12 @@ class GateTest(unittest.TestCase):
     def test_s5_runs_before_s1_when_no_site_is_named(self):
         decision = gate(
             interpreted(
-                [open_intent(target_domain=None, goal="Log in to the user's bank and download their statements.")],
+                [
+                    open_intent(
+                        target_domain=None,
+                        goal="Log in to the user's bank and download their statements.",
+                    )
+                ],
                 raw_text="Log in to my bank and download my statements",
             )
         )
@@ -556,7 +643,11 @@ class GateTest(unittest.TestCase):
     def test_s5_rejects_a_login_and_download_request(self):
         decision = gate(
             interpreted(
-                [open_intent(target_domain="shop.example.com", goal="Download my invoices")],
+                [
+                    open_intent(
+                        target_domain="shop.example.com", goal="Download my invoices"
+                    )
+                ],
                 raw_text="Log in to shop.example.com and download my invoices",
             )
         )
@@ -583,7 +674,11 @@ class GateTest(unittest.TestCase):
     def test_s5_reads_the_goal_as_well_as_the_request(self):
         decision = gate(
             interpreted(
-                [open_intent(target_domain="shop.example.com", goal="Buy the cheapest laptop")],
+                [
+                    open_intent(
+                        target_domain="shop.example.com", goal="Buy the cheapest laptop"
+                    )
+                ],
                 raw_text="Get me the cheapest laptop from shop.example.com",
             )
         )
@@ -603,8 +698,14 @@ class GateTest(unittest.TestCase):
 
     def test_s5_rejects_a_payment_and_a_checkout(self):
         for goal, raw_text in (
-            ("Pay the outstanding invoice", "Pay the outstanding invoice on billing.example.com"),
-            ("Complete the purchase", "Add the laptop to my cart and complete the purchase"),
+            (
+                "Pay the outstanding invoice",
+                "Pay the outstanding invoice on billing.example.com",
+            ),
+            (
+                "Complete the purchase",
+                "Add the laptop to my cart and complete the purchase",
+            ),
         ):
             decision = gate(
                 interpreted(
@@ -621,9 +722,7 @@ class GateTest(unittest.TestCase):
             "What are the payment options on shop.example.com?",
             "Summarise the checkout instructions on shop.example.com",
         ):
-            decision = gate(
-                interpreted([open_intent()], raw_text=raw_text)
-            )
+            decision = gate(interpreted([open_intent()], raw_text=raw_text))
             self.assertDecision(decision, "accept", "S0")
 
     # -- S0 and mixed requests ---------------------------------------------- #
@@ -633,14 +732,32 @@ class GateTest(unittest.TestCase):
             interpreted(
                 [
                     open_intent(
-                        parameters={"query": origin("software engineering", span=(27, 47))},
+                        parameters={
+                            "query": origin("software engineering", span=(27, 47))
+                        },
                         criteria=[
-                            criterion("highest salary", "rank", parameter="salary",
-                                      span=(9, 23), confidence=0.99),
-                            criterion("remote only", "filter", parameter="remote",
-                                      span=(54, 65), confidence=0.97),
+                            criterion(
+                                "highest salary",
+                                "rank",
+                                parameter="salary",
+                                span=(9, 23),
+                                confidence=0.99,
+                            ),
+                            criterion(
+                                "remote only",
+                                "filter",
+                                parameter="remote",
+                                span=(54, 65),
+                                confidence=0.97,
+                            ),
                         ],
-                        expected_record_shape=("title", "company", "url", "salary", "remote"),
+                        expected_record_shape=(
+                            "title",
+                            "company",
+                            "url",
+                            "salary",
+                            "remote",
+                        ),
                     )
                 ],
                 raw_text=SALARY_TEXT,
@@ -660,9 +777,7 @@ class GateTest(unittest.TestCase):
         self.assertDecision(decision, "reject", "G2")
 
     def test_a_mixed_request_can_be_accepted(self):
-        decision = gate(
-            interpreted([good_intent(), open_intent()], raw_text=TEXT)
-        )
+        decision = gate(interpreted([good_intent(), open_intent()], raw_text=TEXT))
         self.assertDecision(decision, "accept", "S0")
         self.assertIn("search_products", decision.reason)
         self.assertIn("jobs.example.com", decision.reason)
@@ -680,23 +795,35 @@ class GateTest(unittest.TestCase):
         expected = GateDecision.from_dict(
             json.loads((EXAMPLES / "gate_open_accept.json").read_text(encoding="utf-8"))
         )
-        data = json.loads((EXAMPLES / "interpreted_request_open_salary.json").read_text(encoding="utf-8"))
+        data = json.loads(
+            (EXAMPLES / "interpreted_request_open_salary.json").read_text(
+                encoding="utf-8"
+            )
+        )
         decision = gate(InterpretedRequest.from_dict(data))
         self.assertEqual(decision.decision, expected.decision)
         self.assertEqual(decision.rule_id, expected.rule_id)
         self.assertEqual(decision.questions, expected.questions)
 
     def test_example_open_request_clarifies_on_s4(self):
-        data = json.loads((EXAMPLES / "interpreted_request_open.json").read_text(encoding="utf-8"))
+        data = json.loads(
+            (EXAMPLES / "interpreted_request_open.json").read_text(encoding="utf-8")
+        )
         decision = gate(InterpretedRequest.from_dict(data))
         self.assertDecision(decision, "clarify", "S4")
         self.assertEqual(decision.questions, [BEST_QUESTION])
 
     def test_example_gate_open_reject_domain_matches_the_rules(self):
         expected = GateDecision.from_dict(
-            json.loads((EXAMPLES / "gate_open_reject_domain.json").read_text(encoding="utf-8"))
+            json.loads(
+                (EXAMPLES / "gate_open_reject_domain.json").read_text(encoding="utf-8")
+            )
         )
-        data = json.loads((EXAMPLES / "interpreted_request_open_salary.json").read_text(encoding="utf-8"))
+        data = json.loads(
+            (EXAMPLES / "interpreted_request_open_salary.json").read_text(
+                encoding="utf-8"
+            )
+        )
         data["intents"][0]["target_domain"] = "127.0.0.1"
         decision = gate(InterpretedRequest.from_dict(data))
         self.assertEqual(decision.decision, expected.decision)

@@ -33,9 +33,9 @@ import tempfile
 import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest import mock
 from functools import partial
 from pathlib import Path
+from unittest import mock
 
 from argus import planner
 from argus.__main__ import (
@@ -45,7 +45,7 @@ from argus.__main__ import (
     EXIT_USAGE,
     main,
 )
-from argus.contracts import InterpretedRequest
+from argus.contracts import InterpretedRequest, Note
 from argus.controller import TERMINAL, Controller
 from argus.fakes import FakeGhost, FakePlannerClient, FakeToolbox, StubModerator
 from argus.gate import RANK_QUESTION
@@ -68,10 +68,13 @@ CHAIN = json.loads(CHAIN_PATH.read_text(encoding="utf-8"))
 S4_QUESTION = RANK_QUESTION.format(text="best")
 
 #: Text of the compound request, so the spans below are real spans of it.
-COMPOUND_TEXT = "Find headphones under $150 and keyboards under $100 in the demo catalog"
+COMPOUND_TEXT = (
+    "Find headphones under $150 and keyboards under $100 in the demo catalog"
+)
 
 
 # --------------------------------------------------------------- requests
+
 
 def single(request_id="request-demo-1"):
     """The shipped fixture: one intent, headphones under $150."""
@@ -161,6 +164,7 @@ def injected_planner(plan_payload):
 
 # ------------------------------------------------------------------ harness
 
+
 class BarrierToolbox(FakeToolbox):
     """A :class:`FakeToolbox` whose ``run_subtask`` waits for its sibling.
 
@@ -222,7 +226,9 @@ class RecordingGhost(FakeGhost):
 class EndToEndCase(unittest.TestCase):
     """Wiring shared by every case, plus the assertions about the store."""
 
-    def run_request(self, request, *, toolbox=None, moderator=None, ghost=None, **controller_kwargs):
+    def run_request(
+        self, request, *, toolbox=None, moderator=None, ghost=None, **controller_kwargs
+    ):
         """Run one request to its terminal result and keep the collaborators."""
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -241,7 +247,9 @@ class EndToEndCase(unittest.TestCase):
     def assert_run_is_terminal_and_clean(self):
         """One terminal event, strictly increasing sequences, no session left open."""
         result = self.result
-        self.assertIn(result.status, {"succeeded", "failed", "cancelled", "needs_input"})
+        self.assertIn(
+            result.status, {"succeeded", "failed", "cancelled", "needs_input"}
+        )
         self.assertEqual(self.toolbox.open_sessions, [])
 
         events = self.store.events(result.run_id)
@@ -257,7 +265,9 @@ class EndToEndCase(unittest.TestCase):
         result = self.result
         run_dir = self.store.run_dir(result.run_id)
         self.assertTrue((run_dir / "run.json").is_file(), f"no run.json in {run_dir}")
-        self.assertTrue((run_dir / "events.jsonl").is_file(), f"no events.jsonl in {run_dir}")
+        self.assertTrue(
+            (run_dir / "events.jsonl").is_file(), f"no events.jsonl in {run_dir}"
+        )
 
         reports = sorted(path.stem for path in (run_dir / "reports").glob("*.json"))
         self.assertEqual(reports, sorted(expected_subtask_ids))
@@ -272,20 +282,28 @@ class EndToEndCase(unittest.TestCase):
             report.pop("session_handle")
         self.assertEqual(stored, expected)
         for report in stored["reports"]:
-            self.assertNotIn("session_handle", report, "a session handle reached the store")
+            self.assertNotIn(
+                "session_handle", report, "a session handle reached the store"
+            )
         self.assertEqual(
             self.store.run_id_for_request(result.interpreted.request_id), result.run_id
         )
 
     def assert_every_claim_is_cited(self):
         for claim in self.result.answer.claims:
-            self.assertTrue(claim.evidence_refs, f"uncited claim: {claim.text!r}")
+            record = self.result.answer.records[claim.record_index]
+            self.assertTrue(claim.fields)
+            self.assertTrue(all(field in record for field in claim.fields))
+            self.assertIn(
+                record["source_observation_id"], self.result.validation["evidence"]
+            )
 
     def event_types(self):
         return [event["type"] for event in self.store.events(self.result.run_id)]
 
 
 # -------------------------------------------------------------------- cases
+
 
 class SingleSubtaskSearchTest(EndToEndCase):
     """The happy path: one intent, one subtask, one validated, cited answer."""
@@ -322,12 +340,18 @@ class SingleSubtaskSearchTest(EndToEndCase):
 
     def test_every_stored_id_is_the_request_id(self):
         stored = self.store.run(self.result.run_id)
-        self.assertEqual(self.store.run_id_for_request("request-demo-1"), self.result.run_id)
+        self.assertEqual(
+            self.store.run_id_for_request("request-demo-1"), self.result.run_id
+        )
         self.assertEqual(stored["interpreted"]["request_id"], "request-demo-1")
         self.assertEqual(stored["plan"]["request_id"], "request-demo-1")
-        self.assertEqual([r["request_id"] for r in stored["reports"]], ["request-demo-1"])
+        self.assertEqual(
+            [r["request_id"] for r in stored["reports"]], ["request-demo-1"]
+        )
         on_disk = json.loads(
-            (self.store.reports_dir(self.result.run_id) / "subtask-1.json").read_text(encoding="utf-8")
+            (self.store.reports_dir(self.result.run_id) / "subtask-1.json").read_text(
+                encoding="utf-8"
+            )
         )
         self.assertEqual(on_disk["request_id"], "request-demo-1")
 
@@ -351,11 +375,18 @@ class CompoundRequestTest(EndToEndCase):
     def test_the_reports_are_reconciled_into_one_answer(self):
         self.assertIn("reconciled", self.event_types())
         self.assertIn(("reconcile", ("subtask-1", "subtask-2")), self.moderator.calls)
-        self.assertEqual({r.request_id for r in self.result.reports}, {"request-demo-compound"})
+        self.assertEqual(
+            {r.request_id for r in self.result.reports}, {"request-demo-compound"}
+        )
         titles = [record["title"] for record in self.result.answer.records]
         self.assertEqual(
             titles,
-            ["Studio headphones", "Travel headphones", "Mechanical keyboard", "Compact keyboard"],
+            [
+                "Studio headphones",
+                "Travel headphones",
+                "Mechanical keyboard",
+                "Compact keyboard",
+            ],
         )
         self.assert_every_claim_is_cited()
 
@@ -382,8 +413,10 @@ class ClarifyTest(EndToEndCase):
 
     def test_the_question_reaches_the_answer(self):
         question = "What product should I search the demo catalog for?"
-        self.assertIn(question, self.result.answer.text)
-        self.assertEqual(self.result.answer.unverified, [question])
+        self.assertIn(question, self.result.answer.lines)
+        self.assertEqual(
+            self.result.answer.notes, [Note("clarification_required", "gate")]
+        )
         self.assertEqual(self.result.answer.claims, [])
 
     def test_the_store_holds_the_run_and_events_but_no_report(self):
@@ -418,7 +451,9 @@ class RetryOtherPathTest(EndToEndCase):
         self.assert_run_is_terminal_and_clean()
         self.assert_store_layout(["subtask-1"])
         stored = json.loads(
-            (self.store.reports_dir(self.result.run_id) / "subtask-1.json").read_text(encoding="utf-8")
+            (self.store.reports_dir(self.result.run_id) / "subtask-1.json").read_text(
+                encoding="utf-8"
+            )
         )
         self.assertEqual(stored["outcome"], "succeeded")
 
@@ -427,7 +462,9 @@ class AuthRequiredTest(EndToEndCase):
     """``AUTH_REQUIRED`` is terminal: the run fails and says so unchanged."""
 
     def setUp(self):
-        self.run_request(single(), toolbox=FakeToolbox(script={"subtask-1": "auth_required"}))
+        self.run_request(
+            single(), toolbox=FakeToolbox(script={"subtask-1": "auth_required"})
+        )
 
     def test_the_run_fails_with_the_workers_own_typed_failure(self):
         self.assertEqual(self.result.status, "failed")
@@ -441,11 +478,10 @@ class AuthRequiredTest(EndToEndCase):
     def test_the_answer_is_honest_rather_than_empty(self):
         self.assertEqual(self.result.answer.claims, [])
         self.assertEqual(self.result.answer.records, [])
-        self.assertEqual([f.code for f in self.result.answer.failures], ["AUTH_REQUIRED"])
-        self.assertTrue(
-            any("AUTH_REQUIRED" in note for note in self.result.answer.unverified),
-            self.result.answer.unverified,
+        self.assertEqual(
+            [f.code for f in self.result.answer.failures], ["AUTH_REQUIRED"]
         )
+        self.assertIn("Failure: AUTH_REQUIRED.", self.result.answer.lines)
         self.assertEqual(self.store.skills(), [], "a failed run compiled a skill")
 
     def test_the_store_holds_the_failed_report_and_the_session_was_closed(self):
@@ -464,10 +500,18 @@ class ThinEvidenceVerifyTest(EndToEndCase):
         names = [call[0] for call in self.toolbox.calls]
         self.assertEqual(
             names,
-            ["open_session", "run_subtask", "observe", "dom_interpret", "close_session"],
+            [
+                "open_session",
+                "run_subtask",
+                "observe",
+                "dom_interpret",
+                "close_session",
+            ],
         )
         self.assertIn("subtask_verified", self.event_types())
-        self.assertEqual(len(self.toolbox.calls_named("observe")), 1, "verification is capped at one")
+        self.assertEqual(
+            len(self.toolbox.calls_named("observe")), 1, "verification is capped at one"
+        )
 
     def test_the_verification_is_recorded_as_evidence(self):
         report = self.result.reports[0]
@@ -499,12 +543,12 @@ class ValidationFailureTest(EndToEndCase):
     def test_the_failure_is_explained_and_nothing_was_promoted(self):
         self.assertEqual(self.result.validation["status"], "failed")
         self.assertEqual(
-            self.result.validation["subtasks"]["subtask-1"]["failed_checks"], ["url_on_site"]
+            self.result.validation["subtasks"]["subtask-1"]["failed_checks"],
+            ["url_on_site"],
         )
         self.assertIn(("synthesize", "request-demo-1", 2), self.moderator.calls)
-        self.assertIn(
-            "validation failed: records are not validated", self.result.answer.unverified
-        )
+        self.assertIn(Note("validation_not_passed", "failed"), self.result.answer.notes)
+        self.assertIn("Validation status is failed.", self.result.answer.lines)
         self.assertEqual([call[0] for call in self.ghost.calls], ["match", "validate"])
         self.assertEqual(self.store.skills(), [])
 
@@ -515,8 +559,9 @@ class ValidationFailureTest(EndToEndCase):
 
 # ----------------------------------------------------------- open-world cases
 
+
 class OpenVagueRankingTest(EndToEndCase):
-    """"The best 10 jobs": S4 asks what "best" means and nothing runs."""
+    """ "The best 10 jobs": S4 asks what "best" means and nothing runs."""
 
     def setUp(self):
         self.run_request(open_request())
@@ -535,8 +580,10 @@ class OpenVagueRankingTest(EndToEndCase):
             "roles, or closest match to your experience.",
         )
         self.assertEqual(self.result.gate.questions, [S4_QUESTION])
-        self.assertIn(S4_QUESTION, self.result.answer.text)
-        self.assertEqual(self.result.answer.unverified, [S4_QUESTION])
+        self.assertIn(S4_QUESTION, self.result.answer.lines)
+        self.assertEqual(
+            self.result.answer.notes, [Note("clarification_required", "gate")]
+        )
         self.assertEqual(self.result.answer.claims, [])
 
     def test_no_session_was_opened_and_the_store_holds_the_run(self):
@@ -588,7 +635,9 @@ class OpenSalaryChainTest(EndToEndCase):
         )
         urls = [record["url"] for record in self.findings(self.SEARCH)]
         self.assertTrue(urls)
-        received = self.toolbox.input_for(self.DETAILS).subtask.parameters["result_urls"]
+        received = self.toolbox.input_for(self.DETAILS).subtask.parameters[
+            "result_urls"
+        ]
         self.assertIsInstance(received, list)
         self.assertEqual(received, urls, "the URLs arrived out of order or incomplete")
         self.assertIn("subtask_inputs_resolved", self.event_types())
@@ -622,7 +671,8 @@ class OpenSalaryChainTest(EndToEndCase):
             record["source_observation_id"] for record in self.findings(self.DETAILS)
         }
         self.assertTrue(
-            {record["source_observation_id"] for record in records} <= detail_observations
+            {record["source_observation_id"] for record in records}
+            <= detail_observations
         )
 
     def test_every_claim_cites_an_observation_of_this_run(self):
@@ -631,7 +681,8 @@ class OpenSalaryChainTest(EndToEndCase):
         self.assert_every_claim_is_cited()
         evidence = set(self.result.validation["evidence"])
         for claim in claims:
-            self.assertTrue(set(claim.evidence_refs) <= evidence, claim.evidence_refs)
+            record = self.result.answer.records[claim.record_index]
+            self.assertIn(record["source_observation_id"], evidence)
 
     def test_the_store_holds_one_report_per_subtask(self):
         self.assert_run_is_terminal_and_clean()
@@ -645,7 +696,9 @@ class OpenBlockedDomainTest(EndToEndCase):
         for domain in ("127.0.0.1", "intranet.corp"):
             with self.subTest(domain=domain):
                 result = self.run_request(
-                    open_request(request_id=f"request-open-{domain}", target_domain=domain)
+                    open_request(
+                        request_id=f"request-open-{domain}", target_domain=domain
+                    )
                 )
                 self.assertEqual(result.status, "failed")
                 self.assertEqual(result.gate.decision, "reject")
@@ -673,7 +726,9 @@ class OpenPlanTooLargeTest(EndToEndCase):
 
     def test_nothing_was_opened_or_run(self):
         self.assertEqual(len(self.client.calls), 1)
-        self.assertEqual(self.toolbox.calls, [], "the toolbox was used for an over-cap plan")
+        self.assertEqual(
+            self.toolbox.calls, [], "the toolbox was used for an over-cap plan"
+        )
         self.assertEqual(self.toolbox.inputs, [])
         self.assertEqual(self.toolbox.sessions, {})
         self.assertEqual(self.result.reports, [])
@@ -691,19 +746,17 @@ class RegistryPathUnchangedTest(EndToEndCase):
         self.assertEqual(self.result.status, "succeeded", self.result.error)
         self.assertEqual(self.result.gate.rule_id, "G0")
         self.assertEqual(self.result.plan.planned_by, "deterministic")
-        self.assertEqual([task.kind for task in self.result.plan.subtasks], ["registry"])
         self.assertEqual(
-            [claim.text for claim in self.result.answer.claims],
-            [
-                "Studio headphones costs 129.0 USD at https://demo-catalog.invalid/products/0.",
-                "Travel headphones costs 79.0 USD at https://demo-catalog.invalid/products/1.",
-            ],
+            [task.kind for task in self.result.plan.subtasks], ["registry"]
         )
         self.assertEqual(
-            [claim.evidence_refs for claim in self.result.answer.claims],
-            [["observation-000.png"], ["observation-000.png"]],
+            [claim.record_index for claim in self.result.answer.claims], [0, 1]
         )
-        self.assertEqual(self.result.answer.unverified, [])
+        self.assertTrue(
+            all("price" in claim.fields for claim in self.result.answer.claims)
+        )
+        self.assertIn('title: "Studio headphones"', self.result.answer.lines[1])
+        self.assertEqual(self.result.answer.notes, [])
 
     def test_registry_validation_keeps_the_three_argument_form(self):
         self.assertEqual(self.result.validation["status"], "passed")
@@ -745,21 +798,35 @@ class CommandLineTest(unittest.TestCase):
         # Text input calls the model at stage 1; with no model named the run
         # ends PRECONDITION_FAILED before any call, and is still recorded
         # under the given request ID.
-        env = {k: v for k, v in os.environ.items() if k not in ("ARGUS_MODEL", "OPENAI_API_KEY")}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("ARGUS_MODEL", "OPENAI_API_KEY")
+        }
         with mock.patch.dict(os.environ, env, clear=True):
             status, out, _ = self.call(
-                "Find headphones in the demo catalog", "--store", self.store_dir,
-                "--request-id", "request-cli-1",
+                "Find headphones in the demo catalog",
+                "--store",
+                self.store_dir,
+                "--request-id",
+                "request-cli-1",
             )
         self.assertEqual(status, EXIT_RUN_NOT_SUCCEEDED)
         payload = json.loads(out)
         self.assertEqual(payload["error"]["code"], "PRECONDITION_FAILED")
-        self.assertEqual(JsonStore(self.store_dir).run_id_for_request("request-cli-1"), payload["run_id"])
+        self.assertEqual(
+            JsonStore(self.store_dir).run_id_for_request("request-cli-1"),
+            payload["run_id"],
+        )
 
     def test_request_id_with_interpreted_is_a_usage_error(self):
         status, out, err = self.call(
-            "--interpreted", str(FIXTURE_PATH), "--store", self.store_dir,
-            "--request-id", "request-cli-1",
+            "--interpreted",
+            str(FIXTURE_PATH),
+            "--store",
+            self.store_dir,
+            "--request-id",
+            "request-cli-1",
         )
         self.assertEqual(status, EXIT_USAGE)
         self.assertEqual(out, "")
@@ -767,20 +834,26 @@ class CommandLineTest(unittest.TestCase):
         self.assertFalse((Path(self.store_dir) / "runs").exists(), "a run was created")
 
     def test_the_interpreted_files_request_id_is_the_runs(self):
-        status, out, _ = self.call("--interpreted", str(FIXTURE_PATH), "--store", self.store_dir)
+        status, out, _ = self.call(
+            "--interpreted", str(FIXTURE_PATH), "--store", self.store_dir
+        )
         self.assertEqual(status, EXIT_OK)
         payload = json.loads(out)
         request_id = FIXTURE["request_id"]
         self.assertEqual(payload["interpreted"]["request_id"], request_id)
         self.assertEqual(payload["plan"]["request_id"], request_id)
         self.assertEqual([r["request_id"] for r in payload["reports"]], [request_id])
-        self.assertEqual(JsonStore(self.store_dir).run_id_for_request(request_id), payload["run_id"])
+        self.assertEqual(
+            JsonStore(self.store_dir).run_id_for_request(request_id), payload["run_id"]
+        )
 
     def test_help_states_the_request_id_rule(self):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err), self.assertRaises(SystemExit):
             main(["--help"])
-        self.assertIn("Not allowed with --interpreted", " ".join(out.getvalue().split()))
+        self.assertIn(
+            "Not allowed with --interpreted", " ".join(out.getvalue().split())
+        )
 
     def test_without_fake_it_says_no_toolbox_is_connected(self):
         status, out, err = self.call("--no-fake", "Find headphones in the demo catalog")
@@ -789,7 +862,9 @@ class CommandLineTest(unittest.TestCase):
         self.assertIn("No real toolbox", err)
 
     def test_text_and_interpreted_together_is_a_usage_error(self):
-        status, _, err = self.call("find headphones", "--interpreted", str(FIXTURE_PATH))
+        status, _, err = self.call(
+            "find headphones", "--interpreted", str(FIXTURE_PATH)
+        )
         self.assertEqual(status, EXIT_USAGE)
         self.assertIn("not both", err)
 
@@ -812,8 +887,13 @@ class CommandLineTest(unittest.TestCase):
 
     def test_the_plan_fixture_runs_the_chain_and_answers_once_per_job(self):
         status, out, err = self.call(
-            "--fake", "--interpreted", str(SALARY_PATH),
-            "--plan-fixture", str(CHAIN_PATH), "--store", self.store_dir,
+            "--fake",
+            "--interpreted",
+            str(SALARY_PATH),
+            "--plan-fixture",
+            str(CHAIN_PATH),
+            "--store",
+            self.store_dir,
         )
         self.assertEqual(status, EXIT_OK, err)
         payload = json.loads(out)
@@ -834,8 +914,12 @@ class CommandLineTest(unittest.TestCase):
 
     def test_an_unreadable_plan_fixture_is_a_usage_error(self):
         status, _, err = self.call(
-            "--interpreted", str(SALARY_PATH), "--plan-fixture", str(FIXTURE_PATH),
-            "--store", self.store_dir,
+            "--interpreted",
+            str(SALARY_PATH),
+            "--plan-fixture",
+            str(FIXTURE_PATH),
+            "--store",
+            self.store_dir,
         )
         self.assertEqual(status, EXIT_USAGE)
         self.assertIn("is not a Plan", err)

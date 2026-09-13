@@ -263,9 +263,7 @@ class OpenAICompatibleClient:
 
         choices = getattr(completion, "choices", None) or []
         if not choices:
-            return ModelResult(
-                status="invalid", raw_text=None, model=model
-            )
+            return ModelResult(status="invalid", raw_text=None, model=model)
         choice = choices[0]
         message = getattr(choice, "message", None)
         if message is None:
@@ -288,7 +286,9 @@ class OpenAICompatibleClient:
 
         parsed = getattr(message, "parsed", None)
         if parsed is None:
-            return ModelResult(status="invalid", raw_text=_text_of(message), model=model)
+            return ModelResult(
+                status="invalid", raw_text=_text_of(message), model=model
+            )
 
         try:
             if isinstance(parsed, output_model):
@@ -299,7 +299,9 @@ class OpenAICompatibleClient:
             return ModelResult(status="invalid", raw_text=str(exc), model=model)
 
         if not isinstance(payload, dict):  # pragma: no cover - pydantic returns a dict
-            return ModelResult(status="invalid", raw_text=_text_of(message), model=model)
+            return ModelResult(
+                status="invalid", raw_text=_text_of(message), model=model
+            )
 
         return ModelResult(
             status="ok", parsed=payload, raw_text=_text_of(message), model=model

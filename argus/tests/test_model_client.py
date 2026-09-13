@@ -148,8 +148,10 @@ class ModelResultTests(unittest.TestCase):
 
 class ParseJsonTests(unittest.TestCase):
     def test_ok_returns_the_validated_dump(self):
-        instance, sdk = client(
-            completion(message(parsed=Answer(label="a", score=1), content='{"label":"a"}'))
+        instance, _sdk = client(
+            completion(
+                message(parsed=Answer(label="a", score=1), content='{"label":"a"}')
+            )
         )
         result = call(instance)
         self.assertEqual(result.status, "ok")
@@ -291,9 +293,7 @@ class ConstructionTests(unittest.TestCase):
 
     def test_the_model_falls_back_to_the_environment(self):
         os.environ[MODEL_ENV_VAR] = "from-env"
-        self.assertEqual(
-            OpenAICompatibleClient(_sdk=FakeSDK(None)).model, "from-env"
-        )
+        self.assertEqual(OpenAICompatibleClient(_sdk=FakeSDK(None)).model, "from-env")
 
     def test_no_model_anywhere_is_a_precondition_failure(self):
         """There is no default model; a run never guesses which one to call."""
@@ -313,9 +313,11 @@ class ConstructionTests(unittest.TestCase):
                 raise ImportError("No module named 'openai'")
             return real_import(name, *args, **kwargs)
 
-        with mock.patch("builtins.__import__", no_openai):
-            with self.assertRaises(ContractError) as caught:
-                OpenAICompatibleClient(model="m")
+        with (
+            mock.patch("builtins.__import__", no_openai),
+            self.assertRaises(ContractError) as caught,
+        ):
+            OpenAICompatibleClient(model="m")
         self.assertEqual(caught.exception.code, "PRECONDITION_FAILED")
         self.assertIn("pip install openai", str(caught.exception))
 
@@ -326,7 +328,9 @@ class ConstructionTests(unittest.TestCase):
         os.environ[BASE_URL_ENV_VAR] = "http://localhost:8000/v1"
         instance = OpenAICompatibleClient(model="m")
         self.assertEqual(instance._sdk.api_key, "key-from-env")
-        self.assertEqual(str(instance._sdk.base_url).rstrip("/"), "http://localhost:8000/v1")
+        self.assertEqual(
+            str(instance._sdk.base_url).rstrip("/"), "http://localhost:8000/v1"
+        )
 
     @unittest.skipIf(openai is None, "the openai package is not installed")
     def test_explicit_credentials_override_the_environment(self):
@@ -335,7 +339,9 @@ class ConstructionTests(unittest.TestCase):
             model="m", api_key="explicit-key", base_url="http://127.0.0.1:9/v1"
         )
         self.assertEqual(instance._sdk.api_key, "explicit-key")
-        self.assertEqual(str(instance._sdk.base_url).rstrip("/"), "http://127.0.0.1:9/v1")
+        self.assertEqual(
+            str(instance._sdk.base_url).rstrip("/"), "http://127.0.0.1:9/v1"
+        )
 
     @unittest.skipIf(openai is None, "the openai package is not installed")
     def test_a_missing_api_key_is_a_precondition_failure(self):

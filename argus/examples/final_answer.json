@@ -1,13 +1,17 @@
 {
-  "text": "The demo catalog lists two headphones under $150: Travel headphones at $79.00 and Studio headphones at $129.00. Reference headphones were excluded because they cost $249.00.",
+  "lines": [
+    "2 selected records; validation passed.",
+    "Record 1 — title: \"Travel headphones\"; price: 79.0; currency: \"USD\".",
+    "Record 2 — title: \"Studio headphones\"; price: 129.0; currency: \"USD\"."
+  ],
   "claims": [
     {
-      "text": "Travel headphones cost $79.00 USD.",
-      "evidence_refs": ["observation-000.png"]
+      "record_index": 0,
+      "fields": ["title", "price", "currency"]
     },
     {
-      "text": "Studio headphones cost $129.00 USD.",
-      "evidence_refs": ["observation-000.png"]
+      "record_index": 1,
+      "fields": ["title", "price", "currency"]
     }
   ],
   "records": [
@@ -29,7 +33,5 @@
     }
   ],
   "failures": [],
-  "unverified": [
-    "Completeness of the catalog listing beyond the first page of results."
-  ]
+  "notes": []
 }

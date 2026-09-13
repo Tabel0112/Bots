@@ -6,6 +6,7 @@ from pathlib import Path
 
 from argus import registry
 from argus.contracts import (
+    AnswerSelection,
     Budget,
     Claim,
     ContractError,
@@ -17,6 +18,7 @@ from argus.contracts import (
     InterpretedRequest,
     MissingParameter,
     ModeratorDecision,
+    Note,
     ParameterOrigin,
     Plan,
     RunResult,
@@ -28,11 +30,14 @@ from argus.contracts import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / "argus" / "examples"
-WORKER_REPORT = REPO_ROOT / "workers" / "visual" / "examples" / "hn-top-story" / "report.json"
+WORKER_REPORT = (
+    REPO_ROOT / "workers" / "visual" / "examples" / "hn-top-story" / "report.json"
+)
 
 #: Every fixture file and the message it must load as.  A new fixture without an
 #: entry here fails ``test_every_fixture_is_mapped``.
 FIXTURES = {
+    "answer_selection.json": AnswerSelection,
     "final_answer.json": FinalAnswer,
     "gate_clarify.json": GateDecision,
     "gate_open_accept.json": GateDecision,
@@ -64,7 +69,9 @@ def assert_payload_preserved(test_case, expected, actual, path="payload"):
         test_case.assertIsInstance(actual, list, msg=path)
         test_case.assertEqual(len(actual), len(expected), msg=path)
         for index, value in enumerate(expected):
-            assert_payload_preserved(test_case, value, actual[index], f"{path}[{index}]")
+            assert_payload_preserved(
+                test_case, value, actual[index], f"{path}[{index}]"
+            )
         return
     test_case.assertEqual(actual, expected, msg=path)
 
@@ -89,11 +96,15 @@ class FixtureTests(unittest.TestCase):
                 assert_payload_preserved(self, payload, produced, name)
 
     def test_fixtures_use_supported_sites_and_operations(self):
-        for intent in InterpretedRequest.from_dict(load("interpreted_request.json")).intents:
+        for intent in InterpretedRequest.from_dict(
+            load("interpreted_request.json")
+        ).intents:
             self.assertTrue(registry.site_supports(intent.site_id, intent.operation))
         for subtask in Plan.from_dict(load("plan.json")).subtasks:
             self.assertTrue(registry.site_supports(subtask.site_id, subtask.operation))
-            self.assertEqual(registry.validate_parameters(subtask.operation, subtask.parameters), [])
+            self.assertEqual(
+                registry.validate_parameters(subtask.operation, subtask.parameters), []
+            )
 
     def test_text_spans_match_the_raw_text(self):
         interpreted = InterpretedRequest.from_dict(load("interpreted_request.json"))
@@ -108,14 +119,18 @@ class FixtureTests(unittest.TestCase):
                     else:
                         self.assertIsNone(origin.span)
 
-    def test_every_claim_in_the_final_answer_cites_evidence(self):
+    def test_every_claim_in_the_final_answer_is_structured(self):
         answer = FinalAnswer.from_dict(load("final_answer.json"))
         self.assertTrue(answer.claims)
         for claim in answer.claims:
-            self.assertTrue(claim.evidence_refs)
+            self.assertIsInstance(claim.record_index, int)
+            self.assertTrue(claim.fields)
+            self.assertNotIn("source_observation_id", claim.fields)
 
     def test_open_world_fixtures_round_trip_with_the_new_fields(self):
-        interpreted = InterpretedRequest.from_dict(load("interpreted_request_open.json"))
+        interpreted = InterpretedRequest.from_dict(
+            load("interpreted_request_open.json")
+        )
         self.assertEqual(interpreted.intents[0].kind, "open")
         self.assertIsInstance(interpreted.intents[0].criteria[0], Criterion)
 
@@ -124,7 +139,9 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(plan.subtasks[1].inputs_from["result_urls"]["field"], "url")
 
     def test_old_fixtures_receive_backward_compatible_defaults(self):
-        intent = InterpretedRequest.from_dict(load("interpreted_request.json")).intents[0]
+        intent = InterpretedRequest.from_dict(load("interpreted_request.json")).intents[
+            0
+        ]
         self.assertEqual(intent.kind, "registry")
         self.assertIsNone(intent.target_domain)
         self.assertEqual(intent.criteria, [])
@@ -150,7 +167,9 @@ class WorkerReportTests(unittest.TestCase):
         self.assertEqual(report.failures, [])
 
     def test_argus_additions_default_when_absent(self):
-        report = WorkerReport.from_dict(json.loads(WORKER_REPORT.read_text(encoding="utf-8")))
+        report = WorkerReport.from_dict(
+            json.loads(WORKER_REPORT.read_text(encoding="utf-8"))
+        )
         self.assertIsNone(report.session_handle)
         self.assertEqual(report.typed_failures, [])
 
@@ -211,7 +230,10 @@ class StrictnessTests(unittest.TestCase):
     def test_fixed_vocabularies_are_enforced(self):
         cases = [
             (GateDecision, load("gate_clarify.json") | {"decision": "maybe"}),
-            (ModeratorDecision, load("moderator_decision_accept.json") | {"stage": "publish"}),
+            (
+                ModeratorDecision,
+                load("moderator_decision_accept.json") | {"stage": "publish"},
+            ),
             (
                 TypedError,
                 {"code": "KABOOM", "message": "boom", "retryable": False},
@@ -222,19 +244,44 @@ class StrictnessTests(unittest.TestCase):
             ),
         ]
         for message, payload in cases:
-            with self.subTest(message=message.__name__):
-                with self.assertRaises(ContractError):
-                    message.from_dict(payload)
+            with (
+                self.subTest(message=message.__name__),
+                self.assertRaises(ContractError),
+            ):
+                message.from_dict(payload)
+
+    def test_note_kind_is_a_fixed_vocabulary(self):
+        with self.assertRaises(ContractError):
+            Note("say_anything", "run")
+
+    def test_claim_indices_and_fields_are_strict(self):
+        for claim in (
+            lambda: Claim(True, ["title"]),
+            lambda: Claim(-1, ["title"]),
+            lambda: Claim(0, []),
+            lambda: Claim(0, ["title", "title"]),
+        ):
+            with self.subTest(claim=claim), self.assertRaises(ContractError):
+                claim()
+
+    def test_answer_selection_rejects_duplicate_and_boolean_indices(self):
+        for indices in ([0, 0], [True]):
+            with self.subTest(indices=indices), self.assertRaises(ContractError):
+                AnswerSelection(record_indices=indices)
 
     def test_parameter_origin_span_is_normalised_and_checked(self):
-        origin = ParameterOrigin(value="headphones", source="text_span", confidence=1.0, span=[5, 15])
+        origin = ParameterOrigin(
+            value="headphones", source="text_span", confidence=1.0, span=[5, 15]
+        )
         self.assertEqual(origin.span, (5, 15))
         self.assertEqual(origin.to_dict()["span"], [5, 15])
         self.assertEqual(ParameterOrigin.from_dict(origin.to_dict()), origin)
         with self.assertRaises(ContractError):
             ParameterOrigin(value="x", source="text_span", confidence=1.0, span=[9, 2])
         with self.assertRaises(ContractError):
-            ParameterOrigin(value="x", source="text_span", confidence=1.0, span=[1, 2, 3])
+            ParameterOrigin(
+                value="x", source="text_span", confidence=1.0, span=[1, 2, 3]
+            )
 
     def test_criterion_span_and_vocab_are_checked(self):
         criterion = Criterion(
@@ -302,8 +349,11 @@ class ConstructedMessageTests(unittest.TestCase):
     def test_subtask_input_carries_the_request_id_and_defaults_it_to_none(self):
         subtask = Plan.from_dict(load("plan.json")).subtasks[0]
         message = SubtaskInput(
-            run_id="run-1", subtask=subtask, session_handle=None,
-            budget=Budget(max_actions=30, max_seconds=120), mode="explore",
+            run_id="run-1",
+            subtask=subtask,
+            session_handle=None,
+            budget=Budget(max_actions=30, max_seconds=120),
+            mode="explore",
             request_id="request-1",
         )
         self._round_trip(message)
@@ -330,7 +380,9 @@ class ConstructedMessageTests(unittest.TestCase):
             run_id="run-1",
             status="succeeded",
             interpreted=InterpretedRequest.from_dict(load("interpreted_request.json")),
-            gate=GateDecision(decision="accept", rule_id="G0", reason="all rules passed"),
+            gate=GateDecision(
+                decision="accept", rule_id="G0", reason="all rules passed"
+            ),
             plan=Plan.from_dict(load("plan.json")),
             reports=[WorkerReport.from_dict(load("worker_report.json"))],
             validation={"status": "passed", "checks": {"price_and_currency": True}},
@@ -371,8 +423,11 @@ class ConstructedMessageTests(unittest.TestCase):
     def test_final_answer_with_failures_round_trips(self):
         self._round_trip(
             FinalAnswer(
-                text="The catalog required a sign-in, so nothing was searched.",
-                claims=[Claim(text="Sign-in was required.", evidence_refs=["observation-002.png"])],
+                lines=[
+                    "0 selected records; validation failed.",
+                    "Failure: AUTH_REQUIRED.",
+                ],
+                claims=[],
                 failures=[
                     TypedError(
                         code="AUTH_REQUIRED",
@@ -380,7 +435,7 @@ class ConstructedMessageTests(unittest.TestCase):
                         retryable=False,
                     )
                 ],
-                unverified=["Whether any product matches the query."],
+                notes=[Note("validation_not_passed", "failed")],
             )
         )
 
@@ -400,10 +455,13 @@ class RegistryTests(unittest.TestCase):
         )
 
     def test_unknown_operation_raises_for_lookups(self):
-        for lookup in (registry.required_parameters, registry.defaults, registry.operation_spec):
-            with self.subTest(lookup=lookup.__name__):
-                with self.assertRaises(ContractError):
-                    lookup("book_flight")
+        for lookup in (
+            registry.required_parameters,
+            registry.defaults,
+            registry.operation_spec,
+        ):
+            with self.subTest(lookup=lookup.__name__), self.assertRaises(ContractError):
+                lookup("book_flight")
 
     def test_site_supports(self):
         self.assertTrue(registry.site_supports("demo-catalog", "search_products"))
@@ -414,7 +472,12 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(
             registry.validate_parameters(
                 "search_products",
-                {"query": "headphones", "max_price": 150, "max_results": 5, "currency": "USD"},
+                {
+                    "query": "headphones",
+                    "max_price": 150,
+                    "max_results": 5,
+                    "currency": "USD",
+                },
             ),
             [],
         )
@@ -425,11 +488,23 @@ class RegistryTests(unittest.TestCase):
     def test_validate_parameters_reports_each_problem(self):
         cases = {
             "unsupported operation": ("book_flight", {"query": "x"}),
-            "unknown parameter 'colour'": ("search_products", {"query": "x", "colour": "red"}),
-            "missing required parameter 'query'": ("search_products", {"max_price": 10}),
+            "unknown parameter 'colour'": (
+                "search_products",
+                {"query": "x", "colour": "red"},
+            ),
+            "missing required parameter 'query'": (
+                "search_products",
+                {"max_price": 10},
+            ),
             "must be a string": ("search_products", {"query": 5}),
-            "must be a number": ("search_products", {"query": "x", "max_price": "cheap"}),
-            "must be an integer": ("search_products", {"query": "x", "max_results": 2.5}),
+            "must be a number": (
+                "search_products",
+                {"query": "x", "max_price": "cheap"},
+            ),
+            "must be an integer": (
+                "search_products",
+                {"query": "x", "max_results": 2.5},
+            ),
             "must be at least 0": ("search_products", {"query": "x", "max_price": -1}),
             "must be at least 1": ("search_products", {"query": "x", "max_results": 0}),
             "is fixed at 'USD'": ("search_products", {"query": "x", "currency": "CAD"}),
@@ -461,7 +536,11 @@ class RegistryTests(unittest.TestCase):
         self.assertIn("jobs.example.com", reason)
 
     def test_domain_allowed_blocks_exact_domains_and_subdomains(self):
-        for domain in ("checkout.stripe.com", "pay.checkout.stripe.com", "accounts.google.com"):
+        for domain in (
+            "checkout.stripe.com",
+            "pay.checkout.stripe.com",
+            "accounts.google.com",
+        ):
             with self.subTest(domain=domain):
                 allowed, reason = registry.domain_allowed(domain)
                 self.assertFalse(allowed)
@@ -477,17 +556,23 @@ class RegistryTests(unittest.TestCase):
 
 class OpenContractValidationTests(unittest.TestCase):
     def test_invalid_caps_are_rejected_at_deserialization(self):
-        for caps in (None, {}, {"max_subtasks": -1},
-                     {"max_subtasks": True, "max_depth": 3},
-                     {"max_subtasks": 4, "max_depth": 0},
-                     {"max_subtasks": 4.5, "max_depth": 3},
-                     {"max_subtasks": 4, "max_depth": 3, "extra": 1}):
+        for caps in (
+            None,
+            {},
+            {"max_subtasks": -1},
+            {"max_subtasks": True, "max_depth": 3},
+            {"max_subtasks": 4, "max_depth": 0},
+            {"max_subtasks": 4.5, "max_depth": 3},
+            {"max_subtasks": 4, "max_depth": 3, "extra": 1},
+        ):
             with self.subTest(caps=caps), self.assertRaises(ContractError):
                 Plan.from_dict(load("plan.json") | {"caps": caps})
 
     def test_caps_cannot_be_raised_above_controller_budgets(self):
-        for caps in ({"max_subtasks": 99, "max_depth": 3},
-                     {"max_subtasks": 4, "max_depth": 99}):
+        for caps in (
+            {"max_subtasks": 99, "max_depth": 3},
+            {"max_subtasks": 4, "max_depth": 99},
+        ):
             with self.subTest(caps=caps), self.assertRaises(ContractError) as caught:
                 Plan.from_dict(load("plan_open_chain.json") | {"caps": caps})
             self.assertEqual(caught.exception.code, "PLAN_TOO_LARGE")
@@ -496,7 +581,9 @@ class OpenContractValidationTests(unittest.TestCase):
         for mixed in (False, True):
             payload = load("plan_open_chain.json")
             template = payload["subtasks"][0]
-            payload["subtasks"] = [template | {"subtask_id": f"step-{i}"} for i in range(5)]
+            payload["subtasks"] = [
+                template | {"subtask_id": f"step-{i}"} for i in range(5)
+            ]
             if mixed:
                 payload["subtasks"][0] = load("plan.json")["subtasks"][0]
             with self.subTest(mixed=mixed), self.assertRaises(ContractError) as caught:
@@ -505,12 +592,16 @@ class OpenContractValidationTests(unittest.TestCase):
 
     def test_registry_only_plans_keep_their_existing_total_work_behavior(self):
         payload = load("plan.json")
-        payload["subtasks"] = [payload["subtasks"][0] | {"subtask_id": f"step-{i}"} for i in range(5)]
+        payload["subtasks"] = [
+            payload["subtasks"][0] | {"subtask_id": f"step-{i}"} for i in range(5)
+        ]
         from argus.planner import validate_plan
+
         validate_plan(Plan.from_dict(payload))
 
     def test_mutated_plan_budget_is_rechecked_by_planner(self):
         from argus.planner import validate_plan
+
         plan = Plan.from_dict(load("plan.json"))
         plan.caps["max_subtasks"] = 99
         with self.assertRaises(ContractError) as caught:
@@ -519,16 +610,34 @@ class OpenContractValidationTests(unittest.TestCase):
 
     def test_malformed_dependency_inputs_are_rejected(self):
         payload = load("plan_open_chain.json")["subtasks"][1]
-        for source in (None, [], {"urls": {"wrong_key": "step-1"}},
-                       {"urls": {"subtask_id": "subtask-open-search", "field": ""}},
-                       {"urls": {"subtask_id": "undeclared", "field": "url"}},
-                       {"urls": {"subtask_id": "subtask-open-search", "field": "url", "extra": 1}}):
+        for source in (
+            None,
+            [],
+            {"urls": {"wrong_key": "step-1"}},
+            {"urls": {"subtask_id": "subtask-open-search", "field": ""}},
+            {"urls": {"subtask_id": "undeclared", "field": "url"}},
+            {"urls": {"subtask_id": "subtask-open-search", "field": "url", "extra": 1}},
+        ):
             with self.subTest(source=source), self.assertRaises(ContractError):
                 Subtask.from_dict(payload | {"inputs_from": source})
 
     def test_invalid_confidence_and_spans_fail_with_contract_error(self):
-        payload = {"text": "best", "kind": "rank", "parameter": None, "span": None, "confidence": 0.4}
-        for confidence in ("not-a-number", None, True, -0.1, 1.1, float("nan"), float("inf")):
+        payload = {
+            "text": "best",
+            "kind": "rank",
+            "parameter": None,
+            "span": None,
+            "confidence": 0.4,
+        }
+        for confidence in (
+            "not-a-number",
+            None,
+            True,
+            -0.1,
+            1.1,
+            float("nan"),
+            float("inf"),
+        ):
             with self.subTest(confidence=confidence), self.assertRaises(ContractError):
                 Criterion.from_dict(payload | {"confidence": confidence})
         for span in (7, "0,4", [True, 4], [-1, 4], [4, 1]):
@@ -537,7 +646,9 @@ class OpenContractValidationTests(unittest.TestCase):
 
     def test_open_context_survives_the_worker_input_boundary(self):
         subtask = Plan.from_dict(load("plan_open_chain.json")).subtasks[1]
-        message = SubtaskInput("run-open", subtask, "fake-session", Budget(30, 120), "explore")
+        message = SubtaskInput(
+            "run-open", subtask, "fake-session", Budget(30, 120), "explore"
+        )
         restored = SubtaskInput.from_dict(message.to_dict()).subtask
         self.assertEqual(restored.target_domain, "jobs.example.com")
         self.assertIn("sequentially", restored.goal)
@@ -546,9 +657,16 @@ class OpenContractValidationTests(unittest.TestCase):
 
     def test_optional_open_context_is_checked_without_requiring_a_domain(self):
         payload = load("interpreted_request_open.json")["intents"][0]
-        self.assertIsNone(Intent.from_dict(payload | {"target_domain": None}).target_domain)
-        for patch in ({"target_domain": 7}, {"goal": []}, {"expected_record_shape": "title"},
-                      {"expected_record_shape": [""]}, {"criteria": None}):
+        self.assertIsNone(
+            Intent.from_dict(payload | {"target_domain": None}).target_domain
+        )
+        for patch in (
+            {"target_domain": 7},
+            {"goal": []},
+            {"expected_record_shape": "title"},
+            {"expected_record_shape": [""]},
+            {"criteria": None},
+        ):
             with self.subTest(patch=patch), self.assertRaises(ContractError):
                 Intent.from_dict(payload | patch)
 
@@ -566,20 +684,30 @@ if __name__ == "__main__":
 
 class ModeratorDecisionVocabularyTests(unittest.TestCase):
     def test_decision_must_match_its_stage(self):
-        from argus.contracts import ContractError, ModeratorDecision, MODERATOR_DECISIONS
+        from argus.contracts import (
+            MODERATOR_DECISIONS,
+            ContractError,
+            ModeratorDecision,
+        )
+
         for stage, allowed in MODERATOR_DECISIONS.items():
             for decision in allowed:
                 ModeratorDecision(stage=stage, decision=decision, reason="ok")
         with self.assertRaises(ContractError):
             ModeratorDecision(stage="assess", decision="merged", reason="wrong stage")
         with self.assertRaises(ContractError):
-            ModeratorDecision(stage="reconcile", decision="accept", reason="wrong stage")
+            ModeratorDecision(
+                stage="reconcile", decision="accept", reason="wrong stage"
+            )
         with self.assertRaises(ContractError):
-            ModeratorDecision(stage="synthesize", decision="accept", reason="not a decision stage")
+            ModeratorDecision(
+                stage="synthesize", decision="accept", reason="not a decision stage"
+            )
 
 
 class RunStatusTests(unittest.TestCase):
     def test_running_is_a_valid_snapshot_status(self):
         from argus.contracts import RunResult
+
         snapshot = RunResult(run_id="run-x", status="running")
         self.assertEqual(RunResult.from_dict(snapshot.to_dict()), snapshot)

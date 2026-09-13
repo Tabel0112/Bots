@@ -12,6 +12,7 @@ parameters with their spans and confidence, criteria), missing parameters,
 ambiguities, and the gate decision with its rule.  Nothing is stored and no browser
 runs.  The API key is read from the environment or .env and never printed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -67,19 +68,29 @@ def describe(text: str, request_id: str, model: str | None) -> None:
     print(f"  model={interpreted.model}  {elapsed:.1f}s")
     for index, intent in enumerate(interpreted.intents):
         where = intent.target_domain if intent.kind == "open" else intent.site_id
-        print(f"  intent {index}: kind={intent.kind} where={where!r} operation={intent.operation!r} confidence={intent.confidence:.2f}")
+        print(
+            f"  intent {index}: kind={intent.kind} where={where!r} operation={intent.operation!r} confidence={intent.confidence:.2f}"
+        )
         if intent.goal:
             print(f"    goal: {intent.goal}")
         for name, origin in intent.parameters.items():
-            quoted = text[origin.span[0]:origin.span[1]] if origin.span else None
-            print(f"    param {name}={origin.value!r} source={origin.source} conf={origin.confidence:.2f} span={origin.span} quoted={quoted!r}")
+            quoted = text[origin.span[0] : origin.span[1]] if origin.span else None
+            print(
+                f"    param {name}={origin.value!r} source={origin.source} conf={origin.confidence:.2f} span={origin.span} quoted={quoted!r}"
+            )
         for criterion in intent.criteria:
-            quoted = text[criterion.span[0]:criterion.span[1]] if criterion.span else None
-            print(f"    criterion {criterion.kind} text={criterion.text!r} parameter={criterion.parameter!r} conf={criterion.confidence:.2f} quoted={quoted!r}")
+            quoted = (
+                text[criterion.span[0] : criterion.span[1]] if criterion.span else None
+            )
+            print(
+                f"    criterion {criterion.kind} text={criterion.text!r} parameter={criterion.parameter!r} conf={criterion.confidence:.2f} quoted={quoted!r}"
+            )
         if intent.expected_record_shape:
             print(f"    record shape: {intent.expected_record_shape}")
     for missing in interpreted.missing_required:
-        print(f"  missing: intent {missing.intent_index} {missing.parameter}: {missing.question}")
+        print(
+            f"  missing: intent {missing.intent_index} {missing.parameter}: {missing.question}"
+        )
     for ambiguity in interpreted.ambiguities:
         print(f"  ambiguity: {ambiguity}")
     decision = gate(interpreted)
@@ -89,10 +100,16 @@ def describe(text: str, request_id: str, model: str | None) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("requests", nargs="*", help="request texts; defaults to the built-in samples")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "requests", nargs="*", help="request texts; defaults to the built-in samples"
+    )
     parser.add_argument("--model", help="override ARGUS_MODEL")
-    parser.add_argument("--compare", help="also run every request with this second model")
+    parser.add_argument(
+        "--compare", help="also run every request with this second model"
+    )
     args = parser.parse_args(argv)
     load_env()
     if not os.environ.get("OPENAI_API_KEY"):

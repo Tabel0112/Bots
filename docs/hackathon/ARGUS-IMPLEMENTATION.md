@@ -50,7 +50,7 @@ Rules for running A to D concurrently in one working tree:
 
 ## Phase 0 spec — contracts
 
-`argus/contracts.py`. Plain dataclasses with `to_dict()` and `from_dict()`, schema version `"0.2-argus-draft"`. No third-party dependencies.
+`argus/contracts.py`. Plain dataclasses with `to_dict()` and `from_dict()`, current schema version `"0.5-argus-draft"`. No third-party dependencies. The original phase-0 shapes below have been updated where the moderator publication boundary changed after review.
 
 - `TypedError`: `code`, `message`, `retryable`, `step_id`, `evidence_refs`. Codes: `NO_MATCH`, `INVALID_INPUT`, `NEEDS_INPUT`, `TARGET_NOT_FOUND`, `TARGET_AMBIGUOUS`, `PRECONDITION_FAILED`, `NAVIGATION_TIMEOUT`, `AUTH_REQUIRED`, `EXTRACTION_FAILED`, `VALIDATION_FAILED`, `UNSUPPORTED_CHANGE`, `BUDGET_EXCEEDED`, `CANCELLED`, `MODEL_REFUSED`.
 - `ParameterOrigin`: `value`, `source` (`text_span` | `default` | `structured`), `span` (start, end) or null, `confidence`.
@@ -61,15 +61,18 @@ Rules for running A to D concurrently in one working tree:
 - `Plan`: `plan_id`, `request_id`, `subtasks`, `created_at`.
 - `SubtaskInput`: `run_id`, `subtask`, `session_handle`, `budget: {max_actions, max_seconds}`, `mode` (`explore` | `reuse`), `bound_procedure` (nullable).
 - `WorkerReport`: adopt Thomas's `report.json` fields verbatim: `schema_version`, `worker`, `worker_model`, `request_id`, `subtask_id`, `subtask`, `outcome`, `summary`, `findings`, `actions[]`, `evidence{}`, `metrics{}`, `failures[]`. Add `session_handle` (returned) and `typed_failures: list[TypedError]`. Keep `failures` as he defines it.
-- `ModeratorDecision`: `stage` (`assess` | `reconcile` | `synthesize`), `decision`, `reason`, `evidence_refs`, `next_action` (nullable dict).
-- `FinalAnswer`: `text`, `claims: list[{text, evidence_refs}]`, `records`, `failures: list[TypedError]`, `unverified: list[str]`.
+- `ModeratorDecision`: `stage` (`assess` | `reconcile` | `observe`), `decision`, `reason`, `evidence_refs`, `next_action` (nullable dict).
+- `Claim`: `record_index`, `fields`; no prose and no moderator-selected evidence reference.
+- `Note`: fixed `kind` plus `subject`; the controller validates subjects against run-owned closed sets and renders fixed templates.
+- `AnswerSelection`: `record_indices`, `claims`, `notes`. Stage 10 moderator output; no records, failures or prose.
+- `FinalAnswer`: controller-owned `lines`, structured `claims`, controller-derived `records`, unchanged typed `failures`, typed `notes`.
 - `Event`: `run_id`, `sequence`, `timestamp`, `type`, `stage`, `message`, `data`.
 - `RunResult`: `run_id`, `status` (`succeeded` | `failed` | `cancelled` | `needs_input`), `interpreted`, `gate`, `plan`, `reports`, `validation`, `answer`, `metrics`, `error`.
 
 `argus/interfaces.py`. `typing.Protocol` classes:
 
 - `Toolbox`: `open_session(site_id) -> handle`, `close_session(handle)`, `run_subtask(SubtaskInput) -> WorkerReport`, `observe(handle) -> observation_ref`, `dom_interpret(handle, question) -> str`, `vision_interpret(handle, question) -> str`.
-- `Moderator`: `assess_report(subtask, report, success_conditions) -> ModeratorDecision`, `reconcile(plan, reports) -> ModeratorDecision`, `synthesize(interpreted, records, validation, evidence, failures) -> FinalAnswer`. Optional `observe_progress(snapshot, event) -> ModeratorDecision`.
+- `Moderator`: `assess_report(subtask, report, success_conditions) -> ModeratorDecision`, `reconcile(plan, reports) -> ModeratorDecision`, `synthesize(interpreted, records, validation, evidence, failures) -> AnswerSelection`. Optional `observe_progress(snapshot, event) -> ModeratorDecision`.
 - `Ghost`: `match(subtask, skills) -> dict` (`decision`: `reuse` | `explore`, `reason`, `skill`), `validate(subtask, records, evidence) -> dict` (`status`: `passed` | `failed` | `inconclusive`, `checks`), `compile(report, subtask) -> dict | None`. Names chosen to line up with Sting's demo functions `validate_request`, `replay`, `verify`, `qualify`; the adapter in phase 3 maps them.
 
 `argus/registry.py`: `SITES` and `OPERATIONS`. One controlled site `demo-catalog` and one operation `search_products` with parameters `query` (string, required), `max_price` (number, optional, minimum 0), `max_results` (integer, default 5), `currency` fixed `USD`. Structure allows adding a site later without code changes to the interpreter.
@@ -81,8 +84,8 @@ Rules for running A to D concurrently in one working tree:
 Delivered and reviewed: 13 files under `argus/`, 34 tests passing with `python3 -m unittest discover -s argus/tests -v`. No specced field was renamed. Facts the later prompts rely on:
 
 - `ContractError(message, code=...)` carries `.typed_error`; use it for `MODEL_REFUSED`.
-- `ParameterOrigin(value, source, confidence, span=None)`; spans normalise to tuples. `MissingParameter`, `Claim` and `Budget` are named dataclasses with the specced field names.
-- `ModeratorDecision.decision` is checked per stage via `contracts.MODERATOR_DECISIONS`: assess → accept, verify, retry_other_path, fail; reconcile → merged, verify, fail; observe → continue, flag, stop_subtask. Stage 10 returns a `FinalAnswer`, not a decision.
+- `ParameterOrigin(value, source, confidence, span=None)`; spans normalise to tuples. `MissingParameter` and `Budget` retain the original fields. `Claim`, `Note`, `AnswerSelection` and `FinalAnswer` use the breaking 0.5 boundary above.
+- `ModeratorDecision.decision` is checked per stage via `contracts.MODERATOR_DECISIONS`: assess → accept, verify, retry_other_path, fail; reconcile → merged, verify, fail; observe → continue, flag, stop_subtask. Stage 10 returns an `AnswerSelection`; the controller alone constructs `FinalAnswer`.
 - `interfaces.py` has `Toolbox`, `Moderator`, `ProgressObserver` (optional, checked with `isinstance`), `Ghost` and `Store`. `JsonStore` implements `Store`.
 - All 13 of Thomas's `WorkerReport` fields are required; only `session_handle` and `typed_failures` default. `RunResult` requires only `run_id` and `status` so snapshots can be written mid-run.
 - `WorkerReport.outcome` is not vocabulary-checked because Thomas owns it.
@@ -100,7 +103,7 @@ A, B, C and D delivered; 205 tests pass with `python3 -m unittest discover -s ar
 - `FakeToolbox(script=...)` accepts a sequence per subtask ID, consumed one call at a time. `StubModerator(retry_codes=("TARGET_NOT_FOUND",))` makes the stub return `retry_other_path` for those codes; default never retries.
 - The scripted `"empty"` outcome has no records and no screenshot (thin-evidence path, drives `verify`). It is not an evidenced empty state.
 - Run status is `succeeded` only if every subtask was accepted and validation passed; `inconclusive` validation fails with `VALIDATION_FAILED` retryable. A failed independent sibling makes the run `failed` while the answer keeps the accepted records.
-- A `reconcile` decision of `verify` is recorded in `answer.unverified`, not executed, in this phase.
+- A `reconcile` decision of `verify` becomes a typed `reconciliation_unresolved` note; its free-form reason is not rendered. It is not executed in this phase.
 - Controller signature: `Controller(toolbox, moderator, ghost, store, max_actions=30, max_seconds=120, max_concurrency=2, *, interpret=None, gate=None, plan=None)`; `run(text_or_interpreted, request_id, run_id=None)`; `cancel(run_id)`.
 
 ## Prompts
@@ -212,13 +215,13 @@ You are implementing the fakes for the ARGUS controller in the repository at /Us
 Create exactly: argus/fakes.py and argus/tests/test_fakes.py.
 
 - FakeToolbox(script=None): implements the Toolbox protocol. open_session returns "fake-session-N" and records it as open; close_session marks it closed and raises if called twice. run_subtask returns a WorkerReport built from argus/examples/worker_report.json with the subtask's IDs substituted and findings filled from a small in-memory catalog (five products with title, price in USD, url on https://demo-catalog.invalid) filtered by query substring and max_price. A script dict keyed by subtask_id can force outcomes: "target_not_found", "auth_required", "budget", "raise", "empty". observe returns "observation-fake-N"; dom_interpret and vision_interpret return a short string echoing the question. Every call is appended to self.calls for assertions.
-- StubModerator: assess_report returns accept when outcome is "succeeded" and the report has at least one evidence screenshot, verify when succeeded but evidence is empty, fail otherwise with the report's first typed failure. reconcile returns a decision listing subtask IDs and no conflicts. synthesize returns a FinalAnswer whose claims are one per record, each citing the record's source observation, and lists failures verbatim.
+- StubModerator: assess_report returns accept when outcome is "succeeded" and the report has at least one evidence screenshot, verify when succeeded but evidence is empty, fail otherwise with the report's first typed failure. reconcile returns a decision listing subtask IDs and no conflicts. synthesize returns an `AnswerSelection` of validated-record indices, structured field claims and typed notes; it never returns prose or failures.
 - FakeGhost: match always returns explore with reason "no qualified skills in fake"; validate passes when every record has title, price, currency "USD" and url on the configured site and price <= max_price if given, fails otherwise with named checks; compile returns a candidate skill dict with status "candidate" and the subtask's operation, or None if the report has no actions.
 
 
 Phase 0 facts: read the "Phase 0 outcome" section of the plan first. StubModerator decisions must use the strings in contracts.MODERATOR_DECISIONS for their stage; reconcile returns "merged" with next_action carrying findings, gaps and conflicts. Build WorkerReport via WorkerReport.from_dict on the fixture so all 13 required fields are present.
 
-Tests cover each scripted outcome, the double-close guard, the validate pass and fail cases, and that StubModerator.synthesize never emits a claim without an evidence ref.
+Tests cover each scripted outcome, the double-close guard, the validate pass and fail cases, and that `StubModerator.synthesize` emits only structured selections backed by each record's own evidence field.
 
 Do not modify any file outside the two you create. Do not commit. Run python3 -m unittest discover -s argus/tests -v and report the command, output and files created.
 ```

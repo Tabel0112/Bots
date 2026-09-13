@@ -85,13 +85,16 @@ class CreateAndReadTest(unittest.TestCase):
             self.assertTrue(store.reports_dir("run-1").is_dir())
             self.assertTrue(store.evidence_dir("run-1").is_dir())
             self.assertEqual(
-                json.loads((Path(tmp) / "index.json").read_text(encoding="utf-8")), {"request-1": "run-1"}
+                json.loads((Path(tmp) / "index.json").read_text(encoding="utf-8")),
+                {"request-1": "run-1"},
             )
 
     def test_create_accepts_plain_dict_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = JsonStore(tmp)
-            store.create_run("run-1", "request-1", {"run_id": "run-1", "status": "failed"})
+            store.create_run(
+                "run-1", "request-1", {"run_id": "run-1", "status": "failed"}
+            )
             self.assertEqual(store.run("run-1")["status"], "failed")
 
     def test_snapshot_overwrites_and_index_survives(self) -> None:
@@ -143,7 +146,11 @@ class EventTest(unittest.TestCase):
             for sequence in range(3):
                 store.append_event("run-1", _event("run-1", sequence))
 
-            lines = (store.run_dir("run-1") / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            lines = (
+                (store.run_dir("run-1") / "events.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            )
             self.assertEqual(len(lines), 3)
             events = store.events("run-1")
             self.assertEqual([item["sequence"] for item in events], [0, 1, 2])
@@ -169,7 +176,7 @@ class EventTest(unittest.TestCase):
                             sequence = next(counter)
                         event = _event("run-1", sequence, message=f"{worker}-{index}")
                         store.append_event("run-1", event)
-                except BaseException as error:  # pragma: no cover - surfaced below
+                except BaseException as error:  # noqa: BLE001  # pragma: no cover
                     errors.append(error)
 
             threads = [
@@ -194,10 +201,14 @@ class EventTest(unittest.TestCase):
                     for item in events
                     if item["message"].startswith(f"{worker}-")
                 ]
-                self.assertEqual(own, [f"{worker}-{index}" for index in range(per_thread)])
+                self.assertEqual(
+                    own, [f"{worker}-{index}" for index in range(per_thread)]
+                )
             # Sorting by sequence is the caller's job and is always possible.
             ordered = sorted(events, key=lambda item: item["sequence"])
-            self.assertEqual([item["sequence"] for item in ordered], list(range(2 * per_thread)))
+            self.assertEqual(
+                [item["sequence"] for item in ordered], list(range(2 * per_thread))
+            )
 
     def test_append_event_accepts_a_plain_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -224,7 +235,9 @@ class AtomicWriteTest(unittest.TestCase):
             filler_a = ["a" * 400 for _ in range(400)]
             filler_b = ["b" * 400 for _ in range(400)]
             store.create_run(
-                "run-1", "request-1", RunResult("run-1", "succeeded", metrics={"filler": filler_a})
+                "run-1",
+                "request-1",
+                RunResult("run-1", "succeeded", metrics={"filler": filler_a}),
             )
             stop = threading.Event()
             seen: list[str] = []
@@ -236,9 +249,10 @@ class AtomicWriteTest(unittest.TestCase):
                         filler = filler_a if index % 2 else filler_b
                         status = "succeeded" if index % 2 else "failed"
                         store.save_snapshot(
-                            "run-1", RunResult("run-1", status, metrics={"filler": filler})
+                            "run-1",
+                            RunResult("run-1", status, metrics={"filler": filler}),
                         )
-                except BaseException as error:  # pragma: no cover - surfaced below
+                except BaseException as error:  # noqa: BLE001  # pragma: no cover
                     errors.append(error)
                 finally:
                     stop.set()
@@ -249,7 +263,7 @@ class AtomicWriteTest(unittest.TestCase):
                         snapshot = store.run("run-1")
                         seen.append(snapshot["status"])
                         self.assertEqual(len(snapshot["metrics"]["filler"]), 400)
-                except BaseException as error:  # pragma: no cover - surfaced below
+                except BaseException as error:  # noqa: BLE001  # pragma: no cover
                     errors.append(error)
 
             threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
@@ -288,7 +302,8 @@ class AtomicWriteTest(unittest.TestCase):
 
 def _leftovers(root: str) -> list[str]:
     return [
-        str(path) for path in Path(root).rglob("*")
+        str(path)
+        for path in Path(root).rglob("*")
         if path.name.endswith(".tmp") or path.name.startswith(".")
     ]
 
@@ -309,8 +324,10 @@ class ReplaceRetryTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             store = JsonStore(tmp)
-            with mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0), \
-                    mock.patch("os.replace", side_effect=flaky):
+            with (
+                mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0),
+                mock.patch("os.replace", side_effect=flaky),
+            ):
                 store.create_run("run-1", "request-1", _snapshot())
             # run.json took three attempts, index.json one.
             self.assertEqual(len(attempts), 4)
@@ -319,7 +336,9 @@ class ReplaceRetryTest(unittest.TestCase):
             self.assertEqual(store.run_id_for_request("request-1"), "run-1")
             self.assertEqual(_leftovers(tmp), [])
 
-    def test_replace_gives_up_after_the_last_attempt_with_the_original_error(self) -> None:
+    def test_replace_gives_up_after_the_last_attempt_with_the_original_error(
+        self,
+    ) -> None:
         attempts: list[str] = []
 
         def stuck(src, dst):
@@ -328,10 +347,12 @@ class ReplaceRetryTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             store = JsonStore(tmp)
-            with mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0), \
-                    mock.patch("os.replace", side_effect=stuck):
-                with self.assertRaises(PermissionError) as caught:
-                    store.create_run("run-1", "request-1", _snapshot())
+            with (
+                mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0),
+                mock.patch("os.replace", side_effect=stuck),
+                self.assertRaises(PermissionError) as caught,
+            ):
+                store.create_run("run-1", "request-1", _snapshot())
             self.assertEqual(len(attempts), store_module._REPLACE_ATTEMPTS)
             self.assertEqual(store_module._REPLACE_ATTEMPTS, 50)
             self.assertEqual(caught.exception.errno, 32)
@@ -348,10 +369,12 @@ class ReplaceRetryTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             store = JsonStore(tmp)
-            with mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0), \
-                    mock.patch("os.replace", side_effect=full):
-                with self.assertRaises(OSError) as caught:
-                    store.create_run("run-1", "request-1", _snapshot())
+            with (
+                mock.patch.object(store_module, "_REPLACE_DELAY_SECONDS", 0),
+                mock.patch("os.replace", side_effect=full),
+                self.assertRaises(OSError) as caught,
+            ):
+                store.create_run("run-1", "request-1", _snapshot())
             self.assertEqual(len(attempts), 1)
             self.assertEqual(caught.exception.errno, 28)
             self.assertEqual(_leftovers(tmp), [])
@@ -375,7 +398,9 @@ class LockTest(unittest.TestCase):
             try:
                 thread = threading.Thread(target=reader)
                 thread.start()
-                self.assertFalse(finished.wait(0.2), "the read did not wait for the writer")
+                self.assertFalse(
+                    finished.wait(0.2), "the read did not wait for the writer"
+                )
                 self.assertEqual(seen, [])
             finally:
                 store._lock.release()
@@ -420,7 +445,11 @@ class ReportTest(unittest.TestCase):
             payload = _report().to_dict()
             payload["session_handle"] = "steel-session-secret"
             store.save_report("run-1", payload)
-            stored = json.loads((store.reports_dir("run-1") / "subtask-1.json").read_text(encoding="utf-8"))
+            stored = json.loads(
+                (store.reports_dir("run-1") / "subtask-1.json").read_text(
+                    encoding="utf-8"
+                )
+            )
             self.assertNotIn("session_handle", stored)
             # The caller's dict is not mutated.
             self.assertEqual(payload["session_handle"], "steel-session-secret")
@@ -457,7 +486,11 @@ class ReportTest(unittest.TestCase):
                 sorted(os.listdir(store.reports_dir("run-1"))),
                 ["subtask-1.json", "subtask-2.json"],
             )
-            stored = json.loads((store.reports_dir("run-1") / "subtask-1.json").read_text(encoding="utf-8"))
+            stored = json.loads(
+                (store.reports_dir("run-1") / "subtask-1.json").read_text(
+                    encoding="utf-8"
+                )
+            )
             self.assertEqual(stored["outcome"], "failed")
 
 
@@ -483,7 +516,9 @@ class EvidenceTest(unittest.TestCase):
             store.create_run("run-1", "request-1", _snapshot())
             source = Path(tmp) / "outside.png"
             source.write_bytes(b"x")
-            stored = store.save_evidence_file("run-1", "observation-000.png", str(source))
+            stored = store.save_evidence_file(
+                "run-1", "observation-000.png", str(source)
+            )
             self.assertEqual(Path(stored).name, "observation-000.png")
 
     def test_missing_source_raises_file_not_found(self) -> None:
@@ -491,7 +526,9 @@ class EvidenceTest(unittest.TestCase):
             store = JsonStore(tmp)
             store.create_run("run-1", "request-1", _snapshot())
             with self.assertRaises(FileNotFoundError):
-                store.save_evidence_file("run-1", "observation-000", str(Path(tmp) / "gone.png"))
+                store.save_evidence_file(
+                    "run-1", "observation-000", str(Path(tmp) / "gone.png")
+                )
 
 
 class SkillTest(unittest.TestCase):
@@ -500,15 +537,24 @@ class SkillTest(unittest.TestCase):
             store = JsonStore(tmp)
             for version in (10, 2, 1, 3):
                 store.save_skill(
-                    {"skill_id": "search-demo", "version": version, "status": "candidate"}
+                    {
+                        "skill_id": "search-demo",
+                        "version": version,
+                        "status": "candidate",
+                    }
                 )
             store.save_skill({"skill_id": "another-skill", "version": 1})
 
             listed = store.skills()
             self.assertEqual(
                 [(item["skill_id"], item["version"]) for item in listed],
-                [("another-skill", 1), ("search-demo", 1), ("search-demo", 2),
-                 ("search-demo", 3), ("search-demo", 10)],
+                [
+                    ("another-skill", 1),
+                    ("search-demo", 1),
+                    ("search-demo", 2),
+                    ("search-demo", 3),
+                    ("search-demo", 10),
+                ],
             )
             self.assertEqual(
                 sorted(os.listdir(store.skills_dir / "search-demo")),
@@ -535,20 +581,27 @@ class SkillTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = JsonStore(tmp)
             store.save_skill(
-                {"skill_id": "search-demo", "version": 1, "session_handle": "steel-secret"}
+                {
+                    "skill_id": "search-demo",
+                    "version": 1,
+                    "session_handle": "steel-secret",
+                }
             )
-            raw = (store.skills_dir / "search-demo" / "v1.json").read_text(encoding="utf-8")
+            raw = (store.skills_dir / "search-demo" / "v1.json").read_text(
+                encoding="utf-8"
+            )
             self.assertNotIn("steel-secret", raw)
-            self.assertEqual(store.skills(), [{"skill_id": "search-demo", "version": 1}])
+            self.assertEqual(
+                store.skills(), [{"skill_id": "search-demo", "version": 1}]
+            )
 
     def test_empty_store_has_no_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(JsonStore(tmp).skills(), [])
 
     def test_skill_without_id_is_refused(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(ContractError):
-                JsonStore(tmp).save_skill({"version": 1})
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ContractError):
+            JsonStore(tmp).save_skill({"version": 1})
 
 
 class ReopenTest(unittest.TestCase):

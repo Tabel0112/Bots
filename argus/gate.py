@@ -90,23 +90,32 @@ _ACTION_PATTERNS: tuple[tuple[str, str], ...] = (
     # A trailing noun ("sign-in options", "login page") is a thing to read
     # about, not an action to perform, so it does not fire.
     ("a login", r"\b(?:log|sign)[\s-]?(?:in|into|on)\b" + _NOT_A_NOUN_USE),
-    ("a login", r"\b(?:log-?in|sign-?in|authenticate|re-?authenticate)\b" + _NOT_A_NOUN_USE),
+    (
+        "a login",
+        r"\b(?:log-?in|sign-?in|authenticate|re-?authenticate)\b" + _NOT_A_NOUN_USE,
+    ),
     (
         "an account creation",
-        r"\b(?:creat\w+|register|registering|sign[\s-]?up|open|opening)\b"
-        r"[^.;]{0,20}?\b(?:account|profile|membership)\b",
+        (
+            r"\b(?:creat\w+|register|registering|sign[\s-]?up|open|opening)\b"
+            r"[^.;]{0,20}?\b(?:account|profile|membership)\b"
+        ),
     ),
     (
         "a payment",
-        r"\b(?:make|makes|making|made|send|sends|sending|sent|enter|entering|"
-        r"submit|submitting)\b[^.;]{0,20}?\b(?:payment|payments|card details|"
-        r"payment details|bank details)\b",
+        (
+            r"\b(?:make|makes|making|made|send|sends|sending|sent|enter|entering|"
+            r"submit|submitting)\b[^.;]{0,20}?\b(?:payment|payments|card details|"
+            r"payment details|bank details)\b"
+        ),
     ),
     (
         "a payment",
-        r"\bpay(?:s|ing|ed)?\b[^.;]{0,20}?\b(?:invoice|invoices|bill|bills|"
-        r"balance|fee|fees|amount|total|subscription|rent|premium|tuition|"
-        r"order|orders)\b",
+        (
+            r"\bpay(?:s|ing|ed)?\b[^.;]{0,20}?\b(?:invoice|invoices|bill|bills|"
+            r"balance|fee|fees|amount|total|subscription|rent|premium|tuition|"
+            r"order|orders)\b"
+        ),
     ),
     (
         "a purchase",
@@ -115,66 +124,115 @@ _ACTION_PATTERNS: tuple[tuple[str, str], ...] = (
     ("a purchase", r"\b(?:place|places|placing|placed)\b[^.;]{0,15}?\border\b"),
     (
         "a purchase",
-        r"\b(?:book|books|booking|booked|reserve|reserves|reserving|reserved|"
-        r"rent|renting|rented)\s+(?:(?:me|us)\s+)?(?:a|an|the|my|our|\d+)\s",
+        (
+            r"\b(?:book|books|booking|booked|reserve|reserves|reserving|reserved|"
+            r"rent|renting|rented)\s+(?:(?:me|us)\s+)?(?:a|an|the|my|our|\d+)\s"
+        ),
     ),
     ("a purchase", r"\b(?:subscribe|subscribes|subscribing|subscribed)\s+to\b"),
     ("a checkout", r"\bcheckout\b"),
     (
         "a checkout",
-        r"\bcheck[\s-]?out\b(?=[^.;]{0,25}\b(?:cart|basket|bag|order|payment|"
-        r"purchase)\b)",
+        (
+            r"\bcheck[\s-]?out\b(?=[^.;]{0,25}\b(?:cart|basket|bag|order|payment|"
+            r"purchase)\b)"
+        ),
     ),
     (
         "a checkout",
-        r"\b(?:complete|completing|completed|finish|finishing|finished)\b"
-        r"[^.;]{0,15}?\b(?:purchase|checkout|order)\b",
+        (
+            r"\b(?:complete|completing|completed|finish|finishing|finished)\b"
+            r"[^.;]{0,15}?\b(?:purchase|checkout|order)\b"
+        ),
     ),
     (
         "a checkout",
-        r"\badd(?:s|ing|ed)?\b[^.;]{0,25}?\bto\s+(?:the\s+|my\s+|your\s+)?"
-        r"(?:cart|basket|bag)\b",
+        (
+            r"\badd(?:s|ing|ed)?\b[^.;]{0,25}?\bto\s+(?:the\s+|my\s+|your\s+)?"
+            r"(?:cart|basket|bag)\b"
+        ),
     ),
     (
         "a form submission",
-        r"\b(?:submit|submits|submitting|submitted|file|files|filing|filed)\b"
-        r"[^.;]{0,25}?\b(?:form|forms|application|applications|request|review|"
-        r"comment|complaint|report|claim|ticket|resume|cv|bid|offer|answer|"
-        r"response)\b",
+        (
+            r"\b(?:submit|submits|submitting|submitted|file|files|filing|filed)\b"
+            r"[^.;]{0,25}?\b(?:form|forms|application|applications|request|review|"
+            r"comment|complaint|report|claim|ticket|resume|cv|bid|offer|answer|"
+            r"response)\b"
+        ),
     ),
     ("a form submission", r"\bappl(?:y|ies|ying|ied)\s+(?:for|to)\b"),
     (
         "a post that changes state",
-        r"\b(?:post|posts|posting|posted|publish|publishes|publishing|published|"
-        r"upload|uploads|uploading|uploaded)\b[^.;]{0,25}?\b(?:comment|comments|"
-        r"review|reviews|reply|replies|message|messages|answer|answers|listing|"
-        r"listings|ad|photo|photos|file|files|document|documents|resume|cv|"
-        r"thread|tweet)\b",
+        (
+            r"\b(?:post|posts|posting|posted|publish|publishes|publishing|published|"
+            r"upload|uploads|uploading|uploaded)\b[^.;]{0,25}?\b(?:comment|comments|"
+            r"review|reviews|reply|replies|message|messages|answer|answers|listing|"
+            r"listings|ad|photo|photos|file|files|document|documents|resume|cv|"
+            r"thread|tweet)\b"
+        ),
     ),
     (
         "a post that changes state",
-        r"\b(?:send|sends|sending|sent)\b[^.;]{0,25}?\b(?:message|messages|"
-        r"email|emails|dm|reply|invite|invitation)\b",
+        (
+            r"\b(?:send|sends|sending|sent)\b[^.;]{0,25}?\b(?:message|messages|"
+            r"email|emails|dm|reply|invite|invitation)\b"
+        ),
     ),
 )
 
 #: Wordings that make a following action phrase a topic being read about rather
 #: than an action being asked for.
 _DOCUMENTATION_FRAMES = (
-    "how do i", "how do you", "how does", "how can i", "how would i", "how to",
-    "how-to", "what is", "what are", "what happens", "where do i", "why does",
-    "documentation", "docs", "guide", "instructions", "tutorial", "faq",
-    "help page", "help article", "help centre", "help center", "support page",
-    "policy", "explain", "explaining", "read about", "learn about", "learn how",
-    "find out how", "steps to", "article about", "instructions for",
+    "how do i",
+    "how do you",
+    "how does",
+    "how can i",
+    "how would i",
+    "how to",
+    "how-to",
+    "what is",
+    "what are",
+    "what happens",
+    "where do i",
+    "why does",
+    "documentation",
+    "docs",
+    "guide",
+    "instructions",
+    "tutorial",
+    "faq",
+    "help page",
+    "help article",
+    "help centre",
+    "help center",
+    "support page",
+    "policy",
+    "explain",
+    "explaining",
+    "read about",
+    "learn about",
+    "learn how",
+    "find out how",
+    "steps to",
+    "article about",
+    "instructions for",
 )
 
 #: Nouns that make the phrase before them the name of something to read, so
 #: "summarise the checkout instructions" is a reading request.  Kept short and
 #: unambiguously documentary: a word like "page" would exempt far too much.
 _DOCUMENTATION_NOUNS = (
-    "documentation", "docs", "guide", "instructions", "tutorial", "faq",
-    "policy", "article", "steps", "help",
+    "documentation",
+    "docs",
+    "guide",
+    "instructions",
+    "tutorial",
+    "faq",
+    "policy",
+    "article",
+    "steps",
+    "help",
 )
 
 #: A documentation frame governs only its own clause; these end it.
@@ -195,10 +253,7 @@ def _plain_parameters(intent: Any) -> dict[str, Any]:
 
 
 def _default_question(parameter: str, operation: str) -> str:
-    return (
-        f"What {parameter} should I use for {operation}? "
-        f"The request did not say."
-    )
+    return f"What {parameter} should I use for {operation}? The request did not say."
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -235,8 +290,7 @@ def _catalog_rules(
                 rule_id="G2",
                 reason=(
                     f"Site {intent.site_id!r} is not configured; the supported "
-                    f"sites are {_known_sites()}."
-                    + _suffix(index, total)
+                    f"sites are {_known_sites()}." + _suffix(index, total)
                 ),
             )
 
@@ -251,8 +305,7 @@ def _catalog_rules(
                 rule_id="G3",
                 reason=(
                     f"Operation {intent.operation!r} is not supported on site "
-                    f"{intent.site_id!r}; it offers {offered}."
-                    + _suffix(index, total)
+                    f"{intent.site_id!r}; it offers {offered}." + _suffix(index, total)
                 ),
             )
 
@@ -299,8 +352,7 @@ def _catalog_rules(
                 rule_id="G5",
                 reason=(
                     f"The parameters for {intent.operation} are not valid: "
-                    f"{'; '.join(problems)}."
-                    + _suffix(index, total)
+                    f"{'; '.join(problems)}." + _suffix(index, total)
                 ),
             )
 
@@ -317,8 +369,7 @@ def _catalog_rules(
                     f"{', '.join(repr(name) for name in unknown)}; it accepts "
                     f"{', '.join(declared)}. An unsupported filter is not "
                     "ignored, because the answer would silently be about "
-                    "something else."
-                    + _suffix(index, total)
+                    "something else." + _suffix(index, total)
                 ),
             )
 
@@ -346,7 +397,11 @@ def _catalog_rules(
             reason=(
                 "The request is too uncertain to run: "
                 f"{'; '.join(uncertain)}."
-                + (f" Noted ambiguities: {' '.join(ambiguities)}" if ambiguities else "")
+                + (
+                    f" Noted ambiguities: {' '.join(ambiguities)}"
+                    if ambiguities
+                    else ""
+                )
             ),
             questions=_dedupe(questions),
         )
@@ -424,8 +479,7 @@ def _open_rules(
                     f"({phrase!r}), which a read-only run never does "
                     "(ACTION_CLASS_NOT_ALLOWED). Reading or searching public "
                     "documentation about it is allowed, so ask for that "
-                    "instead if that is what you meant."
-                    + _suffix(index, total)
+                    "instead if that is what you meant." + _suffix(index, total)
                 ),
             )
 
@@ -438,12 +492,13 @@ def _open_rules(
                 rule_id="S1",
                 reason=(
                     "The request does not name a site to browse, and a site is "
-                    "never guessed from a name."
-                    + _suffix(index, total)
+                    "never guessed from a name." + _suffix(index, total)
                 ),
                 questions=[
-                    "Which site should I use? Give the domain or a link, for "
-                    "example jobs.example.com."
+                    (
+                        "Which site should I use? Give the domain or a link, for "
+                        "example jobs.example.com."
+                    )
                 ],
             )
 
@@ -457,8 +512,7 @@ def _open_rules(
                 rule_id="S2",
                 reason=(
                     f"{reason[:1].upper()}{reason[1:]} (DOMAIN_NOT_ALLOWED). "
-                    "ARGUS browses public sites only."
-                    + _suffix(index, total)
+                    "ARGUS browses public sites only." + _suffix(index, total)
                 ),
             )
 
@@ -473,9 +527,7 @@ def _open_rules(
                     "do there, so there is nothing to look for or to validate."
                     + _suffix(index, total)
                 ),
-                questions=[
-                    f"What should I look for on {intent.target_domain}?"
-                ],
+                questions=[f"What should I look for on {intent.target_domain}?"],
             )
 
     # S4 - a vague ranking is asked about, never resolved by the gate. The

@@ -53,18 +53,25 @@ import argparse
 import json
 import sys
 import uuid
+from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
+from argus import planner
 from argus.contracts import ContractError, InterpretedRequest, RunResult
 from argus.controller import Controller
 from argus.fakes import FakeGhost, FakePlannerClient, FakeToolbox, StubModerator
 from argus.store import JsonStore
-from argus import planner
 
-__all__ = ["DEFAULT_STORE_DIR", "EXIT_OK", "EXIT_RUN_NOT_SUCCEEDED", "EXIT_NO_TOOLBOX",
-           "build_parser", "main"]
+__all__ = [
+    "DEFAULT_STORE_DIR",
+    "EXIT_NO_TOOLBOX",
+    "EXIT_OK",
+    "EXIT_RUN_NOT_SUCCEEDED",
+    "build_parser",
+    "main",
+]
 
 #: Where runs are written when ``--store`` is not given.
 DEFAULT_STORE_DIR = "argus-runs"
@@ -193,7 +200,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return EXIT_USAGE
     if args.plan_fixture and not args.interpreted:
-        print("--plan-fixture requires --interpreted FILE for an explicit offline run.", file=sys.stderr)
+        print(
+            "--plan-fixture requires --interpreted FILE for an explicit offline run.",
+            file=sys.stderr,
+        )
         return EXIT_USAGE
     if args.request_id and args.interpreted:
         print(
@@ -223,7 +233,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return EXIT_USAGE
         except json.JSONDecodeError as exc:
-            print(f"--plan-fixture {args.plan_fixture} is not valid JSON: {exc}", file=sys.stderr)
+            print(
+                f"--plan-fixture {args.plan_fixture} is not valid JSON: {exc}",
+                file=sys.stderr,
+            )
             return EXIT_USAGE
         except ContractError as exc:
             print(

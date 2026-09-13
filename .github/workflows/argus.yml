@@ -56,8 +56,6 @@ jobs:
       - name: Install ruff
         run: python -m pip install ruff
 
-      # Reports only for now. Becomes blocking (drop continue-on-error) once the
-      # existing findings are cleared.
+      # Keep style and correctness findings blocking now that the baseline is clean.
       - name: Run ruff
         run: ruff check argus
-        continue-on-error: true

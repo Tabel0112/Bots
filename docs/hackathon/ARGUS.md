@@ -19,7 +19,7 @@ Status: **draft, not agreed**. Written 2026-09-12 for Abel's review. Nothing her
 | Component | Owns | Never does |
 | --- | --- | --- |
 | ARGUS controller (Abel) | Run state, stage transitions, budgets, sessions, event stream, the single terminal result; interpretation, gating, planning, dispatch | Interpret pages, act in the browser |
-| Moderator (Thomas) | Report sufficiency, reconciliation across subtasks, synthesis of the final answer | Change budgets, edit validators, promote skills, emit results directly, hold run state |
+| Moderator (Thomas) | Report sufficiency, reconciliation across subtasks, selection and ordering of validated records and fields | Write user-facing prose, change budgets, edit validators, promote skills, emit results directly, hold run state |
 | Subagent | One subtask, using the lent session and the toolbox | Open or close sessions, talk to Ghost, spawn other subagents |
 | Toolbox (Thomas, Tianqi) | Browser actions via Steel, `dom_interpret`, `vision_interpret`, `observe`, `extract` | Hold run state, retry on its own |
 | Ghost (Sting) | `match`, `bind`, `validate`, `compile`, `qualify`, `propose_repair` | Create controllers or browser backends |
@@ -39,7 +39,7 @@ Each stage is a **rule** (plain code, deterministic), a **planner call** (model-
 | 7. Report intake | Rule then moderator call | `WorkerReport` | First a schema check. Then one of `accept`, `verify`, `retry_other_path`, `fail` | See decision rules below |
 | 8. Reconcile | Moderator call, only if more than one subtask | All accepted reports | Merged findings, named gaps and conflicts, and for each one `resolve_from_evidence`, `verify`, or `report_as_gap` | Skipped for single-subtask runs |
 | 9. Validate | Rule via Ghost | Records, evidence, checks | `ValidationReport` passed, failed or inconclusive | The moderator cannot override a failed validation. On failure it may choose one bounded re-exploration or fail the run |
-| 10. Synthesize | Moderator call | Validated records, evidence, typed failures, gaps | Final user answer where every claim cites an evidence reference | Rule check afterwards: no claim without a reference, failures and unverified completeness stated plainly |
+| 10. Synthesize | Moderator call | Validated records, evidence, typed failures, gaps | `AnswerSelection`: validated-record indices in output order, structured claims (selected-record index plus fields), typed notes | The controller derives the final records, renders every answer line and fails the run on any invalid index, field or note subject; moderator prose never reaches the user |
 | 11. Publish | Rule | Final answer, metrics | One terminal result and event; all sessions closed | Also triggers candidate compilation, which cannot erase the task result if it fails |
 
 ## Report intake decision rules
@@ -61,15 +61,15 @@ Thomas implements three callables, plus an optional fourth for live monitoring (
 | --- | --- | --- |
 | `assess_report(subtask, report, success_conditions)` | One schema-valid `WorkerReport`, the subtask's success conditions, evidence references | `ModeratorDecision` with `accept`, `verify`, `retry_other_path` or `fail` |
 | `reconcile(plan, accepted_reports)` | All accepted reports for a multi-subtask run | Merged findings plus a list of gaps and conflicts, each tagged `resolve_from_evidence`, `verify` or `report_as_gap` |
-| `synthesize(request, records, validation, evidence, failures)` | Validated records, the validation report, evidence references and typed failures | Final user answer where every claim carries an evidence reference |
+| `synthesize(request, records, validation, evidence, failures)` | Validated records, the validation report, evidence references and typed failures | `AnswerSelection(record_indices, claims, notes)`. `record_indices` point into the controller's validated input and establish output order; each `Claim(record_index, fields)` points into that selected order; `Note(kind, subject)` uses fixed kinds and a subject checked against the request. No records, evidence refs or prose are returned. The controller renders every user-facing line deterministically from validated data (decided 2026-09-13 after Tianqi's PR #10 review: free prose could assert anything while citing real evidence) |
 
 Optional fourth callable for live monitoring, if Thomas wants the moderator to watch runs rather than only react to reports: `observe_progress(run_snapshot, event)`. The controller calls it on selected events only, such as subtask started, a stalled subtask, or every N actions, never on every action. It returns `continue`, `flag` (ask the controller for an early read-only verification) or `stop_subtask` with a reason. The controller still enforces budgets and still owns cancellation.
 
-The controller runs the rule checks around these calls: schema validation before `assess_report`, the retry and verification caps, and the no-claim-without-evidence check after `synthesize`. Verification requested by the moderator is executed by the controller with the lent session and the read-only interpretation tools.
+The controller runs the rule checks around these calls: schema validation before `assess_report`, the retry and verification caps, and strict selection checks after `synthesize` (record indices are unique and in range; claims cover the selection in order; fields exist and exclude provenance-only fields; each selected record's own observation belongs to the run; note subjects belong to a closed controller-owned set). Known prose-shaped fields are discarded before strict decoding and logged by field path only. Verification requested by the moderator is executed by the controller with the lent session and the read-only interpretation tools.
 
 ## Hard limits on the moderator
 
-- Decisions come from fixed sets. Free text is confined to `reason` fields.
+- Decisions come from fixed sets. Free text is confined to `reason` fields, which are internal (events), never user-facing. The final answer is rendered by the controller from validated records; the moderator selects and orders, it does not write.
 - The moderator cannot change budgets, retry limits, the validator, or the set of supported sites and operations.
 - It cannot promote a candidate skill or mark a run complete. Only the controller writes terminal state.
 - Its inputs are the run's own reports and evidence. It does not browse and does not hold session handles.

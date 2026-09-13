@@ -51,12 +51,13 @@ import shutil
 import tempfile
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from argus.contracts import ContractError
 
-__all__ = ["JsonStore", "SESSION_HANDLE_KEY"]
+__all__ = ["SESSION_HANDLE_KEY", "JsonStore"]
 
 #: The one key that is never written to disk (see the module docstring).
 SESSION_HANDLE_KEY = "session_handle"
@@ -105,7 +106,9 @@ def _as_dict(value: Any, kind: str) -> dict[str, Any]:
         return data
     if isinstance(value, Mapping):
         return copy.deepcopy(dict(value))
-    raise ContractError(f"{kind} must be a message dataclass or a mapping, got {type(value).__name__}")
+    raise ContractError(
+        f"{kind} must be a message dataclass or a mapping, got {type(value).__name__}"
+    )
 
 
 class JsonStore:
@@ -202,9 +205,8 @@ class JsonStore:
             self._write_atomic(path, text)
 
     def _read_json(self, path: Path) -> dict[str, Any]:
-        with self._lock:
-            with path.open(encoding="utf-8") as handle:
-                return json.load(handle)
+        with self._lock, path.open(encoding="utf-8") as handle:
+            return json.load(handle)
 
     @staticmethod
     def _scrub(data: dict[str, Any]) -> dict[str, Any]:
@@ -217,7 +219,8 @@ class JsonStore:
         reports = data.get("reports")
         if isinstance(reports, list):
             data["reports"] = [
-                self._scrub(item) if isinstance(item, dict) else item for item in reports
+                self._scrub(item) if isinstance(item, dict) else item
+                for item in reports
             ]
         return data
 
@@ -228,12 +231,16 @@ class JsonStore:
         except FileNotFoundError:
             return {}
         if not isinstance(data, dict):
-            raise ContractError(f"{self.index_path} is not a request_id -> run_id object")
+            raise ContractError(
+                f"{self.index_path} is not a request_id -> run_id object"
+            )
         return data
 
     # ------------------------------------------------------------------ runs
 
-    def create_run(self, run_id: str, request_id: str, snapshot: dict[str, Any]) -> None:
+    def create_run(
+        self, run_id: str, request_id: str, snapshot: dict[str, Any]
+    ) -> None:
         """Create the run's directories, write the first snapshot, index it.
 
         Raises :class:`ContractError` if the run already exists: a repeated
@@ -269,11 +276,10 @@ class JsonStore:
         line = json.dumps(_as_dict(event, "event"), ensure_ascii=False) + "\n"
         path = self._events_path(run_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock:
-            with open(path, "a", encoding="utf-8") as handle:
-                handle.write(line)
-                handle.flush()
-                os.fsync(handle.fileno())
+        with self._lock, open(path, "a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def save_report(self, run_id: str, report: Any) -> None:
         """Write one worker report, keyed by its ``subtask_id``, handle stripped."""
@@ -285,7 +291,9 @@ class JsonStore:
         name = _segment("subtask_id", subtask_id)
         self._write_json(self.reports_dir(run_id) / f"{name}.json", data)
 
-    def save_evidence_file(self, run_id: str, observation_id: str, source_path: str) -> str:
+    def save_evidence_file(
+        self, run_id: str, observation_id: str, source_path: str
+    ) -> str:
         """Copy an evidence file into the run and return its stored path.
 
         The stored name is the observation ID plus the source's extension, so a
@@ -295,7 +303,9 @@ class JsonStore:
         name = _segment("observation_id", observation_id)
         source = Path(source_path)
         if not source.is_file():
-            raise FileNotFoundError(f"evidence source {str(source_path)!r} is not a file")
+            raise FileNotFoundError(
+                f"evidence source {str(source_path)!r} is not a file"
+            )
         suffix = source.suffix
         if suffix and not name.endswith(suffix):
             name = f"{name}{suffix}"
@@ -340,7 +350,11 @@ class JsonStore:
             versions: list[tuple[tuple[int, tuple[int, ...], str], dict[str, Any]]] = []
             for path in directory.glob("v*.json"):
                 data = self._read_json(path)
-                stated = data.get("version", path.stem[1:]) if isinstance(data, dict) else path.stem[1:]
+                stated = (
+                    data.get("version", path.stem[1:])
+                    if isinstance(data, dict)
+                    else path.stem[1:]
+                )
                 versions.append((_version_sort_key(stated), data))
             versions.sort(key=lambda item: item[0])
             found.extend(data for _, data in versions)

@@ -30,20 +30,37 @@ SALARY = InterpretedRequest.from_dict(load("interpreted_request_open_salary.json
 OPEN_SHAPE = ["title", "company", "url", "salary", "remote"]
 
 
-def open_intent(query="software engineering", domain="jobs.example.com", shape=OPEN_SHAPE):
+def open_intent(
+    query="software engineering", domain="jobs.example.com", shape=OPEN_SHAPE
+):
     return Intent(
-        site_id=domain, operation="find_jobs",
+        site_id=domain,
+        operation="find_jobs",
         parameters={"query": ParameterOrigin(query, "text_span", 0.9, (0, len(query)))},
-        confidence=0.9, kind="open", target_domain=domain, goal="Find jobs",
-        criteria=[Criterion("10", "limit", 10, None, 1.0)], expected_record_shape=list(shape),
+        confidence=0.9,
+        kind="open",
+        target_domain=domain,
+        goal="Find jobs",
+        criteria=[Criterion("10", "limit", 10, None, 1.0)],
+        expected_record_shape=list(shape),
     )
 
 
-def step(subtask_id, intent_index=0, operation="search", depends_on=(), inputs_from=None, **overrides):
+def step(
+    subtask_id,
+    intent_index=0,
+    operation="search",
+    depends_on=(),
+    inputs_from=None,
+    **overrides,
+):
     """One planner step in Plan JSON form (inputs_from as the contract's mapping)."""
     data = {
-        "subtask_id": subtask_id, "intent_index": intent_index, "operation": operation,
-        "depends_on": list(depends_on), "inputs_from": dict(inputs_from or {}),
+        "subtask_id": subtask_id,
+        "intent_index": intent_index,
+        "operation": operation,
+        "depends_on": list(depends_on),
+        "inputs_from": dict(inputs_from or {}),
         "concurrency_group": f"group-{subtask_id}",
         "success_conditions": ["results present or explicit empty state"],
         "preferred_tool": "dom",
@@ -70,20 +87,32 @@ def intent(query, max_price=None, site_id="demo-catalog", operation="search_prod
     if max_price is not None:
         parameters["max_price"] = ParameterOrigin(max_price, "text_span", 0.9, (0, 3))
     parameters["currency"] = ParameterOrigin("USD", "default", 1.0)
-    return Intent(site_id=site_id, operation=operation, parameters=parameters, confidence=0.9)
+    return Intent(
+        site_id=site_id, operation=operation, parameters=parameters, confidence=0.9
+    )
 
 
 def interpreted(*intents, request_id="request-t"):
     return InterpretedRequest(
-        request_id=request_id, raw_text="x", intents=list(intents),
-        model="test", interpreted_at="2026-09-12T00:00:00Z",
+        request_id=request_id,
+        raw_text="x",
+        intents=list(intents),
+        model="test",
+        interpreted_at="2026-09-12T00:00:00Z",
     )
 
 
-def subtask(subtask_id, depends_on=(), operation="search_products", site_id="demo-catalog"):
+def subtask(
+    subtask_id, depends_on=(), operation="search_products", site_id="demo-catalog"
+):
     return Subtask(
-        subtask_id=subtask_id, intent_index=0, site_id=site_id, operation=operation,
-        parameters={"query": "q"}, concurrency_group="g", output_schema_id="product-list.v1",
+        subtask_id=subtask_id,
+        intent_index=0,
+        site_id=site_id,
+        operation=operation,
+        parameters={"query": "q"},
+        concurrency_group="g",
+        output_schema_id="product-list.v1",
         depends_on=list(depends_on),
     )
 
@@ -102,22 +131,33 @@ class PlanTests(unittest.TestCase):
     def test_defaults_are_filled_and_preferred_tool_is_dom(self):
         built = planner.plan(interpreted(intent("mice")), "p")
         [st] = built.subtasks
-        self.assertEqual(st.parameters, {"query": "mice", "currency": "USD", "max_results": 5})
+        self.assertEqual(
+            st.parameters, {"query": "mice", "currency": "USD", "max_results": 5}
+        )
         self.assertEqual(st.preferred_tool, "dom")
         self.assertEqual(st.output_schema_id, "product-list.v1")
-        self.assertEqual(st.success_conditions, list(planner.SUCCESS_CONDITIONS["search_products"]))
+        self.assertEqual(
+            st.success_conditions, list(planner.SUCCESS_CONDITIONS["search_products"])
+        )
         self.assertTrue(built.created_at.endswith("Z"))
 
     def test_independent_intents_get_distinct_groups_and_no_dependencies(self):
-        built = planner.plan(interpreted(intent("mice", 40), intent("keyboards", 120)), "p")
-        self.assertEqual([s.subtask_id for s in built.subtasks], ["subtask-1", "subtask-2"])
+        built = planner.plan(
+            interpreted(intent("mice", 40), intent("keyboards", 120)), "p"
+        )
+        self.assertEqual(
+            [s.subtask_id for s in built.subtasks], ["subtask-1", "subtask-2"]
+        )
         self.assertEqual([s.intent_index for s in built.subtasks], [0, 1])
         self.assertEqual([s.depends_on for s in built.subtasks], [[], []])
-        self.assertEqual([s.concurrency_group for s in built.subtasks], ["group-1", "group-2"])
+        self.assertEqual(
+            [s.concurrency_group for s in built.subtasks], ["group-1", "group-2"]
+        )
 
     def test_intents_sharing_a_supplied_parameter_share_a_group(self):
         built = planner.plan(
-            interpreted(intent("mice", 40), intent("keyboards"), intent("mice", 90)), "p"
+            interpreted(intent("mice", 40), intent("keyboards"), intent("mice", 90)),
+            "p",
         )
         groups = [s.concurrency_group for s in built.subtasks]
         self.assertEqual(groups, ["group-1", "group-2", "group-1"])
@@ -125,7 +165,9 @@ class PlanTests(unittest.TestCase):
     def test_shared_defaults_do_not_group(self):
         """Every search shares currency=USD by default; that must not serialise them."""
         built = planner.plan(interpreted(intent("a"), intent("b")), "p")
-        self.assertNotEqual(built.subtasks[0].concurrency_group, built.subtasks[1].concurrency_group)
+        self.assertNotEqual(
+            built.subtasks[0].concurrency_group, built.subtasks[1].concurrency_group
+        )
 
     def test_plan_is_deterministic(self):
         request = interpreted(intent("a"), intent("b"))
@@ -142,7 +184,9 @@ class PlanTests(unittest.TestCase):
 
 class ValidatePlanTests(unittest.TestCase):
     def test_valid_chain_passes(self):
-        planner.validate_plan(make_plan(subtask("a"), subtask("b", ["a"]), subtask("c", ["a", "b"])))
+        planner.validate_plan(
+            make_plan(subtask("a"), subtask("b", ["a"]), subtask("c", ["a", "b"]))
+        )
 
     def test_duplicate_ids(self):
         with self.assertRaisesRegex(ContractError, "duplicate"):
@@ -158,7 +202,9 @@ class ValidatePlanTests(unittest.TestCase):
 
     def test_cycle(self):
         with self.assertRaisesRegex(ContractError, "cycle"):
-            planner.validate_plan(make_plan(subtask("a", ["c"]), subtask("b", ["a"]), subtask("c", ["b"])))
+            planner.validate_plan(
+                make_plan(subtask("a", ["c"]), subtask("b", ["a"]), subtask("c", ["b"]))
+            )
 
     def test_self_dependency_is_a_cycle(self):
         with self.assertRaisesRegex(ContractError, "cycle"):
@@ -169,7 +215,9 @@ class PlanOpenTests(unittest.TestCase):
     """``plan_open`` through ``plan``: the model owns scheduling and nothing else."""
 
     def plan(self, request, client, **kwargs):
-        return planner.plan(request, "plan-open-t", client=client, created_at="t", **kwargs)
+        return planner.plan(
+            request, "plan-open-t", client=client, created_at="t", **kwargs
+        )
 
     # -- the chain ---------------------------------------------------------
 
@@ -179,7 +227,9 @@ class PlanOpenTests(unittest.TestCase):
         self.assertEqual(built.planned_by, "model")
         self.assertEqual(len(client.calls), 1)
         search, details = built.subtasks
-        self.assertEqual((search.operation, details.operation), ("search", "open_results"))
+        self.assertEqual(
+            (search.operation, details.operation), ("search", "open_results")
+        )
         self.assertEqual(search.depends_on, [])
         self.assertEqual(details.depends_on, ["subtask-open-search"])
         self.assertEqual(
@@ -206,7 +256,10 @@ class PlanOpenTests(unittest.TestCase):
         # The fixture carried its own context; none of it reached the plan.
         fixture_search, fixture_details = CHAIN["subtasks"]
         self.assertNotEqual(built.subtasks[0].goal, fixture_search["goal"])
-        self.assertNotEqual(built.subtasks[1].expected_record_shape, fixture_details["expected_record_shape"])
+        self.assertNotEqual(
+            built.subtasks[1].expected_record_shape,
+            fixture_details["expected_record_shape"],
+        )
         self.assertNotIn("max_results", built.subtasks[0].parameters)
         self.assertEqual(built.caps, {"max_subtasks": 4, "max_depth": 3})
         self.assertEqual(built.request_id, SALARY.request_id)
@@ -273,7 +326,9 @@ class PlanOpenTests(unittest.TestCase):
     # -- rule checks after the call -----------------------------------------
 
     def test_a_dependency_cycle_is_rejected(self):
-        client = FakePlannerClient(payload(step("a", depends_on=["b"]), step("b", depends_on=["a"])))
+        client = FakePlannerClient(
+            payload(step("a", depends_on=["b"]), step("b", depends_on=["a"]))
+        )
         with self.assertRaisesRegex(ContractError, "cycle"):
             self.plan(interpreted(open_intent()), client)
 
@@ -284,21 +339,33 @@ class PlanOpenTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "PLAN_TOO_LARGE")
 
     def test_four_steps_are_within_the_budget(self):
-        built = self.plan(interpreted(open_intent()), FakePlannerClient(payload(*(step(f"s{i}") for i in range(4)))))
+        built = self.plan(
+            interpreted(open_intent()),
+            FakePlannerClient(payload(*(step(f"s{i}") for i in range(4)))),
+        )
         self.assertEqual(len(built.subtasks), 4)
 
     def test_depth_four_is_plan_too_large(self):
-        client = FakePlannerClient(payload(
-            step("a"), step("b", depends_on=["a"]), step("c", depends_on=["b"]), step("d", depends_on=["c"]),
-        ))
+        client = FakePlannerClient(
+            payload(
+                step("a"),
+                step("b", depends_on=["a"]),
+                step("c", depends_on=["b"]),
+                step("d", depends_on=["c"]),
+            )
+        )
         with self.assertRaises(ContractError) as caught:
             self.plan(interpreted(open_intent()), client)
         self.assertEqual(caught.exception.code, "PLAN_TOO_LARGE")
 
     def test_depth_three_is_allowed(self):
-        client = FakePlannerClient(payload(
-            step("a"), step("b", depends_on=["a"]), step("c", depends_on=["b"]),
-        ))
+        client = FakePlannerClient(
+            payload(
+                step("a"),
+                step("b", depends_on=["a"]),
+                step("c", depends_on=["b"]),
+            )
+        )
         self.assertEqual(len(self.plan(interpreted(open_intent()), client).subtasks), 3)
 
     def test_intent_index_must_name_an_accepted_open_intent(self):
@@ -310,16 +377,26 @@ class PlanOpenTests(unittest.TestCase):
                     self.plan(mixed, client)
 
     def test_a_binding_cannot_overwrite_an_accepted_parameter(self):
-        client = FakePlannerClient(payload(
-            step("a"), step("b", depends_on=["a"], inputs_from=bind("query", "a", "url")),
-        ))
+        client = FakePlannerClient(
+            payload(
+                step("a"),
+                step("b", depends_on=["a"], inputs_from=bind("query", "a", "url")),
+            )
+        )
         with self.assertRaisesRegex(ContractError, "cannot overwrite"):
             self.plan(interpreted(open_intent()), client)
 
     def test_a_binding_field_must_be_in_the_source_record_shape(self):
-        client = FakePlannerClient(payload(
-            step("a"), step("b", depends_on=["a"], inputs_from=bind("result_urls", "a", "rating")),
-        ))
+        client = FakePlannerClient(
+            payload(
+                step("a"),
+                step(
+                    "b",
+                    depends_on=["a"],
+                    inputs_from=bind("result_urls", "a", "rating"),
+                ),
+            )
+        )
         with self.assertRaisesRegex(ContractError, "expected_record_shape"):
             self.plan(interpreted(open_intent()), client)
 
@@ -345,11 +422,19 @@ class PlanOpenTests(unittest.TestCase):
         self.assertEqual(registry_task.kind, "registry")
         self.assertEqual(registry_task.intent_index, 0)
         self.assertEqual(registry_task.operation, "search_products")
-        self.assertEqual(registry_task.parameters, {"query": "mice", "max_price": 40, "currency": "USD", "max_results": 5})
-        self.assertEqual(registry_task.success_conditions, list(planner.SUCCESS_CONDITIONS["search_products"]))
+        self.assertEqual(
+            registry_task.parameters,
+            {"query": "mice", "max_price": 40, "currency": "USD", "max_results": 5},
+        )
+        self.assertEqual(
+            registry_task.success_conditions,
+            list(planner.SUCCESS_CONDITIONS["search_products"]),
+        )
         self.assertEqual(open_task.intent_index, 1)
         self.assertEqual(open_task.kind, "open")
-        self.assertNotEqual(registry_task.concurrency_group, open_task.concurrency_group)
+        self.assertNotEqual(
+            registry_task.concurrency_group, open_task.concurrency_group
+        )
 
     def test_a_registry_only_request_never_touches_the_client(self):
         client = FakePlannerClient(CHAIN)

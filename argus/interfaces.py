@@ -10,8 +10,9 @@ Ownership (docs/hackathon/ARGUS.md):
 * :class:`Toolbox` (Thomas, Tianqi) performs browser actions and interprets
   pages.  It holds no run state and never retries on its own.
 * :class:`Moderator` (Thomas) judges reports, reconciles them and writes the
-  final answer.  It returns decisions only; the controller executes them, owns
-  budgets, retry caps, sessions and the terminal result.
+  answer selection.  It returns decisions and structured references only; the
+  controller renders the final answer, owns budgets, retry caps, sessions and
+  the terminal result.
 * :class:`Ghost` (Sting) owns skill meaning: matching, validation and candidate
   compilation.
 
@@ -25,8 +26,8 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from argus.contracts import (
+    AnswerSelection,
     Event,
-    FinalAnswer,
     InterpretedRequest,
     ModeratorDecision,
     Plan,
@@ -36,7 +37,7 @@ from argus.contracts import (
     WorkerReport,
 )
 
-__all__ = ["Toolbox", "Moderator", "ProgressObserver", "Ghost", "Store"]
+__all__ = ["Ghost", "Moderator", "ProgressObserver", "Store", "Toolbox"]
 
 
 @runtime_checkable
@@ -98,8 +99,8 @@ class Moderator(Protocol):
         validation: dict[str, Any],
         evidence: list[str],
         failures: list[TypedError],
-    ) -> FinalAnswer:
-        """Stage 10: write the answer, every claim citing an evidence reference."""
+    ) -> AnswerSelection:
+        """Stage 10: select records, fields and typed notes; return no prose."""
 
 
 @runtime_checkable
@@ -162,9 +163,7 @@ class Ghost(Protocol):
         verification.
         """
 
-    def compile(
-        self, report: WorkerReport, subtask: Subtask
-    ) -> dict[str, Any] | None:
+    def compile(self, report: WorkerReport, subtask: Subtask) -> dict[str, Any] | None:
         """Stage 11: a candidate skill from a successful run, or ``None``.
 
         Candidate compilation is optional; its failure never erases a valid task
@@ -180,7 +179,9 @@ class Store(Protocol):
     this protocol only; session handles must never reach disk.
     """
 
-    def create_run(self, run_id: str, request_id: str, snapshot: dict[str, Any]) -> None: ...
+    def create_run(
+        self, run_id: str, request_id: str, snapshot: dict[str, Any]
+    ) -> None: ...
 
     def save_snapshot(self, run_id: str, snapshot: dict[str, Any]) -> None: ...
 
@@ -188,7 +189,9 @@ class Store(Protocol):
 
     def save_report(self, run_id: str, report: WorkerReport) -> None: ...
 
-    def save_evidence_file(self, run_id: str, observation_id: str, source_path: str) -> str: ...
+    def save_evidence_file(
+        self, run_id: str, observation_id: str, source_path: str
+    ) -> str: ...
 
     def save_skill(self, skill: dict[str, Any]) -> None: ...
 

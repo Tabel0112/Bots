@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import copy
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from argus import registry
@@ -37,9 +37,9 @@ from argus.contracts import ContractError, Intent, InterpretedRequest, Plan, Sub
 from argus.model_client import ModelClient, OpenAICompatibleClient
 
 __all__ = [
-    "SUCCESS_CONDITIONS",
     "DEFAULT_PREFERRED_TOOL",
     "PLAN_MAX_TOKENS",
+    "SUCCESS_CONDITIONS",
     "plan",
     "plan_open",
     "validate_plan",
@@ -65,7 +65,7 @@ DEFAULT_PREFERRED_TOOL = "dom"
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _resolved_parameters(intent: Intent) -> dict[str, Any]:
@@ -90,7 +90,9 @@ def _supplied_parameters(intent: Intent) -> set[tuple[str, Any]]:
 
 
 def _shares_parameters(a: Intent, b: Intent) -> bool:
-    return a.site_id == b.site_id and bool(_supplied_parameters(a) & _supplied_parameters(b))
+    return a.site_id == b.site_id and bool(
+        _supplied_parameters(a) & _supplied_parameters(b)
+    )
 
 
 def _concurrency_groups(intents: list[Intent]) -> list[str]:
@@ -122,8 +124,14 @@ def _concurrency_groups(intents: list[Intent]) -> list[str]:
     return groups
 
 
-def plan(interpreted: InterpretedRequest, plan_id: str, created_at: str | None = None,
-         *, client: ModelClient | None = None, model: str | None = None) -> Plan:
+def plan(
+    interpreted: InterpretedRequest,
+    plan_id: str,
+    created_at: str | None = None,
+    *,
+    client: ModelClient | None = None,
+    model: str | None = None,
+) -> Plan:
     """Build the plan for an accepted request; one subtask per intent.
 
     Raises :class:`ContractError` when an intent names an operation the
@@ -131,7 +139,9 @@ def plan(interpreted: InterpretedRequest, plan_id: str, created_at: str | None =
     make the output fully reproducible.
     """
     if any(intent.kind == "open" for intent in interpreted.intents):
-        return plan_open(interpreted, plan_id, client=client, model=model, created_at=created_at)
+        return plan_open(
+            interpreted, plan_id, client=client, model=model, created_at=created_at
+        )
     intents = list(interpreted.intents)
     for index, intent in enumerate(intents):
         if not registry.site_supports(intent.site_id, intent.operation):
@@ -148,7 +158,9 @@ def plan(interpreted: InterpretedRequest, plan_id: str, created_at: str | None =
             operation=intent.operation,
             parameters=_resolved_parameters(intent),
             concurrency_group=groups[index],
-            output_schema_id=registry.operation_spec(intent.operation)["output_schema_id"],
+            output_schema_id=registry.operation_spec(intent.operation)[
+                "output_schema_id"
+            ],
             depends_on=[],
             success_conditions=list(SUCCESS_CONDITIONS.get(intent.operation, ())),
             preferred_tool=DEFAULT_PREFERRED_TOOL,
@@ -172,7 +184,9 @@ def validate_plan(plan: Plan) -> None:
     seen: set[str] = set()
     for subtask in plan.subtasks:
         if subtask.subtask_id in seen:
-            raise ContractError(f"plan {plan.plan_id}: duplicate subtask_id {subtask.subtask_id!r}")
+            raise ContractError(
+                f"plan {plan.plan_id}: duplicate subtask_id {subtask.subtask_id!r}"
+            )
         seen.add(subtask.subtask_id)
 
     for subtask in plan.subtasks:
@@ -203,8 +217,10 @@ def validate_plan(plan: Plan) -> None:
         if mark == 2:
             return
         if mark == 1:
-            cycle = path[path.index(node):] + [node]
-            raise ContractError(f"plan {plan.plan_id}: dependency cycle {' -> '.join(cycle)}")
+            cycle = path[path.index(node) :] + [node]
+            raise ContractError(
+                f"plan {plan.plan_id}: dependency cycle {' -> '.join(cycle)}"
+            )
         state[node] = 1
         for dependency in edges[node]:
             visit(dependency, path + [node])
@@ -216,10 +232,12 @@ def validate_plan(plan: Plan) -> None:
     positions = {s.subtask_id: i for i, s in enumerate(plan.subtasks)}
     tasks = {s.subtask_id: s for s in plan.subtasks}
     depths: dict[str, int] = {}
+
     def depth(node: str) -> int:
         if node not in depths:
             depths[node] = 1 + max((depth(dep) for dep in edges[node]), default=0)
         return depths[node]
+
     is_open = plan.planned_by == "model" or any(s.kind == "open" for s in plan.subtasks)
     for subtask in plan.subtasks:
         if is_open and depth(subtask.subtask_id) > plan.caps["max_depth"]:
@@ -228,9 +246,14 @@ def validate_plan(plan: Plan) -> None:
             upstream = tasks[source["subtask_id"]]
             if positions[upstream.subtask_id] >= positions[subtask.subtask_id]:
                 raise ContractError("inputs_from requires an earlier subtask")
-            if (source["field"] != "findings" and upstream.kind == "open"
-                    and source["field"] not in upstream.expected_record_shape):
-                raise ContractError("inputs_from field is absent from source expected_record_shape")
+            if (
+                source["field"] != "findings"
+                and upstream.kind == "open"
+                and source["field"] not in upstream.expected_record_shape
+            ):
+                raise ContractError(
+                    "inputs_from field is absent from source expected_record_shape"
+                )
 
 
 _PLAN_MODEL: Any = None
@@ -248,12 +271,15 @@ def _output_model() -> Any:
             code="PRECONDITION_FAILED",
         ) from exc
     from typing import Literal
+
     class Strict(BaseModel):
         model_config = ConfigDict(extra="forbid", strict=True)
+
     class Binding(Strict):
         parameter: str
         subtask_id: str
         field: str
+
     class Step(Strict):
         subtask_id: str
         intent_index: int
@@ -263,14 +289,22 @@ def _output_model() -> Any:
         concurrency_group: str
         success_conditions: list[str]
         preferred_tool: Literal["dom", "vision"]
+
     class Output(Strict):
         subtasks: list[Step]
+
     _PLAN_MODEL = Output
     return Output
 
 
-def plan_open(interpreted: InterpretedRequest, plan_id: str, client: ModelClient | None = None,
-              model: str | None = None, *, created_at: str | None = None) -> Plan:
+def plan_open(
+    interpreted: InterpretedRequest,
+    plan_id: str,
+    client: ModelClient | None = None,
+    model: str | None = None,
+    *,
+    created_at: str | None = None,
+) -> Plan:
     """One bounded model call for open intents; the model owns scheduling only.
 
     ``client`` is a :class:`~argus.model_client.ModelClient`, defaulting to an
@@ -302,16 +336,24 @@ def plan_open(interpreted: InterpretedRequest, plan_id: str, client: ModelClient
     )
     # A refusal is a status, never content: nothing below reads the response.
     if result.status == "refusal":
-        raise ContractError("the model declined to plan this request", code="MODEL_REFUSED")
+        raise ContractError(
+            "the model declined to plan this request", code="MODEL_REFUSED"
+        )
     if result.status != "ok":
-        raise ContractError("the planner response did not complete", code="EXTRACTION_FAILED")
+        raise ContractError(
+            "the planner response did not complete", code="EXTRACTION_FAILED"
+        )
     parsed = result.parsed
     if parsed is None:
-        raise ContractError("the model returned no parsed plan", code="EXTRACTION_FAILED")
+        raise ContractError(
+            "the model returned no parsed plan", code="EXTRACTION_FAILED"
+        )
     try:
         output = schema.model_validate(parsed).model_dump()
     except Exception as exc:
-        raise ContractError("the model returned an invalid plan shape", code="EXTRACTION_FAILED") from exc
+        raise ContractError(
+            "the model returned an invalid plan shape", code="EXTRACTION_FAILED"
+        ) from exc
     tasks: list[Subtask] = []
     for index, intent in enumerate(interpreted.intents):
         if intent.kind == "registry":
@@ -325,28 +367,52 @@ def plan_open(interpreted: InterpretedRequest, plan_id: str, client: ModelClient
     covered: set[int] = set()
     for raw in output["subtasks"]:
         index = raw["intent_index"]
-        if not 0 <= index < len(interpreted.intents) or interpreted.intents[index].kind != "open":
-            raise ContractError("planner intent_index must identify an accepted open intent")
+        if (
+            not 0 <= index < len(interpreted.intents)
+            or interpreted.intents[index].kind != "open"
+        ):
+            raise ContractError(
+                "planner intent_index must identify an accepted open intent"
+            )
         intent = interpreted.intents[index]
         covered.add(index)
         bindings = {}
         for binding in raw.pop("inputs_from"):
             name = binding["parameter"]
             if name in intent.parameters or name in bindings:
-                raise ContractError("inputs_from cannot overwrite an accepted or repeated parameter")
+                raise ContractError(
+                    "inputs_from cannot overwrite an accepted or repeated parameter"
+                )
             bindings[name] = {key: binding[key] for key in ("subtask_id", "field")}
         if not raw["success_conditions"] or not all(raw["success_conditions"]):
             raise ContractError("open steps require success conditions")
-        tasks.append(Subtask(
-            **raw, inputs_from=bindings, kind="open", site_id=intent.site_id,
-            parameters={key: copy.deepcopy(origin.value) for key, origin in intent.parameters.items()},
-            output_schema_id="open-records.v1", target_domain=intent.target_domain,
-            goal=intent.goal, criteria=copy.deepcopy(intent.criteria),
-            expected_record_shape=list(intent.expected_record_shape),
-        ))
-    if covered != {i for i, intent in enumerate(interpreted.intents) if intent.kind == "open"}:
+        tasks.append(
+            Subtask(
+                **raw,
+                inputs_from=bindings,
+                kind="open",
+                site_id=intent.site_id,
+                parameters={
+                    key: copy.deepcopy(origin.value)
+                    for key, origin in intent.parameters.items()
+                },
+                output_schema_id="open-records.v1",
+                target_domain=intent.target_domain,
+                goal=intent.goal,
+                criteria=copy.deepcopy(intent.criteria),
+                expected_record_shape=list(intent.expected_record_shape),
+            )
+        )
+    if covered != {
+        i for i, intent in enumerate(interpreted.intents) if intent.kind == "open"
+    }:
         raise ContractError("planner omitted an accepted open intent")
-    built = Plan(plan_id=plan_id, request_id=interpreted.request_id, subtasks=tasks,
-                 created_at=created_at or _utc_now(), planned_by="model")
+    built = Plan(
+        plan_id=plan_id,
+        request_id=interpreted.request_id,
+        subtasks=tasks,
+        created_at=created_at or _utc_now(),
+        planned_by="model",
+    )
     validate_plan(built)
     return built

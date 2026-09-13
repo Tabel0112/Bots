@@ -19,15 +19,15 @@ from typing import Any
 from argus.contracts import ContractError
 
 __all__ = [
-    "SITES",
-    "OPERATIONS",
     "DOMAIN_POLICY",
-    "operation_spec",
-    "site_supports",
-    "required_parameters",
+    "OPERATIONS",
+    "SITES",
     "defaults",
-    "validate_parameters",
     "domain_allowed",
+    "operation_spec",
+    "required_parameters",
+    "site_supports",
+    "validate_parameters",
 ]
 
 #: Configured sites.  ``origin`` is the only place a run may browse for a site.
@@ -91,8 +91,18 @@ DOMAIN_POLICY: dict[str, Any] = {
         "checkout.stripe.com",
     ),
     "non_public_suffixes": (
-        "localhost", "local", "internal", "lan", "home", "home.arpa",
-        "corp", "intranet", "test", "invalid", "example", "onion",
+        "localhost",
+        "local",
+        "internal",
+        "lan",
+        "home",
+        "home.arpa",
+        "corp",
+        "intranet",
+        "test",
+        "invalid",
+        "example",
+        "onion",
     ),
     "allow_any_other": True,
 }
@@ -135,7 +145,9 @@ def domain_allowed(domain: str) -> tuple[bool, str]:
     if not isinstance(domain, str) or not domain.strip():
         return False, "target domain is required"
     try:
-        normalised = domain.strip().encode("idna").decode("ascii").lower().removesuffix(".")
+        normalised = (
+            domain.strip().encode("idna").decode("ascii").lower().removesuffix(".")
+        )
     except UnicodeError:
         return False, f"target domain {domain!r} is not a valid hostname"
 
@@ -149,7 +161,10 @@ def domain_allowed(domain: str) -> tuple[bool, str]:
         address = None
     if address is not None:
         if not address.is_global or address.is_multicast or address.is_reserved:
-            return False, f"target domain {normalised!r} is blocked: non-public IP address"
+            return (
+                False,
+                f"target domain {normalised!r} is blocked: non-public IP address",
+            )
         if DOMAIN_POLICY["allow_any_other"]:
             return True, f"target domain {normalised!r} is allowed by policy"
         return False, f"target domain {normalised!r} is not on the allowlist"
@@ -165,7 +180,10 @@ def domain_allowed(domain: str) -> tuple[bool, str]:
     # Browsers can reinterpret shortened, integer, octal or hexadecimal IPv4
     # forms, e.g. 127.1 or 0x7f000001.  Never send those to DNS as ordinary names.
     if _NUMERIC_LABEL.fullmatch(normalised.rsplit(".", 1)[-1]):
-        return False, f"target domain {normalised!r} is blocked: ambiguous numeric address"
+        return (
+            False,
+            f"target domain {normalised!r} is blocked: ambiguous numeric address",
+        )
     if "." not in normalised or any(
         normalised == suffix or normalised.endswith(f".{suffix}")
         for suffix in DOMAIN_POLICY["non_public_suffixes"]
