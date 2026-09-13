@@ -25,7 +25,7 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | ARGUS-1 | Task plan, routing and moderator walkthrough | Abel | Researching | Define worker inputs/outputs using INT-1; use samples while workers develop | Not reported |
 | INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
-| DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Needs owner | Allocate remaining deliverables; use evaluation checklist | Not run |
+| DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Building | Interactive dashboard prototype exists; assign an owner and connect it to agreed runtime events and the controlled site | `frontend/dist/`; owner-private Sites v4 deployed with decision-oriented flow chart; simulated data only |
 
 ### GHOST-1 update — 2026-09-12
 
@@ -51,6 +51,19 @@ Contract version + input/output/failure examples: report.json is 0.1-provisional
 Checks run + result: test_parser.py passed; smoke_test.py passed (live Steel: navigate, 1280x800 screenshot, click/scroll/key, DOM element under cursor, network capture); 3-point vision grounding calibration on UI-TARS-1.5-7B Q4 (2/3 within 11px, coords in original pixel space); end-to-end run succeeded on news.ycombinator.com — correct title + points verified against the run's own screenshot, 1 model call, 20s, session replay on Steel dashboard.
 Open issue / needed from / next action: local UI-TARS answers can drift to Chinese without an explicit English instruction (now added); Q4 grounding is ~10-40px on sparse synthetic images — F16 on the 36GB Mac (set UITARS_BASE_URL) is the upgrade path if precision limits real tasks. Next: multi-step task on the controlled site once it exists.
 Receiver + connection check/result: Abel (consume examples/hn-top-story/report.json as the worker-report sample), Sting (same run's actions/evidence as compilation input) — connection checks pending
+```
+
+### DEMO-1 UX prototype update — 2026-09-12
+
+```text
+Task ID / date / status: DEMO-1 / 2026-09-12 / Building
+Artifact, branch/revision or local files: frontend/dist/{index.html,styles.css,app.js}, frontend/README.md; local UX review update on codex/browser-worker-steel; Sites source d651d058e1f677c99e6ee3e5519716ef84bd21c7; owner-private Sites version 4 at https://argus-mission-control.sunyihan666.chatgpt.site
+Module README / usage instructions: frontend/README.md
+Entry point + environment names: frontend/dist/index.html; no environment variables
+Contract version + input/output/failure examples: simulated dashboard data only; no runtime contract connected
+Checks run + result: JavaScript syntax and whitespace passed; browser checks passed for the proof-decision pass route (12 events), failed proof routing into visual recovery and fresh DOM verification (16 events), browser-unavailable retry (13 events), five results, responsive horizontal/vertical graph modes, and 390/820/1100/1440px body bounds. Prior synchronized history/evidence, before/after, pause/resume/cancel, run reopening, proof-link, Paper/Midnight, and keyboard-tab checks remain applicable. Browser console error log empty. Owner-private Sites version 4 deployment succeeded.
+Open issue / needed from / next action: assign a dashboard owner; connect the prototype to agreed ARGUS run events and real evidence without changing its explicit demo/live distinction
+Receiver + connection check/result: no runtime receiver check has run
 ```
 
 ### HTML-1 update — 2026-09-12, PR #7 review
