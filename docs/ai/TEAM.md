@@ -27,7 +27,7 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | MOD-1 | Moderator callables: assess, reconcile, synthesize | Thomas (module) / Sting (adapter, under ARGUS-3) | Building | `moderator/` merged (PR #8) is a run harness, not an `argus.interfaces.Moderator`; P3-MOD reuses its synthesis prompt behind the interface and retires its dispatch. Thomas to confirm that boundary | `moderator/` on main at `eaed4c7`; harness check on Hacker News reported values wrong vs screenshots (see its README) |
 | INT-2 | First connected request with verified result | Sting runs it; Abel reviews | Planned | ARGUS-3 P3-SESSION + P3-DOM + P3-GHOST + P3-MOD, then P3-INT2 with STEEL_API_KEY, OPENAI_API_KEY, ARGUS_MODEL. Read-only decision workflow is finished at this point; execution and boundary handoff (DECISIONS) come after | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
-| DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Unassigned | Needs owner | Allocate remaining deliverables; use evaluation checklist | Not run |
+| DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Tianqi (per Abel's report 2026-09-12; not yet confirmed by Tianqi in this doc) | Building | Controlled site needs two UI versions and a known result set for INT-3 repair and validation; dashboard consumes the ARGUS event stream (`events.jsonl`, `RunResult`) and must label fake runs as samples; use the evaluation checklist | Local, unreported |
 
 ### GHOST-1 update — 2026-09-12
 
