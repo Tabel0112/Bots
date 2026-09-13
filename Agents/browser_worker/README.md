@@ -11,6 +11,13 @@ Canvas without readable DOM results requests visual help after the initial inspe
 The optional request field `visual_fallback_available` now defaults to true; false
 disables fallback. Without `GHOST_API_URL`, the original standalone DOM loop remains.
 
+When a validated exploration is compiled into a Ghost candidate, every `fill`, `select`,
+`click` and `navigate` step records the accessible name of its target and is rejected if
+the target has none. `extract_records` is the exception: it never records a semantic
+target, because replay extracts through the field recipe over the page's record refs,
+and the container the model pointed at is typically a label-less wrapper such as
+`<section id="results">` or a result row whose accessible name is data.
+
 Install from the repository root with `python -m pip install -e '.[test,visual]'`.
 Start Ghost with `python -m ghostapi.api`, then use
 `python -m Agents.browser_worker.ghost_cli --live-steel --request Agents/browser_worker/examples/subtask.json`

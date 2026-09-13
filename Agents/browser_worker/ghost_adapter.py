@@ -162,7 +162,13 @@ def candidate_request(task, site, report, agent_id, worker_kind="dom"):
         obs = observations[step.before_observation_id]
         target, value, parameter = None, None, None
         expected = {"change": a.expected_change}
-        if a.target_ref:
+        # Extraction replays through the field recipe over the page's record refs and
+        # never resolves a semantic target, so the container the model happened to
+        # point at must not become one: it is often a label-less wrapper such as
+        # <section id="results"> (which would fail the name check below and block the
+        # candidate), or a result row whose accessible name is data-dependent (which
+        # would make every changed-input replay fail with TARGET_NOT_FOUND).
+        if a.target_ref and step.action_type != "extract_records":
             element = resolve_element(obs, a.target_ref)
             if not element.name:
                 raise NotCompilable("Coordinate-only or unnamed targets cannot be reused.")
