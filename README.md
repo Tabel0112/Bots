@@ -9,6 +9,49 @@ execution, same-session UI-TARS fallback, candidate saving, explicit qualificati
 semantic replay. The local Chrome/HTTP lifecycle is tested; live Steel/model and
 ARGUS/moderator receiver verification remain pending.
 
+## Run the demo
+
+The recorded demo is ORION Mission Control on the **live runtime**: real public
+websites visited in Steel browser sessions, fresh records each with its source URL and
+observation, no model calls during a run. The three examples read staples.com,
+en.wikivoyage.org and remotive.com. Full guide, expected results and failure modes:
+[docs/hackathon/LIVE-DEMO.md](docs/hackathon/LIVE-DEMO.md).
+
+From the repository root, with `STEEL_API_KEY` in `.env` and no live Steel session open
+(the plan allows one):
+
+1. Ghost registry for the demo, in its own database file:
+
+```bash
+GHOST_DATABASE_PATH=ghostapi/ghost-live.sqlite3 python -m uvicorn ghostapi.api.app:app --host 127.0.0.1 --port 8767
+```
+
+2. Register the three site workflows once (re-running changes nothing):
+
+```bash
+python ghostapi/demo/seed_live_workflows.py --url http://127.0.0.1:8767
+```
+
+3. Mission Control on the live runtime:
+
+```bash
+ARGUS_RUNTIME=scrape ARGUS_STORE=argus-runs/demo-live GHOST_API_URL=http://127.0.0.1:8767 GHOST_DATABASE_PATH=ghostapi/ghost-live.sqlite3 python -m uvicorn argus.api.app:create_app --factory --host 127.0.0.1 --port 4174
+```
+
+4. Open http://127.0.0.1:4174. The sidebar says **Live runtime** and the Ghost Library
+   lists three qualified workflows. Run the Shopping, Travel and Jobs examples one at a
+   time (about 15 to 25 seconds each). Results recorded on 2026-09-13:
+
+| Example | Site | Result |
+| --- | --- | --- |
+| Shopping | staples.com | headphones 149.00 USD and keyboard 49.95 USD, cheapest within each limit |
+| Travel | en.wikivoyage.org | six sourced stops over three days |
+| Jobs | remotive.com | the listings showing a salary range, ranked by salary |
+
+The connected runtime (ARGUS interpreter, DOM worker, Ghost and moderator on the
+controlled catalog) is a separate script in
+[docs/hackathon/DEMO-RUNBOOK.md](docs/hackathon/DEMO-RUNBOOK.md).
+
 ## Run the browser worker
 
 Follow [Agents/browser_worker/README.md](Agents/browser_worker/README.md) for setup, the no-key local demo, real GPT/Steel configuration, API requests, tests, and known limitations. The worker's versioned boundary is `SubtaskRequest` / `SubtaskReport` **0.2**; it does not replace the historical provisional ARGUS contract automatically.
