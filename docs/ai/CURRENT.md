@@ -1,30 +1,46 @@
 # Current checkpoint
 
-Updated: 2026-09-13. **DOM-first worker–Ghost connection implemented locally; live Steel/model verification pending. ARGUS PR #10 includes the structured-publication review correction.** Ghost and visual modules have separate implementation/evidence below. Assignments and receiver handoffs remain in [TEAM.md](TEAM.md).
+Updated: 2026-09-13. **Main stabilization after Sting's direct integration commit `7e28641`.** Abel owns and integrates all repository changes from 2026-09-13 onward (see [DECISIONS.md](DECISIONS.md)). Assignments and receiver handoffs remain in [TEAM.md](TEAM.md).
 
-Mission Control now has a runnable controlled-data integration slice: Shopping,
-Travel Plan and Job Search execute through the real ARGUS controller, dependency
-scheduler, validation and publication boundary; a FastAPI/SSE layer drives the UI
-with controller, Ghost, subagent, worker-action and moderator events. This is not
-a live Steel/model/Ghost receiver check. Setup is in the module READMEs.
-All three scenarios reached passed validation in direct checks; the final focused
-3-test demo/API suite and full 456-test ARGUS suite passed, as did JS syntax, compileall,
-whitespace, API health and HTTP page serving. The local server is running on port
-4173. Browser visual QA remains pending because no computer-use browser was available.
-The follow-up changed the launcher into natural-language routing: example buttons only
-populate text, while backend classification and extraction now choose the domain and
-derive supported parameters/criteria. A live HTTP request for the top two remote
-software-engineering salaries produced a two-step plan and exactly two validated,
-salary-ranked records. This remains deterministic controlled-domain interpretation,
-not a general model interpreter or live website run.
+## State of main, verified 2026-09-13 by Abel
 
-Latest credential smoke check: the user configured Steel/OpenAI keys in ignored `.env`.
-The real Steel adapter created a session, opened `https://example.com/`, observed
-`Example Domain` and five visible elements, and released the session in 4.353 seconds.
-The attempted live-model local catalog demo stopped before any OpenAI call: `.env`
-selects `gpt-5.6-luna` / `low`, while `Settings` only accepts GPT-5.4 / medium or high.
-User settings were preserved. No live visual endpoint is configured; full Steel + model
-and Ghost execution remain unverified.
+Sting pushed `7e28641` directly to `main` without a pull request. It adds `argus/api`
+(FastAPI + SSE), `argus/demo_runtime.py` (controlled fixture runtime), `argus/live_runtime.py`
+(a self-contained Steel/Playwright scraper for three fixed public pages), `ghostapi/api`,
+the worker–Ghost adapters under `Agents/`, and replaces Tianqi's scripted dashboard
+prototype in `frontend/dist/` with an event-driven UI. Verified on the merged tree with
+dependencies installed: ARGUS 456 tests, Ghost API 16 tests, DOM worker 89 tests,
+Ghost-visual handoff 5 tests and the visual parser check all passed. The controlled
+shopping run completed in a browser with 41 events and two fixture records.
+
+That commit also broke CI on `main`: all four ARGUS test jobs failed because
+`argus/requirements.txt` lacked FastAPI and python-dotenv, and the lint job failed with
+11 Ruff errors and 6 unformatted files. The sidebar hard-coded "Live Steel runtime" even in
+`ARGUS_RUNTIME=controlled`, and the keyword router answered unsupported requests with a
+different task (for example "give me the best condo in toronto" produced a Toronto
+sightseeing itinerary because "toronto" alone selected the travel scenario).
+
+The stabilization branch `fix/main-stabilize` (Abel) fixes exactly those points:
+requirements aligned with the Ghost API pins, Ruff clean, runtime label and per-run
+"Fixture data" badge driven by the API, and request classification that requires both an
+intent and a supported subject and otherwise returns HTTP 422 with an inline message.
+Checks run: `python3 -m unittest discover -s argus/tests` **458 tests OK**; `ruff check argus`
+and `ruff format --check argus` clean; `node --check frontend/dist/app.js`; `git diff --check`;
+browser check of the controlled runtime (label, rejection, shopping example). Live Steel mode
+was **not** run by Abel; the live claims below remain Sting's only.
+
+What "integrated" means today: the live path is Sting's private scraper, not the team's
+components. `argus/live_runtime.py` never calls Tianqi's DOM worker (`Agents/browser_worker`)
+or Thomas's visual worker; the moderator is the demo stub and `moderator/` is imported by
+nothing; planning is a fixed `demo_plan` with keyword routing rather than the ARGUS
+interpreter/planner; Ghost is used for lookup only and `compile` returns a placeholder without
+saving a candidate; no model is called; screenshots are IDs without image files. INT-1 is
+unagreed, ARGUS-3 adapters are not started, INT-2/INT-3 have not run, and no connection is
+Integrated. The next real step is ARGUS-3 as described in TEAM.
+
+The remainder of this file is Sting's checkpoint text from `7e28641`, kept for its
+module details; where it says work is "uncommitted on `feat/ghost-api-interactive-demo`",
+that work is now on `main`.
 
 ## Latest user direction
 

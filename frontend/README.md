@@ -28,7 +28,13 @@ salary ranking, and result limit.
 Successful output includes controller-rendered lines, validated records, source
 URLs, and observation IDs. Runs stream live and can be reopened. Cancel requests
 propagate to ARGUS. Unsupported request domains or shopping categories return HTTP
-422 with a clear message; missing runs return 404.
+422 with a clear message shown inline under the form; the request is never rerouted
+to a different task. Missing runs return 404.
+
+The sidebar label comes from `/api/health`: "Live Steel runtime" or "Controlled
+fixture runtime". Runs made in the controlled runtime carry a "Fixture data" badge
+in the run list and on the result panel, so sample data cannot be mistaken for a
+live result.
 
 ## Checks
 

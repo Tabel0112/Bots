@@ -1,6 +1,6 @@
 # Team tasks and project tracking
 
-Updated: 2026-09-13. Four teammates cover the assignments below. HTML-1 has a local implementation handoff; the merged GHOST-1 and VLM-1 status/evidence is preserved. ARGUS PR #10 includes the semantic-provenance correction and awaits CI and re-review.
+Updated: 2026-09-13. Four teammates cover the assignments below. **From 2026-09-13 Abel owns and integrates all repository changes; every change to `main` goes through a pull request reviewed by someone other than its author** (user decision, see [DECISIONS.md](DECISIONS.md)). Sting's direct push `7e28641` predates this rule. ARGUS PR #10 is merged; CI on `main` was red after `7e28641` and is fixed on `fix/main-stabilize`.
 
 | Person | Assigned workstream | Main responsibility | Next useful deliverable |
 | --- | --- | --- | --- |
@@ -28,6 +28,19 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | INT-2 | First connected request with verified result | Sting runs it; Abel reviews | Planned | ARGUS-3 P3-SESSION + P3-DOM + P3-GHOST + P3-MOD, then P3-INT2 with STEEL_API_KEY, OPENAI_API_KEY, ARGUS_MODEL. Read-only decision workflow is finished at this point; execution and boundary handoff (DECISIONS) come after | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
 | DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Tianqi (per Abel's report 2026-09-12; not yet confirmed by Tianqi in this doc) | Building | Controlled site needs two UI versions and a known result set for INT-3 repair and validation; dashboard consumes the ARGUS event stream (`events.jsonl`, `RunResult`) and must label fake runs as samples; use the evaluation checklist | Local, unreported |
+
+### Main stabilization after `7e28641` — 2026-09-13 (Abel)
+
+```text
+Task ID / date / status: STAB-1 / 2026-09-13 / Building (pull request from fix/main-stabilize)
+Artifact, branch/revision or local files: argus/requirements.txt, argus/demo_runtime.py, argus/api/service.py, argus/tests/test_demo_runtime.py, argus/live_runtime.py (lint only), frontend/dist/{index.html,app.js,styles.css}, docs/ai/{CURRENT,TEAM,DECISIONS}.md, argus/README.md, frontend/README.md
+Module README / usage instructions: argus/README.md (Mission Control demo), frontend/README.md
+Entry point + environment names: python -m argus.api; ARGUS_RUNTIME (live default, controlled = offline fixture), STEEL_API_KEY (live only), ARGUS_STORE, GHOST_DATABASE_PATH
+Contract version + input/output/failure examples: unchanged 0.5 controller contracts. New: /api/health.runtime and each run's runtime field ("controlled"/"live", persisted via interpreted.model); unsupported requests such as "give me the best condo in toronto" return HTTP 422 "will not guess" instead of a rerouted Toronto itinerary
+Checks run + result: unittest discover argus/tests 458 OK (Python 3.13.5); ruff check/format --check argus clean; node --check app.js; git diff --check; browser: controlled label shown, condo request rejected inline, shopping example completed with Fixture data badge. Live Steel mode not run by Abel.
+Open issue / needed from / next action: CI on main is red until this merges. Tianqi: the scripted prototype dashboard was replaced by 7e28641 — decide whether anything is restored. Sting: ARGUS-3 adapters (DOM worker via Worker.run, structured moderator, Ghost candidate save) replace the hand-rolled live scraper. FastAPI pins still differ between ghostapi (<0.129) and Agents/browser_worker (==0.141.1); separate CI jobs hide this.
+Receiver + connection check/result: none newly Integrated; this task changes labeling, routing and CI only.
+```
 
 ### DEMO-1 connected controlled runtime - 2026-09-13
 
@@ -270,7 +283,7 @@ The receiver marks **Integrated** only after consuming the artifact successfully
 4. **INT-3: recovery.** On the controlled site, observe the old version's failure, attempt bounded repair, qualify the new version, and demonstrate honest unsupported-change handling.
 5. **DEMO-1: full product.** Once assigned, connect the dashboard and verify the [evaluation scenarios](../hackathon/EVALUATION.md), measured costs, clean-start instructions and backup recording. The UI must distinguish samples from real runs.
 
-Choose one person to integrate branches for each checkpoint; that Git/release role is not assigned yet. Producers prepare their scoped changes, and the integrator records the combined revision. This board does not authorize staging, commits, pushes or releases. Shared-file changes must be coordinated so teammates do not overwrite each other.
+Abel integrates branches for each checkpoint (user decision 2026-09-13). Producers prepare their scoped changes, and the integrator records the combined revision. This board does not authorize staging, commits, pushes or releases. Shared-file changes must be coordinated so teammates do not overwrite each other.
 
 ## Sting — Ghost API
 

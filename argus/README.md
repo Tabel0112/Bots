@@ -31,7 +31,9 @@ Run from the repository root with Python 3.11 or newer:
 python -m argus.api
 ```
 
-Open `http://127.0.0.1:4173`. `STEEL_API_KEY` is required. `ARGUS_STORE`
+Install `argus/requirements.txt` first (FastAPI, Uvicorn, python-dotenv, httpx are
+included and pinned to the Ghost API range). Open `http://127.0.0.1:4173`.
+`STEEL_API_KEY` is required for the default live runtime. `ARGUS_STORE`
 optionally selects the JSON run directory and `GHOST_DATABASE_PATH` selects the
 Ghost registry; defaults are `argus-runs/` and `ghostapi/ghostapi.sqlite3`.
 The API exposes run submission, history,
@@ -41,7 +43,10 @@ The submitted natural-language text selects the Shopping, Travel Plan, or Job Se
 domain and supplies its parameters and criteria. Shopping recognizes headphones and
 keyboards plus their price limits. Travel extracts a one-to-three-day Toronto plan
 and supported interests. Job Search extracts remote, salary ranking, and a result
-limit up to six. Unknown domains and unsupported product categories fail explicitly.
+limit up to six. Routing requires both an intent and a supported subject: a request
+that only mentions Toronto, or only "remote", or an unsupported product, is rejected
+with HTTP 422 and the message "ARGUS could not map this request to a supported demo
+task, so it will not guess". It is never rerouted to a different task.
 
 Shopping creates one subtask per requested category and runs independent searches
 concurrently. Travel and Job Search run research followed by a dependent detail
@@ -55,6 +60,9 @@ instead of producing a conclusion. Unknown scenarios return HTTP 422 and unknown
 runs return 404. Stop the server with Ctrl+C.
 
 `ARGUS_RUNTIME=controlled python -m argus.api` runs the explicit offline fixture.
+`/api/health` reports `runtime`, every run snapshot and list entry carries `runtime`
+(derived from the persisted `interpreted.model`), and Mission Control labels the
+sidebar and each fixture run accordingly.
 The live worker currently uses deterministic read-only DOM extraction and opens a
 fresh worker-owned Steel session per subtask. It does not yet invoke GPT/UI-TARS,
 replay a matched Ghost procedure, save a fully parameterized Ghost candidate, or
