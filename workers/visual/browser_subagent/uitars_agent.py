@@ -138,15 +138,22 @@ class UITarsSubagent:
         return path
 
     def _chat(self, messages):
-        self._model_calls += 1
-        r = self._http.post(f"{self.base_url}/chat/completions", json={
-            "model": self.model,
-            "messages": messages,
-            "temperature": self.temperature,
-            "max_tokens": 512,
-        })
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        last_error = None
+        for attempt in range(3):
+            self._model_calls += 1
+            try:
+                r = self._http.post(f"{self.base_url}/chat/completions", json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": self.temperature,
+                    "max_tokens": 512,
+                })
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"]
+            except (httpx.HTTPStatusError, httpx.TransportError) as e:
+                last_error = e
+                time.sleep(2 * (attempt + 1))
+        raise last_error
 
     def read_value(self, image_b64, question):
         """Ask the reader model to read a value off a magnified crop.

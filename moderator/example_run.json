@@ -1,0 +1,18 @@
+{
+  "schema_version": "0.1-provisional",
+  "request_id": "request-moderator-demo",
+  "task": "Summarize what is currently leading Hacker News: the top story and the most-discussed story visible on the front page.",
+  "budgets": {"per_subtask_timeout_s": 600, "max_parallel": 1},
+  "subtasks": [
+    {
+      "subtask_id": "subtask-top-story",
+      "subtask": "Find the top story on Hacker News and report its exact title and points.",
+      "start_url": "https://news.ycombinator.com"
+    },
+    {
+      "subtask_id": "subtask-most-comments",
+      "subtask": "Look at the Hacker News front page and report the title and comment count of the story with the most comments that you can see.",
+      "start_url": "https://news.ycombinator.com"
+    }
+  ]
+}
