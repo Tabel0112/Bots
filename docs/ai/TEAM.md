@@ -20,7 +20,7 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | --- | --- | --- | --- | --- | --- |
 | INT-1 | Shared example and interface agreement | All four; Abel coordinates ARGUS inputs/outputs | Planned | Walk through one request and agree the checklist below | Not reported |
 | GHOST-1 | Ghost lifecycle and callable boundary | Sting | Building | Connect the fixture boundary to a real worker trace; local demo remains simulated | `ghostapi/` on `feat/ghost-api-interactive-demo`; 12 Python and 5 JavaScript tests passed |
-| VLM-1 | Visual worker example and evidence report | Thomas | Ready to connect | Abel/Sting run the connection check against `workers/visual/examples/hn-top-story/`; align report shape at INT-1 | `workers/visual/`; see update below |
+| VLM-1 | Visual worker example and evidence report | Thomas | Building | Record an interaction-step example (click/type/scroll with semantic targets) that Ghost can compile; align report shape at INT-1 | `workers/visual/` on main (merged as eb3095b); see update below |
 | HTML-1 | HTML/code worker example and evidence report | Tianqi | Building | INT-1 agreement, live GPT/configured Steel task, then receiver checks | `browser_worker/`, tests; `codex/browser-worker-steel` rebased on `b4c9e76`; handoff below |
 | ARGUS-1 | Task plan, routing and moderator walkthrough | Abel | Researching | Define worker inputs/outputs using INT-1; use samples while workers develop | Not reported |
 | INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
@@ -43,14 +43,14 @@ Receiver + connection check/result: Abel/Thomas/Tianqi connection check pending
 ### VLM-1 update — 2026-09-12
 
 ```text
-Task ID / date / status: VLM-1 / 2026-09-12 / Ready to connect
-Artifact, branch/revision or local files: workers/visual/ on main
+Task ID / date / status: VLM-1 / 2026-09-12 / Building
+Artifact, branch/revision or local files: workers/visual/ on main (merged as eb3095b)
 Module README / usage instructions: workers/visual/README.md
 Entry point + environment names: python -m browser_subagent "<subtask>" --url <start>; STEEL_API_KEY (required), UITARS_BASE_URL (default http://127.0.0.1:8080/v1), ANTHROPIC_API_KEY (claude backend only)
-Contract version + input/output/failure examples: report.json is 0.1-provisional, aligned with CONTRACTS v0.1 ActionRecord/RunResult/metrics concepts. Real-browser example: workers/visual/examples/hn-top-story/ (report.json + observation-000.png). Failure handling proven live: a mid-run Steel session timeout produced typed action failures and an honest failed outcome (fast-abort now added); unparseable model output aborts after 3 attempts.
-Checks run + result: test_parser.py passed; smoke_test.py passed (live Steel: navigate, 1280x800 screenshot, click/scroll/key, DOM element under cursor, network capture); 3-point vision grounding calibration on UI-TARS-1.5-7B Q4 (2/3 within 11px, coords in original pixel space); end-to-end run succeeded on news.ycombinator.com — correct title + points verified against the run's own screenshot, 1 model call, 20s, session replay on Steel dashboard.
-Open issue / needed from / next action: local UI-TARS answers can drift to Chinese without an explicit English instruction (now added); Q4 grounding is ~10-40px on sparse synthetic images — F16 on the 36GB Mac (set UITARS_BASE_URL) is the upgrade path if precision limits real tasks. Next: multi-step task on the controlled site once it exists.
-Receiver + connection check/result: Abel (consume examples/hn-top-story/report.json as the worker-report sample), Sting (same run's actions/evidence as compilation input) — connection checks pending
+Contract version + input/output/failure examples: report.json is 0.1-provisional, aligned with CONTRACTS v0.1 ActionRecord/RunResult/metrics concepts. Real-browser observation-only example: workers/visual/examples/hn-top-story/ (navigate -> one model call -> finished(); no interaction steps, semantic_target/findings null, report.json hand-edited to relocate evidence paths). Failure handling proven live: a mid-run Steel session timeout produced typed action failures and an honest failed outcome (fast-abort now added); unparseable model output aborts after 3 attempts.
+Checks run + result: test_parser.py passed (offline, no steel-sdk needed); smoke_test.py passed (live Steel: navigate, 1280x800 screenshot, click/scroll/key, DOM element under cursor, network capture); 3-point vision grounding calibration on UI-TARS-1.5-7B Q4 (2/3 within 11px, coords in original pixel space — rescale removed accordingly); live mousemove probe measured Steel action space = full-window screenshot space at constant (4,87)px offset from page viewport — element_at/semantic_target now corrected by a per-session measured offset; end-to-end run succeeded on news.ycombinator.com — correct title + points verified against the run's own screenshot, 1 model call, 20s, session replay on Steel dashboard.
+Open issue / needed from / next action: record an interaction-step example (click/type/scroll with corrected semantic targets) that Ghost can compile; claude backend untested; F16 on a bigger-GPU workstation (set UITARS_BASE_URL) is the upgrade path if Q4 grounding (~10-40px on sparse synthetic images) limits real tasks.
+Receiver + connection check/result: Abel (consume examples/hn-top-story/report.json as the worker-report sample), Sting (needs the upcoming interaction-step trace for compilation) — connection checks pending
 ```
 
 ### HTML-1 update — 2026-09-12, PR #7 review

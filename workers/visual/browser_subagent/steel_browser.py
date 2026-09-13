@@ -42,6 +42,7 @@ class SteelBrowser:
         self.width = width
         self.height = height
         self.session_timeout_ms = session_timeout_ms
+        self.view_offset = (0, 0)
         self.session = None
         self.network_log = []
         self._pw = None
@@ -54,7 +55,22 @@ class SteelBrowser:
             api_timeout=self.session_timeout_ms,
         )
         self._connect_cdp()
+        self._measure_view_offset()
         return self.session
+
+    def _measure_view_offset(self):
+        # Steel mouse coordinates are in full-window screenshot space; DOM APIs use
+        # page-viewport space. Measure the constant offset once per session.
+        self.view_offset = (0, 0)
+        try:
+            self._page.evaluate("window.__cal=null; addEventListener('mousemove', e => window.__cal=[e.clientX,e.clientY])")
+            self._computer(action="move_mouse", coordinates=[100, 100])
+            time.sleep(0.3)
+            got = self._page.evaluate("window.__cal")
+            if got:
+                self.view_offset = (100 - got[0], 100 - got[1])
+        except Exception:
+            pass
 
     def _connect_cdp(self):
         from playwright.sync_api import sync_playwright
@@ -117,6 +133,7 @@ class SteelBrowser:
         return {"url": self._page.url, "title": self.page_title}
 
     def element_at(self, x, y):
+        x, y = x - self.view_offset[0], y - self.view_offset[1]
         try:
             return self._page.evaluate(
                 """([x, y]) => {
