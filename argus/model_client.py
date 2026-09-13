@@ -233,7 +233,7 @@ class OpenAICompatibleClient:
         try:
             completion = self._sdk.chat.completions.parse(
                 model=self.model,
-                max_tokens=max_tokens,
+                max_completion_tokens=max_tokens,
                 response_format=output_model,
                 messages=[
                     {"role": "system", "content": system},

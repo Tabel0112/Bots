@@ -84,9 +84,13 @@ RANK_QUESTION = (
 #: objects are required wherever the verb has an innocent reading: "pay" needs a
 #: bill, "book" needs a thing booked, "check out" needs a cart, because "jobs
 #: that pay the highest salary" and "check out this page" are not transactions.
+_NOT_A_NOUN_USE = r"(?![\s-]*(?:option|options|page|pages|button|buttons|form|forms|instruction|instructions|flow|screen|screens|link|links|process|prompt|dialog|activity|history|method|methods|step|steps))"
+
 _ACTION_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("a login", r"\b(?:log|sign)[\s-]?(?:in|into|on)\b"),
-    ("a login", r"\b(?:log-?in|sign-?in|authenticate|re-?authenticate)\b"),
+    # A trailing noun ("sign-in options", "login page") is a thing to read
+    # about, not an action to perform, so it does not fire.
+    ("a login", r"\b(?:log|sign)[\s-]?(?:in|into|on)\b" + _NOT_A_NOUN_USE),
+    ("a login", r"\b(?:log-?in|sign-?in|authenticate|re-?authenticate)\b" + _NOT_A_NOUN_USE),
     (
         "an account creation",
         r"\b(?:creat\w+|register|registering|sign[\s-]?up|open|opening)\b"
@@ -112,7 +116,7 @@ _ACTION_PATTERNS: tuple[tuple[str, str], ...] = (
     (
         "a purchase",
         r"\b(?:book|books|booking|booked|reserve|reserves|reserving|reserved|"
-        r"rent|renting|rented)\s+(?:a|an|the|my|our|\d+)\s",
+        r"rent|renting|rented)\s+(?:(?:me|us)\s+)?(?:a|an|the|my|our|\d+)\s",
     ),
     ("a purchase", r"\b(?:subscribe|subscribes|subscribing|subscribed)\s+to\b"),
     ("a checkout", r"\bcheckout\b"),
@@ -402,7 +406,29 @@ def _open_rules(
     intents: list[tuple[int, Any]],
     total: int,
 ) -> GateDecision | None:
-    """Apply S1 to S5 to the open intents, or return ``None`` if all pass."""
+    """Apply the open rules in order S5, S1, S2, S3, S4 (rejections for a
+    requested action come before any clarification), or return ``None``."""
+    # S5 - the wording asks for an action a read-only run never performs. Both
+    # the goal and the request text are checked, because either can carry it.
+    for index, intent in intents:
+        for source, text in (("goal", intent.goal), ("request", interpreted.raw_text)):
+            found = _requested_action(text)
+            if found is None:
+                continue
+            action, phrase = found
+            return GateDecision(
+                decision="reject",
+                rule_id="S5",
+                reason=(
+                    f"The {source} asks ARGUS to perform {action} "
+                    f"({phrase!r}), which a read-only run never does "
+                    "(ACTION_CLASS_NOT_ALLOWED). Reading or searching public "
+                    "documentation about it is allowed, so ask for that "
+                    "instead if that is what you meant."
+                    + _suffix(index, total)
+                ),
+            )
+
     # S1 - nothing to browse. The interpreter never invents a domain, so this is
     # a question, not a failure.
     for index, intent in intents:
@@ -470,26 +496,6 @@ def _open_rules(
                 questions=[RANK_QUESTION.format(text=criterion.text)],
             )
 
-    # S5 - the wording asks for an action a read-only run never performs. Both
-    # the goal and the request text are checked, because either can carry it.
-    for index, intent in intents:
-        for source, text in (("goal", intent.goal), ("request", interpreted.raw_text)):
-            found = _requested_action(text)
-            if found is None:
-                continue
-            action, phrase = found
-            return GateDecision(
-                decision="reject",
-                rule_id="S5",
-                reason=(
-                    f"The {source} asks ARGUS to perform {action} "
-                    f"({phrase!r}), which a read-only run never does "
-                    "(ACTION_CLASS_NOT_ALLOWED). Reading or searching public "
-                    "documentation about it is allowed, so ask for that "
-                    "instead if that is what you meant."
-                    + _suffix(index, total)
-                ),
-            )
     return None
 
 

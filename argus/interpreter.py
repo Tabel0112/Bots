@@ -163,6 +163,9 @@ def system_prompt() -> str:
             "never select a suggested clarification example for the user. "
             "Criteria parameter holds its resolved scalar value or null. "
             "Registry intents use null open context and empty criteria/shape.",
+            "10. expected_record_shape lists field names as short snake_case "
+            "identifiers without spaces (title, company, url, salary, remote, "
+            "points), one per field a record should carry; never sentences.",
         ]
     )
     return "\n".join(lines)

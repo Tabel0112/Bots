@@ -164,7 +164,7 @@ class ParseJsonTests(unittest.TestCase):
         self.assertEqual(len(sdk.calls), 1)
         sent = sdk.calls[0]
         self.assertEqual(sent["model"], "test-model-1")
-        self.assertEqual(sent["max_tokens"], 99)
+        self.assertEqual(sent["max_completion_tokens"], 99)
         # Structured output by schema, not by asking nicely in prose.
         self.assertIs(sent["response_format"], Answer)
         self.assertEqual(

@@ -53,6 +53,7 @@ runs the catalog rules first.
 
 | Rule | Decision | Fires when |
 | --- | --- | --- |
+| S5 (checked first) | reject | the wording asks ARGUS to perform a login, payment, purchase, booking or state-changing submission (`ACTION_CLASS_NOT_ALLOWED`); rejections run before any clarification |
 | S1 | clarify | the open intent has no `target_domain`; the question asks which site to use |
 | S2 | reject | `registry.domain_allowed` says no; the reason is the policy's own and the run fails with `DOMAIN_NOT_ALLOWED` |
 | S3 | clarify | the goal is missing or blank, so there is nothing to look for or validate |

@@ -524,14 +524,32 @@ class GateTest(unittest.TestCase):
         )
         self.assertDecision(decision, "accept", "S0")
 
-    def test_s4_runs_before_s5(self):
+    def test_s5_runs_before_s4(self):
         decision = gate(
             interpreted(
                 [open_intent(criteria=[criterion("best", "rank", confidence=0.3)])],
                 raw_text="Log in to jobs.example.com and find the best jobs",
             )
         )
-        self.assertDecision(decision, "clarify", "S4")
+        self.assertDecision(decision, "reject", "S5")
+
+    def test_s5_runs_before_s1_when_no_site_is_named(self):
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain=None, goal="Log in to the user's bank and download their statements.")],
+                raw_text="Log in to my bank and download my statements",
+            )
+        )
+        self.assertDecision(decision, "reject", "S5")
+
+    def test_s5_catches_book_me_a_table(self):
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain=None, goal="Book a table")],
+                raw_text="Book me a table for two tonight",
+            )
+        )
+        self.assertDecision(decision, "reject", "S5")
 
     # -- S5: actions a read-only run never performs ------------------------- #
 
