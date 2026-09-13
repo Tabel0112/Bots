@@ -1,0 +1,76 @@
+{
+  "schema_version": "0.1-provisional",
+  "run_id": "request-moderator-demo",
+  "task": "Summarize what is currently leading Hacker News: the top story and the most-discussed story visible on the front page.",
+  "status": "succeeded",
+  "workers_completed": true,
+  "validation": {
+    "status": "inconclusive",
+    "validator_id": null,
+    "reason": "no independent validator configured; worker-reported values are unverified (a VLM can misread values it looks at)",
+    "checks": []
+  },
+  "subtasks": [
+    {
+      "subtask_id": "subtask-top-story",
+      "subtask": "Find the top story on Hacker News and report its exact title and points.",
+      "outcome": "succeeded",
+      "summary": "The top story is the one with the title \"LG denies TV spying claims, says tracking and snooping concerns 'not true'\" and it has 162 points.",
+      "findings": null,
+      "evidence": {
+        "session_id": "20a09f86-9083-4524-b21b-cd4cc9e31364",
+        "session_replay_url": "https://app.steel.dev/sessions/20a09f86-9083-4524-b21b-cd4cc9e31364",
+        "screenshots": [
+          "C:\\Users\\Thomas\\Desktop\\uoftxloohack\\Bots\\moderator\\runs\\request-moderator-demo\\subtask-top-story\\steps\\000.png"
+        ],
+        "network_requests": [
+          {
+            "type": "network",
+            "ts": 1789241814.3871076,
+            "method": "GET",
+            "url": "https://news.ycombinator.com/",
+            "status": 200,
+            "resource_type": "document",
+            "post_data": null
+          }
+        ],
+        "trace_file": "C:\\Users\\Thomas\\Desktop\\uoftxloohack\\Bots\\moderator\\runs\\request-moderator-demo\\subtask-top-story\\trace.jsonl"
+      }
+    },
+    {
+      "subtask_id": "subtask-most-comments",
+      "subtask": "Look at the Hacker News front page and report the title and comment count of the story with the most comments that you can see.",
+      "outcome": "succeeded",
+      "summary": "The article titled \"We must pace the frontier\" has the highest number of comments, with a total of 430 comments.",
+      "findings": null,
+      "evidence": {
+        "session_id": "bc562e90-2d9f-4854-adfc-4c98b5052a7c",
+        "session_replay_url": "https://app.steel.dev/sessions/bc562e90-2d9f-4854-adfc-4c98b5052a7c",
+        "screenshots": [
+          "C:\\Users\\Thomas\\Desktop\\uoftxloohack\\Bots\\moderator\\runs\\request-moderator-demo\\subtask-most-comments\\steps\\000.png"
+        ],
+        "network_requests": [
+          {
+            "type": "network",
+            "ts": 1789241827.5100372,
+            "method": "GET",
+            "url": "https://news.ycombinator.com/",
+            "status": 200,
+            "resource_type": "document",
+            "post_data": null
+          }
+        ],
+        "trace_file": "C:\\Users\\Thomas\\Desktop\\uoftxloohack\\Bots\\moderator\\runs\\request-moderator-demo\\subtask-most-comments\\trace.jsonl"
+      }
+    }
+  ],
+  "failures": [],
+  "metrics": {
+    "elapsed_ms": 21915,
+    "browser_action_count": 2,
+    "model_call_count": 2
+  },
+  "final_answer": "- **Top story:** “LG denies TV spying claims, says tracking and snooping concerns ‘not true’” — **162 points**\n- **Most discussed:** “We must pace the frontier” — **430 comments**\n\nThese figures are worker-reported from screenshots and remain unverified.",
+  "synthesized_by": "gpt-5.6-sol",
+  "_note": "Committed example of a real two-subtask moderated run. Worker-reported values are UNVERIFIED and known to be wrong (top-story points misread; most-comments story not the true maximum) - see moderator/README.md harness-check finding. Kept as-is because it is real run output."
+}

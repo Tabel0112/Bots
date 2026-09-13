@@ -10,8 +10,6 @@ import time
 
 import httpx
 
-from .steel_browser import SteelBrowser
-
 DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1"
 MAX_IMAGES_IN_CONTEXT = 4
 
@@ -32,12 +30,15 @@ hotkey(key='')
 type(content='') #If you want to submit your input, use "\\n" at the end of `content`.
 scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left')
 open_url(url='') #Navigate the browser directly to a URL.
+zoom(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x2,y2)<|box_end|>') #Magnify the rectangle from corner (x1,y1) to corner (x2,y2) to read small text exactly.
 wait() #Sleep for 5s and take a screenshot to check for any changes.
 finished(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format.
 
 ## Note
 - Use English in `Thought` part and in `finished(content=...)`.
 - Write a small plan and finally summarize your next action (with its target element) in one sentence in `Thought` part.
+- Small text is unreliable at full-page scale: before reporting any exact number or exact small text, zoom() into its region and read it from the magnified view.
+- Coordinates in your actions ALWAYS refer to the full-page screenshot, never to a magnified zoom view.
 
 ## User Instruction
 {instruction}"""
@@ -101,8 +102,13 @@ def extract_thought(text):
 
 class UITarsSubagent:
     def __init__(self, base_url=None, model="ui-tars", max_steps=40, log_dir=None,
-                 width=1280, height=800, temperature=0.0):
+                 width=1280, height=800, temperature=0.0, reader_url=None, reader_model="reader"):
         self.base_url = (base_url or os.environ.get("UITARS_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
+        # Optional second endpoint used only to read exact values off a magnified crop.
+        # Measured: a 72B reader is perfect there where the 7B driver is not.
+        reader = reader_url or os.environ.get("READER_BASE_URL")
+        self.reader_url = reader.rstrip("/") if reader else None
+        self.reader_model = reader_model
         self.model = model
         self.max_steps = max_steps
         self.log_dir = log_dir or os.path.join("runs", str(int(time.time())))
@@ -110,9 +116,6 @@ class UITarsSubagent:
         self.height = height
         self.temperature = temperature
         self._trace = None
-        rh, rw = smart_resize(height, width)
-        self.sx = width / rw
-        self.sy = height / rh
         self._http = httpx.Client(timeout=300)
 
     def _log(self, record):
@@ -135,19 +138,52 @@ class UITarsSubagent:
         return path
 
     def _chat(self, messages):
-        self._model_calls += 1
-        r = self._http.post(f"{self.base_url}/chat/completions", json={
-            "model": self.model,
-            "messages": messages,
-            "temperature": self.temperature,
-            "max_tokens": 512,
-        })
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        last_error = None
+        for attempt in range(3):
+            self._model_calls += 1
+            try:
+                r = self._http.post(f"{self.base_url}/chat/completions", json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": self.temperature,
+                    "max_tokens": 512,
+                })
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"]
+            except (httpx.HTTPStatusError, httpx.TransportError) as e:
+                last_error = e
+                time.sleep(2 * (attempt + 1))
+        raise last_error
+
+    def read_value(self, image_b64, question):
+        """Ask the reader model to read a value off a magnified crop.
+
+        `question` must be a targeted question, not a free-form transcription request:
+        Holo1.5 answers "...how many points does it have? Answer with the number only"
+        accurately (12/12 magnified at 72B) but hallucinates on "transcribe this image".
+
+        Returns None when no reader endpoint is configured or the call fails -- the
+        driver still sees the magnified image either way."""
+        if not self.reader_url:
+            return None
+        try:
+            r = self._http.post(f"{self.reader_url}/chat/completions", json={
+                "model": self.reader_model, "temperature": 0.0, "max_tokens": 128,
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": question},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                ]}],
+            })
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"].strip()
+        except Exception:
+            return None
 
     def _scale(self, x, y):
-        return (max(0, min(self.width - 1, round(x * self.sx))),
-                max(0, min(self.height - 1, round(y * self.sy))))
+        # UI-TARS-1.5 coordinates arrive in raw screenshot pixel space (verified by
+        # 3-point calibration); clamp only, no smart_resize ratio.
+        return (max(0, min(self.width - 1, round(x))),
+                max(0, min(self.height - 1, round(y))))
 
     @staticmethod
     def _img_content(b64):
@@ -167,6 +203,8 @@ class UITarsSubagent:
                             msg["content"].append({"type": "text", "text": "(screenshot pruned)"})
 
     def run(self, subtask, start_url=None):
+        from .steel_browser import SteelBrowser
+
         os.makedirs(os.path.join(self.log_dir, "steps"), exist_ok=True)
         self._trace = open(os.path.join(self.log_dir, "trace.jsonl"), "a", encoding="utf-8")
         browser = SteelBrowser(width=self.width, height=self.height)
@@ -271,6 +309,21 @@ class UITarsSubagent:
                             inp["coordinate"] = list(self._scale(*_parse_coords(kw["start_box"])))
                         entry["action"]["input"] = inp
                         _, shot = browser.execute("scroll", inp)
+                    elif name == "zoom":
+                        x0, y0 = self._scale(*_parse_coords(kw["start_box"]))
+                        x1, y1 = self._scale(*_parse_coords(kw["end_box"]))
+                        entry["action"]["input"] = {"region": [x0, y0, x1, y1]}
+                        shot = browser.zoom_b64([x0, y0, x1, y1])
+                        feedback.append(
+                            f"magnified view of region ({x0},{y0})-({x1},{y1}); "
+                            "action coordinates must still refer to the full-page screenshot")
+                        reading = self.read_value(
+                            shot,
+                            f"This is a magnified region of a web page. {subtask.rstrip()} "
+                            "Answer using only what is visible in this image.")
+                        if reading:
+                            entry["reader_answer"] = reading
+                            feedback.append(f"A dedicated reader model reads it as: {reading}")
                     elif name == "open_url":
                         nav = browser.navigate(str(kw.get("url", "")))
                         entry["title"] = nav["title"]

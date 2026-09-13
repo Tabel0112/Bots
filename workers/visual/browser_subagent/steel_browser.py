@@ -42,6 +42,7 @@ class SteelBrowser:
         self.width = width
         self.height = height
         self.session_timeout_ms = session_timeout_ms
+        self.view_offset = (0, 0)
         self.session = None
         self.network_log = []
         self._pw = None
@@ -54,7 +55,22 @@ class SteelBrowser:
             api_timeout=self.session_timeout_ms,
         )
         self._connect_cdp()
+        self._measure_view_offset()
         return self.session
+
+    def _measure_view_offset(self):
+        # Steel mouse coordinates are in full-window screenshot space; DOM APIs use
+        # page-viewport space. Measure the constant offset once per session.
+        self.view_offset = (0, 0)
+        try:
+            self._page.evaluate("window.__cal=null; addEventListener('mousemove', e => window.__cal=[e.clientX,e.clientY])")
+            self._computer(action="move_mouse", coordinates=[100, 100])
+            time.sleep(0.3)
+            got = self._page.evaluate("window.__cal")
+            if got:
+                self.view_offset = (100 - got[0], 100 - got[1])
+        except Exception:
+            pass
 
     def _connect_cdp(self):
         from playwright.sync_api import sync_playwright
@@ -117,6 +133,7 @@ class SteelBrowser:
         return {"url": self._page.url, "title": self.page_title}
 
     def element_at(self, x, y):
+        x, y = x - self.view_offset[0], y - self.view_offset[1]
         try:
             return self._page.evaluate(
                 """([x, y]) => {
@@ -154,11 +171,25 @@ class SteelBrowser:
         resp = self._computer(action="take_screenshot")
         return resp.base64_image
 
-    def zoom_b64(self, region):
+    def zoom_b64(self, region, min_side=24):
         full = self.screenshot_b64()
         img = Image.open(io.BytesIO(base64.b64decode(full)))
         x0, y0, x1, y1 = [int(v) for v in region]
+        x0, x1 = sorted((x0, x1))
+        y0, y1 = sorted((y0, y1))
+        # Models often describe a region as a line rather than a box (UI-TARS-72B did
+        # this in 3/12 trials, e.g. (54,288)-(231,286)). Grow such a region about its
+        # centre instead of failing on an empty crop.
+        if x1 - x0 < min_side:
+            c = (x0 + x1) // 2
+            x0, x1 = c - min_side // 2, c + min_side // 2
+        if y1 - y0 < min_side:
+            c = (y0 + y1) // 2
+            y0, y1 = c - min_side // 2, c + min_side // 2
         crop = img.crop((max(0, x0), max(0, y0), min(img.width, x1), min(img.height, y1)))
+        if crop.width and crop.width < 800:
+            factor = min(4, max(2, round(800 / crop.width)))
+            crop = crop.resize((crop.width * factor, crop.height * factor), Image.LANCZOS)
         buf = io.BytesIO()
         crop.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode()

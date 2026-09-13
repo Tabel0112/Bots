@@ -1,0 +1,202 @@
+{
+  "label": "holo-7b",
+  "image_sha256_16": "b14cd50b98539225",
+  "summary": {
+    "full_page": "11/12",
+    "magnified": "12/12"
+  },
+  "rows": [
+    {
+      "title": "Make your first edit to OpenStreetMap",
+      "view": "full_page",
+      "expected": 128,
+      "got": 128,
+      "correct": true,
+      "raw": "128"
+    },
+    {
+      "title": "Make your first edit to OpenStreetMap",
+      "view": "magnified",
+      "expected": 128,
+      "got": 128,
+      "correct": true,
+      "raw": "128"
+    },
+    {
+      "title": "LG denies TV spying claims about tracking",
+      "view": "full_page",
+      "expected": 212,
+      "got": 212,
+      "correct": true,
+      "raw": "212"
+    },
+    {
+      "title": "LG denies TV spying claims about tracking",
+      "view": "magnified",
+      "expected": 212,
+      "got": 212,
+      "correct": true,
+      "raw": "212"
+    },
+    {
+      "title": "Nvidia is the central bank of AI",
+      "view": "full_page",
+      "expected": 229,
+      "got": 229,
+      "correct": true,
+      "raw": "229"
+    },
+    {
+      "title": "Nvidia is the central bank of AI",
+      "view": "magnified",
+      "expected": 229,
+      "got": 229,
+      "correct": true,
+      "raw": "229"
+    },
+    {
+      "title": "Will There Be a 7G?",
+      "view": "full_page",
+      "expected": 45,
+      "got": 45,
+      "correct": true,
+      "raw": "45"
+    },
+    {
+      "title": "Will There Be a 7G?",
+      "view": "magnified",
+      "expected": 45,
+      "got": 45,
+      "correct": true,
+      "raw": "45"
+    },
+    {
+      "title": "An open letter to Dario on open weights",
+      "view": "full_page",
+      "expected": 105,
+      "got": 105,
+      "correct": true,
+      "raw": "105"
+    },
+    {
+      "title": "An open letter to Dario on open weights",
+      "view": "magnified",
+      "expected": 105,
+      "got": 105,
+      "correct": true,
+      "raw": "105"
+    },
+    {
+      "title": "Stabilizing Rust's Never Type",
+      "view": "full_page",
+      "expected": 21,
+      "got": 21,
+      "correct": true,
+      "raw": "21"
+    },
+    {
+      "title": "Stabilizing Rust's Never Type",
+      "view": "magnified",
+      "expected": 21,
+      "got": 21,
+      "correct": true,
+      "raw": "21"
+    },
+    {
+      "title": "We must pace the frontier",
+      "view": "full_page",
+      "expected": 345,
+      "got": 345,
+      "correct": true,
+      "raw": "345"
+    },
+    {
+      "title": "We must pace the frontier",
+      "view": "magnified",
+      "expected": 345,
+      "got": 345,
+      "correct": true,
+      "raw": "345"
+    },
+    {
+      "title": "Microcode in Intel's 8087 floating-point chip",
+      "view": "full_page",
+      "expected": 55,
+      "got": 55,
+      "correct": true,
+      "raw": "55"
+    },
+    {
+      "title": "Microcode in Intel's 8087 floating-point chip",
+      "view": "magnified",
+      "expected": 55,
+      "got": 55,
+      "correct": true,
+      "raw": "55"
+    },
+    {
+      "title": "IKEA made a mod for Skyrim",
+      "view": "full_page",
+      "expected": 486,
+      "got": 486,
+      "correct": true,
+      "raw": "486"
+    },
+    {
+      "title": "IKEA made a mod for Skyrim",
+      "view": "magnified",
+      "expected": 486,
+      "got": 486,
+      "correct": true,
+      "raw": "486"
+    },
+    {
+      "title": "Google's anti-scraping update",
+      "view": "full_page",
+      "expected": 582,
+      "got": 582,
+      "correct": true,
+      "raw": "582"
+    },
+    {
+      "title": "Google's anti-scraping update",
+      "view": "magnified",
+      "expected": 582,
+      "got": 582,
+      "correct": true,
+      "raw": "582"
+    },
+    {
+      "title": "A build visualizer for compile times",
+      "view": "full_page",
+      "expected": 31,
+      "got": 11,
+      "correct": false,
+      "raw": "11"
+    },
+    {
+      "title": "A build visualizer for compile times",
+      "view": "magnified",
+      "expected": 31,
+      "got": 31,
+      "correct": true,
+      "raw": "31"
+    },
+    {
+      "title": "A Mathematical Framework for Transformers",
+      "view": "full_page",
+      "expected": 58,
+      "got": 58,
+      "correct": true,
+      "raw": "58"
+    },
+    {
+      "title": "A Mathematical Framework for Transformers",
+      "view": "magnified",
+      "expected": 58,
+      "got": 58,
+      "correct": true,
+      "raw": "58"
+    }
+  ]
+}

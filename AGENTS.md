@@ -2,7 +2,7 @@
 
 Read [docs/ai/README.md](docs/ai/README.md) and [docs/ai/CURRENT.md](docs/ai/CURRENT.md) before project work. Then read only the topic files needed for the user's task.
 
-ARGUS + Ghost API is currently in planning/research. The synthetic implementation is provisional. Confirmed workstream assignments and tasks are in [TEAM.md](docs/ai/TEAM.md). Backlogs and implementation examples are context, not a request to resume coding.
+ARGUS + Ghost API remains partly in planning/research. On 2026-09-12 the user explicitly authorized implementing the DOM browser worker; its actual usage and limitations are in [browser_worker/README.md](browser_worker/README.md). The older synthetic implementation is provisional. Confirmed workstream assignments and tasks are in [TEAM.md](docs/ai/TEAM.md). Backlogs and implementation examples are context, not a request to resume unrelated coding.
 
 Follow the user's current request. Preserve unrelated work and distinguish proposals, implemented behavior and checks actually run. At a meaningful checkpoint, update the relevant context file so the next AI can continue without the conversation. Keep personal AI-tool preferences outside project instructions.
 
