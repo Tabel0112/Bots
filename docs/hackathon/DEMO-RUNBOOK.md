@@ -11,6 +11,10 @@ the morning of 2026-09-14 (explore 43 s, reuse 34 s with 0 worker model calls, t
 categories 49 s with 40 checks, Wikipedia 101 s with five correct articles). Run ids
 are in the ARGUS-3 and OW-1 blocks of [TEAM.md](../ai/TEAM.md). Nothing else is claimed.
 
+The recorded demo runs the **live runtime** on public websites instead; its setup and
+results are in [LIVE-DEMO.md](LIVE-DEMO.md). The connected-runtime script below is
+unchanged.
+
 ## Before the demo (20 minutes, one person)
 
 1. Checkout: `main` after PR #17 merges, or `feat/argus-3-followups`. `.env` must hold
