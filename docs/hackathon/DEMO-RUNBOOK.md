@@ -94,6 +94,7 @@ guessing. Stop there or answer "lowest listed price" and show the site-access fa
 | Run ends `needs_input` | The gate asked a question; answer it in the box under the result and the follow-up runs. |
 | Sidebar says a different runtime, or health lists problems | The API started without its environment; fix the variables and restart terminal 2. |
 | Reuse explores instead of replaying | The registry has no qualified skill (wrong database or fresh copy). Recreate it below. |
+| Prompt 1 succeeds but no candidate is saved (the worker report's `evidence.ghost` says `candidate_skipped: "Coordinate-only or unnamed targets cannot be reused."`) | The model pointed `extract_records` at the label-less `<section id="results">`, which has no accessible name. Fixed on `fix/extract-candidate-unnamed-container` (extraction steps no longer record a semantic target); on older code each prompt-1 run is a fresh sample, so rerun it. Seen on 2026-09-13: one of two runs. |
 | Open-world run fails with "site access" | The site blocks automation. Use the Wikipedia prompt. |
 
 ## Recreate the qualified skill (about 3 minutes)
