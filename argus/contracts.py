@@ -104,7 +104,7 @@ ERROR_CODES = (
 )
 
 #: Where a parameter value came from.
-PARAMETER_SOURCES = ("text_span", "default", "structured")
+PARAMETER_SOURCES = ("text_span", "default", "structured", "suggested")
 
 #: Whether an intent or subtask uses a qualified registry operation or an
 #: open-world navigation path.

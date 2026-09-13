@@ -1,0 +1,22 @@
+{
+  "schema_version": "0.2",
+  "request_id": "request-open-1",
+  "run_id": "run-open-1",
+  "subtask_id": "open-search-1",
+  "objective": "Search example.com for public examples and return visible results.",
+  "site_id": "open:example.com",
+  "operation": "open_search",
+  "start_url": "https://example.com/",
+  "session": {"ownership": "worker"},
+  "parameters": {"query": "public examples"},
+  "output_schema_id": "open-records.v1",
+  "success_conditions": [],
+  "allowed_actions": ["navigate", "fill", "select", "click", "wait_for", "inspect_element", "extract_records", "report_success", "report_failure", "request_visual_fallback"],
+  "allowed_domains": ["example.com", "www.example.com"],
+  "allowed_url_patterns": ["https://example.com/*", "https://www.example.com/*"],
+  "budgets": {"max_actions": 20, "max_model_calls": 30, "max_retries": 3, "max_runtime_seconds": 180, "no_progress_limit": 4},
+  "required_evidence": ["observations", "action_trace", "field_sources"],
+  "prerequisites": [],
+  "visual_fallback_available": true,
+  "expected_record_shape": ["title", "url"]
+}

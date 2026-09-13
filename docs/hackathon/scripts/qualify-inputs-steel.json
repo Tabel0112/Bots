@@ -1,0 +1,5 @@
+[
+  {"query": "premium", "max_price": 200},
+  {"query": "keyboard", "max_price": 100},
+  {"query": "premium", "max_price": 150}
+]

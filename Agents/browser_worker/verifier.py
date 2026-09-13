@@ -78,10 +78,16 @@ def extract(action: Action, obs: Observation, task: SubtaskRequest, site: SiteCo
     fields = site.record_schema["properties"]
     records = []
     containers = set()
+    observed_refs = {element.ref for element in obs.elements}
     for mapping in action.records:
-        if mapping.container_ref not in obs.signals.get("record_refs", []):
+        permitted_containers = (
+            observed_refs if site.open_site else set(obs.signals.get("record_refs", []))
+        )
+        if mapping.container_ref not in permitted_containers:
             raise WorkerError(
-                C.EXTRACTION_FAILED, "Source is not a configured result container.", True
+                C.EXTRACTION_FAILED,
+                "Source is not a current observed result container.",
+                True,
             )
         if mapping.container_ref in containers:
             raise WorkerError(
@@ -119,7 +125,28 @@ def extract(action: Action, obs: Observation, task: SubtaskRequest, site: SiteCo
                 retrieved_at=obs.timestamp,
             )
         )
+    if site.open_site:
+        obs.signals["record_refs"] = [mapping.container_ref for mapping in action.records]
+        obs.signals["record_count"] = len(action.records)
+        obs.signals["results_ready"] = bool(action.records)
     return records
+
+
+def _approved_links(
+    task: SubtaskRequest, site: SiteConfig, records: list[ExtractedRecord], obs: Observation
+) -> bool:
+    try:
+        guard_url(obs.url, site, task)
+        for record in records:
+            for field, value in record.data.items():
+                if isinstance(value, str) and (
+                    site.record_schema["properties"][field].get("format") == "uri"
+                    or urlsplit(value).scheme in {"http", "https"}
+                ):
+                    guard_url(value, site, task)
+    except (WorkerError, ValueError):
+        return False
+    return True
 
 
 def expected_change(decision, before: Observation, after: Observation) -> bool:
@@ -204,6 +231,47 @@ def verify(
     check(
         "field_provenance", provenance_ok, "Every field must equal its current-run observed source."
     )
+    if site.open_site:
+        empty = not records and bool(
+            re.search(r"\b(?:no|0)\s+results?\b", obs.visible_text, re.IGNORECASE)
+        )
+        obs.signals["record_refs"] = [record.container_ref for record in records]
+        obs.signals["record_count"] = len(records)
+        obs.signals["empty"] = empty
+        obs.signals["results_ready"] = bool(records) or empty
+        check(
+            "approved_links",
+            _approved_links(task, site, records, obs),
+            "Final URL and result links must remain within open-site authority.",
+        )
+        query = task.parameters["query"]
+        applied = any(
+            trace.action_type == "fill"
+            and trace.outcome == "succeeded"
+            and trace.arguments.value == str(query)
+            and trace.arguments.value_origin is not None
+            and trace.arguments.value_origin.kind == "parameter"
+            and trace.arguments.value_origin.key == "query"
+            for trace in report.action_trace
+        )
+        check(
+            "query_applied",
+            applied,
+            "A succeeded fill action must apply the query from its parameter origin.",
+        )
+        skipped = ["visible_record_coverage", "results_or_empty", "complete_observation"]
+        skipped.extend(f"applied:{name}" for name in task.parameters if name != "query")
+        skipped.extend(
+            f"condition:{index}:{condition.kind}"
+            for index, condition in enumerate(
+                [*site.mandatory_conditions, *task.success_conditions]
+            )
+        )
+        for name in skipped:
+            limitation = f"{name}: not applicable on an open site"
+            if limitation not in report.limitations:
+                report.limitations.append(limitation)
+        return checks
     # Count coverage prevents success by extracting only convenient matching rows.
     check(
         "visible_record_coverage",
@@ -249,19 +317,9 @@ def verify(
                     isinstance(v, str) and str(value).casefold() in v.casefold() for v in values
                 )
         check(f"condition:{i}:{condition.kind}", passed, "Configured/requested result condition.")
-    links_ok = True
-    try:
-        guard_url(obs.url, site, task)
-        for r in records:
-            for field, value in r.data.items():
-                if isinstance(value, str) and (
-                    site.record_schema["properties"][field].get("format") == "uri"
-                    or urlsplit(value).scheme in {"http", "https"}
-                ):
-                    guard_url(value, site, task)
-    except (WorkerError, ValueError):
-        links_ok = False
     check(
-        "approved_links", links_ok, "Final URL and result links must remain within site authority."
+        "approved_links",
+        _approved_links(task, site, records, obs),
+        "Final URL and result links must remain within site authority.",
     )
     return checks

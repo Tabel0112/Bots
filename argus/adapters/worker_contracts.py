@@ -60,8 +60,11 @@ __all__ = [
     "translate_success_conditions",
 ]
 
-#: Registry operation -> worker operation.  Decision 8: only the catalog search tonight.
-OPERATION_MAP: dict[str, str] = {"search_products": "search_extract"}
+#: ARGUS operation -> worker operation.
+OPERATION_MAP: dict[str, str] = {
+    "search_products": "search_extract",
+    "open_search": "open_search",
+}
 
 #: The ``worker`` field of every ARGUS report produced from the DOM worker.
 WORKER_NAME = "dom"
@@ -237,6 +240,69 @@ def prepare_request(
             f"supported: {', '.join(sorted(OPERATION_MAP))}",
             subtask_id,
         )
+    if worker_operation == "open_search":
+        domain = _site_key(subtask.site_id).strip().lower().rstrip(".")
+        if not subtask.site_id.startswith("open:") or not domain:
+            raise _precondition(
+                "open_search requires site_id 'open:<hostname>'", subtask_id
+            )
+        parameters = (
+            dict(subtask.parameters) if isinstance(subtask.parameters, dict) else {}
+        )
+        passthrough = {
+            key: value
+            for key, value in parameters.items()
+            if key != "site_choice"
+            and not isinstance(value, bool)
+            and isinstance(value, (str, int, float))
+        }
+        if (
+            not isinstance(passthrough.get("query"), str)
+            or not passthrough["query"].strip()
+        ):
+            raise _precondition("open_search requires a string query", subtask_id)
+        expected = list(subtask.expected_record_shape) or ["title", "url"]
+        start_url = f"https://{domain}/"
+        budget = subtask_input.budget
+        request = SubtaskRequest(
+            schema_version="0.2",
+            request_id=subtask_input.request_id or subtask_input.run_id,
+            run_id=subtask_input.run_id,
+            subtask_id=subtask_id,
+            objective=(subtask.goal or subtask.operation)[:_OBJECTIVE_MAX],
+            site_id=f"open:{domain}",
+            operation="open_search",
+            start_url=start_url,
+            session=SessionSpec(ownership="worker"),
+            parameters=passthrough,
+            output_schema_id="open-records.v1",
+            success_conditions=[],
+            allowed_actions=list(ACTIONS),
+            allowed_domains=[domain, f"www.{domain}"],
+            allowed_url_patterns=[
+                f"https://{domain}/*",
+                f"https://www.{domain}/*",
+            ],
+            budgets=Budgets(
+                max_actions=_clamp_ceil(
+                    budget.max_actions, _field_bounds(Budgets, "max_actions")
+                ),
+                max_runtime_seconds=_clamp_ceil(
+                    budget.max_seconds,
+                    _field_bounds(Budgets, "max_runtime_seconds"),
+                ),
+            ),
+            required_evidence=list(REQUIRED_EVIDENCE),
+            prerequisites=[],
+            visual_fallback_available=bool(os.environ.get("UITARS_BASE_URL")),
+            expected_record_shape=expected,
+        )
+        limitations = [
+            f"criterion:{index}:{criterion.kind}: not applicable on an open site"
+            for index, criterion in enumerate(subtask.criteria)
+        ]
+        return request, limitations
+
     site_key = _site_key(subtask.site_id)
     site = sites.get(site_key)
     if site is None:
@@ -472,6 +538,7 @@ def to_worker_report(
             ],
             "final_url": report.final_url,
             "ghost": ghost_summary(report.ghost),
+            "limitations": list(report.limitations),
         },
         {
             "browser_action_count": int(metrics.actions),

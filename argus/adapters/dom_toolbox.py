@@ -23,7 +23,9 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
+import os
 import threading
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -74,6 +76,7 @@ class DomToolbox:
         #: ``handle -> True`` while open, ``False`` once ``close_session`` was called.
         self.sessions: dict[str, bool] = {}
         self._contexts: dict[tuple[str, str], dict[str, Any]] = {}
+        self._current_future = None
         self._events: dict[tuple[str, str], asyncio.Event] = {}
         self._session_n = 0
         self._lock = threading.Lock()
@@ -159,6 +162,46 @@ class DomToolbox:
             if handle in self.sessions:
                 self.sessions[handle] = False
 
+    # Steel intermittently rejects a session create right after another session was
+    # released (one-session accounts); the worker reports it as SESSION_UNAVAILABLE
+    # with no actions taken. One paced retry with a fresh worker avoids failing a
+    # whole run on that transient. ARGUS_SESSION_RETRY_DELAY (seconds) tunes it;
+    # ARGUS_SESSION_RETRY=0 disables it.
+    @staticmethod
+    def _is_session_start_failure(report) -> bool:
+        try:
+            return (
+                report.outcome == "failed"
+                and not report.action_trace
+                and bool(report.failures)
+                and all(
+                    str(getattr(f, "code", "")).endswith("SESSION_UNAVAILABLE")
+                    for f in report.failures
+                )
+            )
+        except AttributeError:
+            return False
+
+    def _run_with_session_retry(self, worker, request, event, loop, timeout):
+        retries = int(os.getenv("ARGUS_SESSION_RETRY", "1") or 0)
+        delay = float(os.getenv("ARGUS_SESSION_RETRY_DELAY", "5") or 0)
+        attempt = 0
+        while True:
+            future = asyncio.run_coroutine_threadsafe(
+                worker.run(request, cancel=event), loop
+            )
+            self._current_future = future
+            report = future.result(timeout=timeout)
+            if attempt >= retries or not self._is_session_start_failure(report):
+                return report, attempt > 0
+            attempt += 1
+            with self._lock:
+                self.calls.append(("session_retry", request.subtask_id, attempt))
+            if event.is_set():
+                return report, True
+            time.sleep(delay)
+            worker = self._make_worker()
+
     def run_subtask(self, subtask_input: SubtaskInput) -> WorkerReport:
         """Translate, run the worker on the loop thread and translate back."""
         subtask = subtask_input.subtask
@@ -188,17 +231,17 @@ class DomToolbox:
             with self._lock:
                 self._events.pop(key, None)
             raise
-        future = asyncio.run_coroutine_threadsafe(
-            worker.run(request, cancel=event), loop
-        )
         timeout = (
             max(0.0, float(subtask_input.budget.max_seconds)) + self._grace_seconds
         )
+        retried = False
         try:
-            report = future.result(timeout=timeout)
+            report, retried = self._run_with_session_retry(
+                worker, request, event, loop, timeout
+            )
         except concurrent.futures.TimeoutError:
             loop.call_soon_threadsafe(event.set)
-            self._settle(future)
+            self._settle(self._current_future)
             result = self._timeout_report(subtask_input, timeout)
             context = {"limitations": list(limitations) + ["worker timed out"]}
         except Exception as exc:  # noqa: BLE001 - every worker error becomes a typed report
@@ -217,9 +260,16 @@ class DomToolbox:
                     + ["worker report not translatable"]
                 }
             else:
-                context["limitations"] = list(limitations) + list(
+                combined_limitations = list(limitations) + list(
                     context.get("limitations", [])
                 )
+                if retried:
+                    combined_limitations.append(
+                        "browser session start failed once and was retried"
+                    )
+                context["limitations"] = combined_limitations
+                if isinstance(result.evidence, dict):
+                    result.evidence["limitations"] = combined_limitations
         finally:
             with self._lock:
                 self._events.pop(key, None)

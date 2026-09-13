@@ -24,6 +24,106 @@ SENSITIVE = re.compile(r"password|passwd|secret|token|api[_-]?key|cookie|authori
 PROHIBITED = re.compile(
     r"\b(log[ -]?in|sign[ -]?in|purchase|buy|checkout|delete|submit|send|pay)\b", re.I
 )
+_HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.I)
+_OPEN_NUMBER_FIELDS = {"price", "salary", "rating"}
+
+
+def _open_hostname(site_id: str) -> str:
+    if not site_id.startswith("open:"):
+        raise WorkerError(C.INVALID_INPUT, "open_search requires site_id open:<hostname>.")
+    host = site_id.removeprefix("open:").strip().lower().rstrip(".")
+    try:
+        host.encode("ascii")
+        parsed = urlsplit(f"//{host}")
+        labels = host.split(".")
+        valid = (
+            parsed.hostname == host
+            and parsed.port is None
+            and 0 < len(host) <= 253
+            and all(_HOST_LABEL.fullmatch(label) for label in labels)
+        )
+    except (UnicodeEncodeError, ValueError):
+        valid = False
+    if not valid:
+        raise WorkerError(C.INVALID_INPUT, "open_search site_id contains an invalid hostname.")
+    return host
+
+
+def _open_schema(task: SubtaskRequest, host: str) -> SiteConfig:
+    if "query" not in task.parameters or not isinstance(task.parameters["query"], str):
+        raise WorkerError(C.INVALID_INPUT, "open_search requires a string query parameter.")
+    if not task.parameters["query"].strip():
+        raise WorkerError(C.INVALID_INPUT, "open_search query must not be empty.")
+    if any(
+        isinstance(value, bool) or not isinstance(value, (str, int, float))
+        for value in task.parameters.values()
+    ):
+        raise WorkerError(
+            C.INVALID_INPUT, "open_search filters must contain only strings or numbers."
+        )
+    fields = task.expected_record_shape
+    if (
+        not fields
+        or len(set(fields)) != len(fields)
+        or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", field) for field in fields)
+    ):
+        raise WorkerError(C.INVALID_INPUT, "open_search requires a unique expected_record_shape.")
+
+    start_url = task.start_url or f"https://{host}/"
+    try:
+        parsed = urlsplit(start_url)
+        _ = parsed.port
+    except ValueError:
+        raise WorkerError(C.INVALID_INPUT, "open_search start_url is invalid.") from None
+    domains = [host, f"www.{host}"]
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in domains:
+        raise WorkerError(C.DOMAIN_NOT_ALLOWED, "open_search start_url must use its named host.")
+    if task.start_url:
+        netloc = parsed.netloc
+        paired = f"www.{host}" if parsed.hostname == host else host
+        paired_netloc = paired + (f":{parsed.port}" if parsed.port is not None else "")
+        patterns = [f"{parsed.scheme}://{netloc}/*", f"{parsed.scheme}://{paired_netloc}/*"]
+    else:
+        patterns = [f"https://{host}/*", f"https://www.{host}/*"]
+
+    parameter_properties = {
+        name: {"type": "string" if isinstance(value, str) else "number"}
+        for name, value in task.parameters.items()
+    }
+    record_properties = {}
+    for field in fields:
+        if field.casefold() in _OPEN_NUMBER_FIELDS:
+            record_properties[field] = {"type": "number"}
+        else:
+            record_properties[field] = {"type": "string", "minLength": 1}
+            if field.casefold() == "url":
+                record_properties[field]["format"] = "uri"
+    return SiteConfig(
+        site_id=task.site_id,
+        start_url=start_url,
+        allowed_domains=domains,
+        allowed_url_patterns=patterns,
+        controls=[],
+        parameters_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "required": list(task.parameters),
+            "properties": parameter_properties,
+        },
+        output_schema_id="open-records.v1",
+        record_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "required": fields,
+            "properties": record_properties,
+        },
+        results_selector=None,
+        record_selector=None,
+        empty_selector=None,
+        parameter_evidence=[],
+        max_records=30,
+        open_site=True,
+    )
 
 
 def guard_url(url: str, site: SiteConfig, task: SubtaskRequest, resource: bool = False):
@@ -53,7 +153,13 @@ def guard_url(url: str, site: SiteConfig, task: SubtaskRequest, resource: bool =
         ):
             raise ValueError()
         query = parse_qsl(parts.query, keep_blank_values=True)
-        if any(k not in site.allowed_query_keys or SENSITIVE.search(k) for k, _ in query):
+        # Open sites have no operator-declared query keys: any non-sensitive GET
+        # query is allowed on the allowed domain (site searches redirect to URLs
+        # such as /w/index.php?search=...). Configured sites keep their allowlist.
+        if any(
+            (not site.open_site and k not in site.allowed_query_keys) or SENSITIVE.search(k)
+            for k, _ in query
+        ):
             raise ValueError()
         if any(x in unquote(parts.path).split("/") for x in ("..", ".")):
             raise ValueError()
@@ -68,9 +174,12 @@ def validate_request(raw: SubtaskRequest | dict, sites: dict[str, SiteConfig]):
         task = SubtaskRequest.model_validate(raw)
     except (ValueError, TypeError):
         raise WorkerError(C.INVALID_INPUT, "Request does not match SubtaskRequest 0.2.") from None
-    site = sites.get(task.site_id)
-    if not site:
-        raise WorkerError(C.INVALID_INPUT, "Unknown site_id.")
+    if task.operation == "open_search":
+        site = _open_schema(task, _open_hostname(task.site_id))
+    else:
+        site = sites.get(task.site_id)
+        if not site:
+            raise WorkerError(C.INVALID_INPUT, "Unknown site_id.")
     if task.output_schema_id != site.output_schema_id:
         raise WorkerError(C.INVALID_INPUT, "Unknown output schema for this site.")
     if list(Draft202012Validator(site.parameters_schema).iter_errors(task.parameters)):
@@ -95,7 +204,7 @@ def validate_request(raw: SubtaskRequest | dict, sites: dict[str, SiteConfig]):
     if not set(task.allowed_actions) <= set(ACTIONS):
         raise WorkerError(C.ACTION_REJECTED, "Unsupported action requested.")
     covered = {r.parameter for r in site.parameter_evidence}
-    if not set(task.parameters) <= covered:
+    if not site.open_site and not set(task.parameters) <= covered:
         raise WorkerError(
             C.INVALID_INPUT, "Every parameter needs configured applied-result evidence."
         )
@@ -137,7 +246,9 @@ def validate_action(decision: Decision, task: SubtaskRequest, site: SiteConfig, 
     if kind in {"fill", "select", "click", "inspect_element"}:
         element = resolve_element(obs, a.target_ref)
         if kind != "inspect_element" and (
-            element.disabled or kind not in element.permitted_actions
+            element.disabled
+            or (not site.open_site and kind not in element.permitted_actions)
+            or (site.open_site and not _open_action_allowed(kind, element))
         ):
             raise WorkerError(
                 C.ACTION_REJECTED, "This control is not authorized for that operation.", True
@@ -148,7 +259,9 @@ def validate_action(decision: Decision, task: SubtaskRequest, site: SiteConfig, 
                 for e in obs.elements
                 if (e.role, e.name, e.attributes.get("bound_parameter"))
                 == (element.role, element.name, element.attributes.get("bound_parameter"))
-                and kind in e.permitted_actions
+                and (
+                    _open_action_allowed(kind, e) if site.open_site else kind in e.permitted_actions
+                )
             ]
             if not element.name or len(matches) > 1:
                 raise WorkerError(
@@ -180,3 +293,13 @@ def validate_action(decision: Decision, task: SubtaskRequest, site: SiteConfig, 
         raise WorkerError(C.ACTION_REJECTED, "Only navigate accepts a URL.", True)
     if kind != "extract_records" and a.records:
         raise WorkerError(C.ACTION_REJECTED, "Only extraction accepts record mappings.", True)
+
+
+def _open_action_allowed(kind: str, element: Element) -> bool:
+    if kind == "fill":
+        return element.role in {"textbox", "searchbox", "combobox"}
+    if kind == "select":
+        return element.role in {"textbox", "searchbox", "combobox"}
+    if kind == "click":
+        return element.role in {"button", "link", "checkbox"}
+    return False

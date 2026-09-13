@@ -18,10 +18,11 @@ open-world delta and the controller/moderator boundary) and
 real Steel browser sessions, public Staples/Wikivoyage/Remotive pages, Ghost's
 SQLite registry lookup, deterministic DOM extraction and the structured moderator.
 Set `ARGUS_RUNTIME=controlled` only for credential-free tests and offline demos.
-The general CLI still defaults to its older composition. Phase 1b
-(open-world navigation) is implemented offline end to end: two interpreter
-tiers, the S rules, model-planned chains through the model-client boundary,
-dependency data transfer and generic validation.
+The general CLI still defaults to its older composition. In the connected
+runtime, the bounded OW-1 path now suggests a public site for an open intent,
+plans one independent DOM `open_search` per intent, and sends it to the browser
+worker without requiring a hand-written site configuration. The older
+model-planned open chains remain available outside that connected-runtime path.
 
 ## Mission Control demo
 
@@ -44,9 +45,21 @@ included and pinned to the Ghost API range). Open `http://127.0.0.1:4173`.
 | `scrape` (was `live`) | Deprecated hand-written three-site scraper in `argus/live_runtime.py`; not the product path | `STEEL_API_KEY` |
 
 The connected runtime refuses to start and names every missing piece; `/api/health`
-repeats the mode and the problems. Sessions are worker-owned in this first
+repeats the mode and the problems and reports `open_world_search: true` in
+connected mode. Sessions are worker-owned in this first
 connected slice, so the controller's own observe/verify step is unavailable
 (`PRECONDITION_FAILED`) until the ARGUS Steel session manager lands.
+
+For an open request with no named domain, connected interpretation makes one
+strict structured suggestion call per unresolved intent. ARGUS accepts only the
+first syntactically valid candidate allowed by `registry.domain_allowed`, stores
+it as `parameters.site_choice` with source `suggested`, and otherwise leaves the
+request unresolved so gate rule S1 asks the user. Each accepted open intent is
+planned as one independent `open_search` subtask (maximum four), with its query,
+string/number parameters, criteria, and expected fields carried into the worker.
+The worker enforces read-only controls and hostname-scoped navigation, and its
+report persists both the generic checks that ran and explicit limitations for
+site-specific checks that could not run.
 
 Local startup for a connected run against the bundled catalog (three terminals):
 
@@ -298,7 +311,7 @@ invalid → `EXTRACTION_FAILED`.
 
 | Name | Read by | Effect |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | the `openai` SDK itself, not this code | Credentials for interpretation and open-world planning. Not needed with `--interpreted` (and `--plan-fixture`). |
+| `OPENAI_API_KEY` | the `openai` SDK itself, not this code | Credentials for interpretation, connected site suggestion, and model-planned open-world scheduling. Not needed with `--interpreted` (and `--plan-fixture`). |
 | `OPENAI_BASE_URL` | the `openai` SDK itself | Points the same call at an OpenAI-compatible endpoint. |
 | `ARGUS_MODEL` | `argus.model_client` | Names the model. **There is no default**: without it the run fails with `PRECONDITION_FAILED` rather than quietly calling a model the team did not choose. |
 
@@ -357,6 +370,7 @@ request still calls the planner model.
 | `model_client.py` | 1, 3 | The single model boundary: `ModelClient`, `ModelResult`, `OpenAICompatibleClient`. |
 | `registry.py` | 1-3 | Supported sites, operations, parameters, defaults, parameter validation and the open-world `DOMAIN_POLICY`. |
 | `interpreter.py` | 1 | Request text to `InterpretedRequest`, registry tier and open tier. |
+| `site_suggestion.py` | 1 | One policy-checked model suggestion for each unresolved connected open intent; failure falls through to gate clarification. |
 | `gate.py` | 2 | `accept` / `clarify` / `reject` by rules G1-G7 and S1-S5. |
 | `planner.py` | 3 | `InterpretedRequest` to `Plan`: deterministic for registry, one model call for open scheduling, then `validate_plan`. |
 | `controller.py` | 3-11 | State machine, match, dispatch, `inputs_from` transfer, intake, reconcile, validate, synthesize, publish. |
@@ -622,24 +636,32 @@ The three CLI commands above ran with the exit statuses and output shown.
   is joined at interpreter exit, so toolbox adapters must honour
   `Budget.max_seconds` themselves for a clean stop.
 
-## Pending live toolbox integration
+## Open-world limitations
 
-These are required before any real open-world run and none of them exists here:
+OW-1 is a bounded DOM-first read-only search, not unrestricted web browsing.
+Offline tests cover suggestion policy, planning, contract translation, generic
+browser actions, extraction provenance, verification and controller persistence.
+No paid-model, public-site, Steel, DNS-rebinding or Ghost qualification check was
+run for this slice. Remaining limits include:
 
 - **Address enforcement at the transport.** DNS result checks, the connected
-  destination, redirect hops, DNS rebinding and every subsequent request. The
-  offline `domain_allowed` preflight is the only part ARGUS has.
-- **Execution-time action blocking** for login, payment and state-changing
-  submissions, independent of the S5 wording preflight.
+  destination and DNS rebinding. ARGUS has an offline hostname preflight and the
+  worker restricts navigation/redirect hostnames and methods, but this is not an
+  OS network sandbox.
+- **Unconfigured-site semantics.** Only generic DOM roles are available. The
+  worker proves the query fill, output schema, provenance, approved links,
+  freshness and current run; it does not prove ranking quality, non-query filter
+  application, exhaustive coverage, pagination or cross-page completeness.
+- **Page technology.** Iframes, shadow DOM, canvas-only content and sites that
+  require POST search, authentication, downloads or transactional submissions
+  remain unsupported. The zero-result decision uses a bounded visible-text
+  heuristic (`no results` or `0 results`).
 - **Shared four-slot VLM arbitration across runs and callers.** The per-run
   `max_concurrency` cap does not stop several controllers from overloading the
   machine's four local VLM slots.
-- **Real Steel sessions** in place of `FakeToolbox` handles.
-- **Thomas's moderator** replacing `StubModerator` behind the same three
-  callables.
-- **Sting's Ghost receiver verification**, including the `report_context`
-  keyword now passed to `Ghost.validate` for open subtasks — an ARGUS-local
-  addition Sting has not seen or agreed.
+- **Live integration evidence.** Public pages can change or block automation;
+  open-site Ghost compilation/qualification and receiver behaviour have not
+  been verified against live services.
 
 ## For the teammates connecting to this
 

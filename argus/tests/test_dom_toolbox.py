@@ -274,3 +274,60 @@ class DomToolboxTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SessionRetryTests(unittest.TestCase):
+    def test_session_start_failure_is_retried_once_with_a_fresh_worker(self):
+        import os
+        from unittest.mock import patch
+
+        from argus.adapters.dom_toolbox import DomToolbox
+
+        failing = make_report(
+            "failed",
+            records=[],
+            failures=[
+                Failure(
+                    code=FailureCode.SESSION_UNAVAILABLE,
+                    message="Could not initialize the browser session.",
+                )
+            ],
+        )
+        failing.action_trace = []
+        scripts = [{"report": failing}, {"report": make_report()}]
+
+        def build(**kwargs):
+            return FakeWorker(**scripts.pop(0), **kwargs)
+
+        with patch.dict(os.environ, {"ARGUS_SESSION_RETRY_DELAY": "0"}):
+            toolbox = DomToolbox(worker_factory=build, sites=SITES)
+            result = toolbox.run_subtask(make_input())
+        self.assertEqual(result.outcome, "succeeded")
+        self.assertIn(("session_retry", "subtask-1", 1), [c[:3] for c in toolbox.calls])
+        self.assertIn(
+            "browser session start failed once and was retried",
+            result.evidence["limitations"],
+        )
+
+    def test_session_start_failure_is_not_retried_when_disabled(self):
+        import os
+        from unittest.mock import patch
+
+        from argus.adapters.dom_toolbox import DomToolbox
+
+        failing = make_report(
+            "failed",
+            records=[],
+            failures=[
+                Failure(
+                    code=FailureCode.SESSION_UNAVAILABLE,
+                    message="Could not initialize the browser session.",
+                )
+            ],
+        )
+        failing.action_trace = []
+        with patch.dict(os.environ, {"ARGUS_SESSION_RETRY": "0"}):
+            toolbox = DomToolbox(worker_factory=factory(report=failing), sites=SITES)
+            result = toolbox.run_subtask(make_input())
+        self.assertEqual(result.outcome, "failed")
+        self.assertFalse([c for c in toolbox.calls if c[0] == "session_retry"])

@@ -420,10 +420,18 @@ class Worker:
             report.metrics.elapsed_ms = int((time.monotonic() - state.started) * 1000)
             report.metrics.input_tokens = getattr(model, "input_tokens", None)
             report.metrics.output_tokens = getattr(model, "output_tokens", None)
+            coverage = (
+                "Coverage is limited to model-identified records visible in the final DOM; "
+                "cross-page completeness is unverified."
+                if site.open_site
+                else "Coverage is limited to configured records visible in the final DOM; "
+                "cross-page completeness is unverified."
+            )
             report.limitations.extend(
                 [
-                    "Coverage is limited to configured records visible in the final DOM; cross-page completeness is unverified.",
-                    "Visual interpretation is a handoff only; this worker does not execute coordinates or qualify Ghost skills.",
+                    coverage,
+                    "Visual interpretation is a handoff only; this worker does not execute "
+                    "coordinates or qualify Ghost skills.",
                 ]
             )
             for o in report.observations:
