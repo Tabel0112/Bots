@@ -1,6 +1,6 @@
 # Current checkpoint
 
-Updated: 2026-09-12. **HTML-1 DOM worker implemented locally; shared integration pending.** Ghost and visual modules have separate implementation/evidence below. Assignments and handoffs remain in [TEAM.md](TEAM.md).
+Updated: 2026-09-12. **HTML-1 DOM worker implemented locally; interactive dashboard prototype added; shared integration pending.** Ghost and visual modules have separate implementation/evidence below. Assignments and handoffs remain in [TEAM.md](TEAM.md).
 
 ## Latest user direction
 
@@ -39,6 +39,10 @@ Earlier documentation-only checkpoints and the local synthetic backend experimen
 ## Visual worker module
 
 `workers/visual/` is merged on main. VLM-1 is Ready to connect, with reported parser, live Steel smoke, grounding calibration and a successful one-step Hacker News run. Preserve its [TEAM evidence](TEAM.md) and [module usage](../../workers/visual/README.md); its ARGUS/Ghost receiver checks remain pending. These are the visual workstream's recorded results, not checks rerun for HTML-1.
+
+## Dashboard UX prototype
+
+`frontend/dist/` contains a dependency-free Mission Control prototype with Paper and Midnight themes. The UX review update synchronizes immutable event snapshots across a decision-oriented execution flow, vertical recorded-only activity, and before/after sample evidence. History stays pinned until Return to live/latest. The flow uses Plan/Execute/Verify stages, an explicit proof decision, and a labeled visual-recovery loop returning to fresh DOM verification. Wide layouts show the fitted primary route; narrower chart space switches to a vertical layout with a fit/readable control. Successful reuse, price-filter failure with visual recovery, browser unavailability with retry, pause/resume, cancellation, and five-result completion are simulated. Runs, Ghost Library, and Evidence have consistent hash navigation; smaller screens use workspace panel tabs. No live service connection is claimed or implemented. This verified revision is deployed as owner-private Sites version 4 at `https://argus-mission-control.sunyihan666.chatgpt.site`. Usage and limitations are in [`frontend/README.md`](../../frontend/README.md).
 
 ## Ghost API local module
 
