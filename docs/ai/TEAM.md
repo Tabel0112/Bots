@@ -1,15 +1,16 @@
 # Team tasks and project tracking
 
-Updated: 2026-09-12. The four workstream assignments below were confirmed by the user. The task breakdown translates them into concrete planning/research deliverables; it does not claim implementation or tests are complete.
+Updated: 2026-09-12. Four teammates cover the assignments below. HTML-1 has a local implementation handoff; the merged GHOST-1 and VLM-1 status/evidence is preserved. The PR #7 review clarifies the Abel/controller and Thomas/moderator split below; this is not new implementation evidence.
 
 | Person | Assigned workstream | Main responsibility | Next useful deliverable |
 | --- | --- | --- | --- |
 | Sting | Ghost API | Reusable procedures, matching, binding, qualification and skill lifecycle | Example trace → candidate → qualification → changed-input replay walkthrough |
 | Thomas | VLM / subagent visual interpretation | Interpret screenshots, identify visual targets and verify visual outcomes | One Steel screenshot-to-action example with evidence and failure handling |
 | Tianqi | HTML/codebase interpretation for subagents | Interpret available page structure/code, identify semantic targets and extract structured information | One HTML/DOM-to-action/result example with evidence and failure handling |
-| Abel | ARGUS | Task interpretation, decomposition, worker coordination, moderator behavior and final synthesis | One complete task plan with worker inputs/outputs and moderator decisions |
+| Abel | ARGUS controller | Task interpretation, decomposition, routing and worker coordination | One complete task plan with worker inputs/outputs |
+| Thomas | Moderator | Monitor progress, aggregate evidence, reason over outputs and synthesize the final result | Moderator walkthrough against the shared worker report |
 
-All four are working on their assigned areas according to the user. Implementation progress, branches, deadlines and validation evidence have not yet been reported. See [CURRENT.md](CURRENT.md) for what is known to exist in this checkout.
+All four are working on their assigned areas according to the user. Reported implementation evidence is recorded below; unreported checks remain pending. See [CURRENT.md](CURRENT.md) for the current checkout.
 
 ## Progress board
 
@@ -20,7 +21,7 @@ Update this board in place. Detailed responsibilities are below; this table trac
 | INT-1 | Shared example and interface agreement | All four; Abel coordinates ARGUS inputs/outputs | Planned | Walk through one request and agree the checklist below | Not reported |
 | GHOST-1 | Ghost lifecycle and callable boundary | Sting | Building | Connect the fixture boundary to a real worker trace; local demo remains simulated | `ghostapi/` on `feat/ghost-api-interactive-demo`; 12 Python and 5 JavaScript tests passed |
 | VLM-1 | Visual worker example and evidence report | Thomas | Building | Record an interaction-step example (click/type/scroll with semantic targets) that Ghost can compile; align report shape at INT-1 | `workers/visual/` on main (merged as eb3095b); see update below |
-| HTML-1 | HTML/code worker example and evidence report | Tianqi | Researching | Define available code sources; prove structure → action/result; align with INT-1 | Not reported |
+| HTML-1 | HTML/code worker example and evidence report | Tianqi | Building | INT-1 agreement, live GPT/configured Steel task, then receiver checks | `browser_worker/`, tests; `codex/browser-worker-steel` rebased on `b4c9e76`; handoff below |
 | ARGUS-1 | Task plan, routing and moderator walkthrough | Abel | Researching | Define worker inputs/outputs using INT-1; use samples while workers develop | Not reported |
 | INT-2 | First connected request with verified result | All four | Planned | INT-1, ARGUS-1, one callable worker and Ghost validation; connect early | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
@@ -52,7 +53,21 @@ Open issue / needed from / next action: record an interaction-step example (clic
 Receiver + connection check/result: Abel (consume examples/hn-top-story/report.json as the worker-report sample), Sting (needs the upcoming interaction-step trace for compilation) — connection checks pending
 ```
 
-Status meanings: **Planned** = identified; **Researching** = approach under investigation; **Building** = implementation reported; **Ready to connect** = handoff checklist complete; **Integrated** = receiver has run the connection check; **Blocked** = named missing dependency; **Needs owner** = not assigned. The four Researching states reflect the user's report, not independently verified progress. Record a blocker as “missing input — needed from whom — work that can continue.”
+### HTML-1 update — 2026-09-12, PR #7 review
+
+```text
+Task ID / date / status: HTML-1 / 2026-09-12 / Building
+Artifact, branch/revision or local files: browser_worker/, tests/browser_worker/, pyproject.toml and .github/workflows/browser-worker.yml on codex/browser-worker-steel, rebased onto main b4c9e76
+Module README / usage instructions: browser_worker/README.md and browser_worker/TESTING.md
+Entry point + environment names: Worker.run (ARGUS in-process); optional uvicorn browser_worker.main:app; OPENAI_API_KEY, STEEL_API_KEY, WORKER_BROWSER, WORKER_BROWSER_EXECUTABLE, WORKER_SITES_FILE, WORKER_API_TOKEN (full settings in module README)
+Contract version + input/output/failure examples: local 0.2 boundary pending INT-1 agreement; examples/subtask.json -> independently checked records/report, typed failed/inconclusive/needs_visual outcomes; no receiver compatibility assumed
+Changes: preserve merged Ghost/visual docs, scope DOM choices, isolate pytest/Ruff, add Linux CI, abort ambient writes without failing the run, restrict model failure codes, document body-cache compatibility and portable browser setup
+Checks run + result: 74 DOM tests passed (Python 3.12.14/Windows, 37.72s); Ruff lint/format and whitespace checks passed. Existing Ghost Python suite: 12 passed. Ghost/visual source and Ghost CI unchanged against main. Dedicated Linux CI added; remote result pending. Prior live Steel create/connect/observe/release sanity passed (Example Domain, 5.671s); not rerun for review. No live GPT/configured-site task verified.
+Open issue / needed from / next action: agree boundary and shared toolbox at INT-1; Thomas/Tianqi converge adapters and ownership, then test needs_visual compatibility; configure hosted read-only site and run real GPT task
+Receiver + connection check/result: Abel (ARGUS), Sting (Ghost traces), Thomas (moderator/visual) pending; HTML-1 is not Integrated
+```
+
+Status meanings: **Planned** = identified; **Researching** = approach under investigation; **Building** = implementation reported; **Ready to connect** = handoff checklist complete; **Integrated** = receiver has run the connection check; **Blocked** = named missing dependency; **Needs owner** = not assigned. Unreported checks remain pending. Record a blocker as “missing input — needed from whom — work that can continue.”
 
 ## INT-1 — agree before connecting components
 
@@ -64,6 +79,8 @@ Use the [provisional contract](../hackathon/CONTRACTS.md) as a reference. Its ex
 - [ ] Browser-session lifecycle responsibility, time/action limits, retry/fallback limits, and one owner for each shared code/config file before concurrent edits.
 
 Record the agreed shapes in CONTRACTS and versioned examples when approved. Keep sample messages clearly labeled. Everyone can research and prototype against those examples without waiting for every component to finish. Record architectural choices in [DECISIONS.md](DECISIONS.md), rather than inventing separate contracts in each workstream.
+
+HTML-1's implemented local 0.2 boundary is an INT-1 proposal, not a competing shared contract. ARGUS uses `Worker.run` in-process; FastAPI is optional transport. Thomas and Tianqi must converge the currently separate DOM/visual adapters into the shared Steel toolbox, agree session ownership and verify `needs_visual` compatibility before claiming integration. Coordination and receiver verification remain pending.
 
 ## Handoff — ready to connect
 
@@ -120,6 +137,8 @@ Handoff: provide an example worker report to Abel and a trace/evidence example t
 
 ## Tianqi — HTML/codebase interpretation
 
+Current implementation and review evidence is in the HTML-1 update above; see [module usage](../../browser_worker/README.md) and [testing runbook](../../browser_worker/TESTING.md).
+
 - Define which HTML/DOM and available code sources the subagent consumes and how it interprets them.
 - Identify semantic controls, parameter fields, navigation context and result records.
 - Propose browser actions and extract structured outputs with source evidence and explicit limitations.
@@ -127,22 +146,26 @@ Handoff: provide an example worker report to Abel and a trace/evidence example t
 
 Handoff: provide an example worker report to Abel and a trace/evidence example to Sting. Coordinate semantic target descriptions and output fields with Thomas. Clarify whether “codebase interpretation” means rendered HTML/DOM, page-delivered scripts, or a repository explicitly available to the team; do not assume access to a public website's private source repository.
 
-## Abel — ARGUS
+## Abel — ARGUS controller
 
 - Interpret one user task into an overall request, subtasks, dependencies and success conditions.
 - Define routing to HTML/code interpretation, visual interpretation and qualified Ghost procedures.
-- Define moderator monitoring, evidence aggregation, handling of gaps/conflicts and final synthesis.
+- Coordinate with Thomas's moderator on monitoring, evidence aggregation and final synthesis.
 - Agree shared worker reports, run state, budgets and failure/fallback behavior with the other workstreams.
 
-Handoff: provide one worked task example showing each worker's input, expected output, evidence and failure report. Coordinate the moderator's implementation boundary; its separate-model versus controller-role decision remains open.
+Handoff: provide one worked task example showing each worker's input, expected output, evidence and failure report. Agree the controller/moderator boundary with Thomas at INT-1.
+
+## Thomas — Moderator
+
+Monitor subtask progress, gather worker evidence, handle gaps/conflicts and synthesize the final result. Coordinate inputs/outputs with Abel's controller; the PR review identifies this ownership, not a verified connection. Moderator implementation and receiver checks are not reported here.
 
 ## Shared boundaries and remaining ownership
 
 Use the same read-only search/filter/extraction example for all four deliverables. Agree one compatible worker-report shape containing subtask identity, outcome, findings, source evidence, observed actions/parameter origins, available measurements and failures. This is a planning requirement, not a new frozen schema.
 
-Thomas and Tianqi cover two interpretation paths that may share a browser worker/session adapter. Their assignments do not require separate runtime agents or competing browser backends. Agree the shared adapter boundary and file ownership before simultaneous edits. Sting consumes both kinds of evidence; Abel coordinates their use and final verification.
+Thomas and Tianqi cover two interpretation paths and, per PR #7 review, one shared Steel toolbox. The separate local adapters need convergence; agree the shared adapter boundary, lifecycle ownership and file ownership before simultaneous edits. Sting consumes both kinds of evidence; Abel coordinates execution with Thomas's moderator.
 
-Dashboard, controlled-site construction, presentation/backup recording, release work and shared Steel session-lifecycle implementation have not been assigned explicitly. Allocate those separately; do not infer ownership from the removed A–D plans.
+Dashboard, controlled-site construction, presentation/backup recording and release work have not been assigned explicitly. Allocate those separately; do not infer ownership from the removed A–D plans. Thomas/Tianqi still need to agree the concrete shared Steel session-lifecycle implementation.
 
 ## Updating this document
 
