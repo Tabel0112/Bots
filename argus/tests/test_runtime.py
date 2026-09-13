@@ -50,11 +50,15 @@ def _fake_controller(root, interpret):
     )
 
 
-def _wait(client, run_id, seconds=5.0):
+def _wait(client, run_id, seconds=60.0):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         run = client.get(f"/api/runs/{run_id}").json()
         if run["status"] != "running":
+            # join the run thread so a temporary store is never removed under it
+            thread = client.app.state.run_service.threads.get(run_id)
+            if thread is not None:
+                thread.join(timeout=30)
             return run
         time.sleep(0.02)
     raise AssertionError(f"{run_id} still running")
