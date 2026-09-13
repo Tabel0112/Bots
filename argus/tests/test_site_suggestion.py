@@ -43,6 +43,21 @@ def suggestions(*candidates) -> ModelResult:
 
 
 class SiteSuggestionTests(unittest.TestCase):
+    def test_a_request_for_a_carried_product_gets_no_suggestion(self):
+        # The interpreter already tried to map a product the catalog carries to
+        # the registry. Suggesting a retailer here would send the run somewhere
+        # the worker cannot serve it, so the intent stays unresolved for the gate.
+        original = request()
+        original.raw_text = "Find headphones under 150 USD and show the cheapest"
+        client = FakeModelClient([])
+
+        result = suggest_sites(original, client)
+
+        self.assertEqual(client.calls, [])
+        self.assertIsNone(result.intents[0].target_domain)
+        self.assertNotIn("site_choice", result.intents[0].parameters)
+        self.assertEqual(result.ambiguities, original.ambiguities)
+
     def test_allowed_candidate_is_chosen_and_recorded(self):
         client = FakeModelClient(
             suggestions(
