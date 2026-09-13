@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1224" width="900" height="1224" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<defs><marker id="head" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#163d2e"/></marker></defs>
+<rect width="900" height="1224" fill="#ffffff"/>
+<rect x="130" y="30" width="400" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="330" y="57" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Inquiry</text>
+<text x="330" y="79" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">request text from the user</text>
+<line x1="330" y1="94" x2="330" y2="128" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="90" y="130" width="480" height="330" rx="12" fill="#eef4f0" stroke="#9aa8a1" stroke-width="1.5"/>
+<text x="106" y="158" text-anchor="start" font-size="15" font-weight="700" fill="#163d2e">ARGUS CONTROLLER</text>
+<rect x="130" y="174" width="400" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="330" y="201" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Interpreter</text>
+<text x="330" y="223" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">intents, parameters, cited spans</text>
+<line x1="330" y1="238" x2="330" y2="272" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="130" y="272" width="400" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="330" y="299" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Gate</text>
+<text x="330" y="321" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">accept, ask one question, or reject</text>
+<line x1="330" y1="336" x2="330" y2="370" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="130" y="370" width="400" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="330" y="397" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Planner</text>
+<text x="330" y="419" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">subtasks with dependencies</text>
+<line x1="330" y1="434" x2="330" y2="500" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<polygon points="330,502 480,550 330,598 180,550" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="330" y="546" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Ghost API lookup</text>
+<text x="330" y="568" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">is there a qualified workflow?</text>
+<line x1="180" y1="552" x2="180" y2="656" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<text x="168" y="594" text-anchor="end" font-size="14" font-weight="400" fill="#5a6a63">yes: replay</text>
+<line x1="480" y1="552" x2="480" y2="656" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<text x="492" y="594" text-anchor="start" font-size="14" font-weight="400" fill="#5a6a63">no: explore</text>
+<rect x="55" y="658" width="250" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="180" y="685" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Replay</text>
+<text x="180" y="707" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">bound inputs, 0 model calls</text>
+<rect x="355" y="658" width="250" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="480" y="685" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Explore</text>
+<text x="480" y="707" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">fresh browsing, evidence recorded</text>
+<rect x="90" y="762" width="480" height="134" rx="12" fill="#eef4f0" stroke="#9aa8a1" stroke-width="1.5"/>
+<text x="106" y="790" text-anchor="start" font-size="15" font-weight="700" fill="#163d2e">BROWSER SUBAGENTS ON STEEL</text>
+<line x1="180" y1="722" x2="180" y2="760" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<line x1="480" y1="722" x2="480" y2="760" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="70" y="806" width="220" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="180" y="833" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">DOM worker</text>
+<text x="180" y="855" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">reads page structure</text>
+<rect x="370" y="806" width="220" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="480" y="833" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Visual worker</text>
+<text x="480" y="855" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">UI-TARS, mouse and keyboard</text>
+<line x1="330" y1="896" x2="330" y2="932" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="130" y="934" width="400" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="330" y="961" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Moderator</text>
+<text x="330" y="983" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">reconciles reports, selects validated records</text>
+<line x1="330" y1="998" x2="330" y2="1032" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="130" y="1032" width="400" height="64" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2"/>
+<text x="330" y="1059" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Validation</text>
+<text x="330" y="1081" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">worker checks + ARGUS binding checks</text>
+<line x1="330" y1="1096" x2="330" y2="1130" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="130" y="1130" width="400" height="64" rx="8" fill="#163d2e" stroke="#163d2e" stroke-width="2"/>
+<text x="330" y="1157" text-anchor="middle" font-size="18" font-weight="700" fill="#ffffff">Answer</text>
+<text x="330" y="1179" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">controller-rendered; every record cites evidence</text>
+<rect x="620" y="992" width="250" height="150" rx="8" fill="#ffffff" stroke="#163d2e" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="745" y="1028" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2a26">Ghost skill</text>
+<text x="745" y="1050" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">candidate from a</text>
+<text x="745" y="1072" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">validated exploration,</text>
+<text x="745" y="1094" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">qualified in fresh sessions,</text>
+<text x="745" y="1116" text-anchor="middle" font-size="14" font-weight="400" fill="#5a6a63">reused next time</text>
+<path d="M 530 1064 L 618 1064" fill="none" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)" stroke-dasharray="7 6"/>
+<path d="M 745 992 L 745 550 L 484 550" fill="none" stroke="#163d2e" stroke-width="2.2" marker-end="url(#head)" stroke-dasharray="7 6"/>
+<text x="735" y="795" text-anchor="end" font-size="14" font-weight="400" fill="#5a6a63">next compatible request</text>
+</svg>
