@@ -1,8 +1,11 @@
 """Tests for stage 2, the acceptance gate.
 
-Every rule gets a fixture-shaped :class:`InterpretedRequest`, plus the shipped
-``argus/examples`` fixtures: the interpreted request must be accepted and the
-two gate fixtures must agree with the rules in :mod:`argus.gate`.
+Every catalog rule (G1 to G7) and every open-world rule (S1 to S5) gets a
+fixture-shaped :class:`InterpretedRequest`, and each rule's precedence over the
+next one is tested, not just the rule alone.  The shipped ``argus/examples``
+fixtures are gated too: the registry request is accepted, the open request
+clarifies on S4 with the approved question, and the four gate fixtures must
+agree with the rules in :mod:`argus.gate`.
 """
 
 from __future__ import annotations
@@ -13,16 +16,27 @@ from pathlib import Path
 
 from argus import registry
 from argus.contracts import (
+    Criterion,
     GateDecision,
     Intent,
     InterpretedRequest,
     MissingParameter,
     ParameterOrigin,
 )
-from argus.gate import CONFIDENCE_FLOOR, gate
+from argus.gate import CONFIDENCE_FLOOR, RANK_QUESTION, gate
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 TEXT = "Find headphones under $150 in the demo catalog"
+OPEN_TEXT = "Find the best 10 software engineering jobs on jobs.example.com"
+SALARY_TEXT = (
+    "Find the highest salary 10 software engineering jobs, remote only, "
+    "on jobs.example.com"
+)
+#: The clarification docs/hackathon/ARGUS.md approved, word for word.
+BEST_QUESTION = (
+    "What should 'best' mean? For example, highest salary, remote-only roles, "
+    "or closest match to your experience."
+)
 
 
 def origin(value, *, source="text_span", confidence=0.95, span=None):
@@ -49,6 +63,37 @@ def interpreted(intents, *, missing_required=None, ambiguities=None, raw_text=TE
         interpreted_at="2026-09-12T17:00:00Z",
         missing_required=list(missing_required or []),
         ambiguities=list(ambiguities or []),
+    )
+
+
+def criterion(text, kind, *, parameter=None, span=None, confidence=0.95):
+    return Criterion(
+        text=text, kind=kind, parameter=parameter, span=span, confidence=confidence
+    )
+
+
+def open_intent(
+    *,
+    site_id="jobs.example.com",
+    operation="find_jobs",
+    parameters=None,
+    confidence=0.9,
+    target_domain="jobs.example.com",
+    goal="Find software engineering jobs",
+    criteria=(),
+    expected_record_shape=("title", "company", "url"),
+):
+    """An accepted-by-default open intent; each S test breaks one thing."""
+    return Intent(
+        site_id=site_id,
+        operation=operation,
+        parameters=parameters if parameters is not None else {},
+        confidence=confidence,
+        kind="open",
+        target_domain=target_domain,
+        goal=goal,
+        criteria=list(criteria),
+        expected_record_shape=list(expected_record_shape),
     )
 
 
@@ -337,6 +382,310 @@ class GateTest(unittest.TestCase):
         self.assertEqual(decision.rule_id, expected.rule_id)
         self.assertEqual(decision.questions, expected.questions)
         self.assertIn("example-shop", decision.reason)
+
+    # -- S1: no target domain ---------------------------------------------- #
+
+    def test_s1_open_intent_without_a_target_domain(self):
+        decision = gate(
+            interpreted(
+                [open_intent(site_id="", target_domain=None)],
+                raw_text="Find remote software engineering jobs",
+            )
+        )
+        self.assertDecision(decision, "clarify", "S1")
+        self.assertEqual(len(decision.questions), 1)
+        self.assertIn("Which site", decision.questions[0])
+
+    # -- S2: the domain policy --------------------------------------------- #
+
+    def test_s2_rejects_a_private_address(self):
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain="127.0.0.1")],
+                raw_text="Find jobs on 127.0.0.1",
+            )
+        )
+        self.assertDecision(decision, "reject", "S2")
+        self.assertIn("DOMAIN_NOT_ALLOWED", decision.reason)
+        # The policy's own reason, not just the verdict.
+        self.assertIn("non-public IP address", decision.reason)
+        self.assertEqual(decision.questions, [])
+
+    def test_s2_rejects_a_non_public_hostname(self):
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain="intranet.corp")],
+                raw_text="Find jobs on intranet.corp",
+            )
+        )
+        self.assertDecision(decision, "reject", "S2")
+        self.assertIn("DOMAIN_NOT_ALLOWED", decision.reason)
+        self.assertIn("non-public hostname", decision.reason)
+
+    def test_s2_rejects_a_blocklisted_login_host(self):
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain="accounts.google.com")],
+                raw_text="Read the sign-in options on accounts.google.com",
+            )
+        )
+        self.assertDecision(decision, "reject", "S2")
+        self.assertIn("DOMAIN_NOT_ALLOWED", decision.reason)
+
+    def test_s2_runs_after_s1(self):
+        # An intent with neither a domain nor a goal is asked about, not rejected.
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain=None, goal=None)],
+                raw_text="Find something somewhere",
+            )
+        )
+        self.assertDecision(decision, "clarify", "S1")
+
+    # -- S3: no goal -------------------------------------------------------- #
+
+    def test_s3_open_intent_without_a_goal(self):
+        for goal in (None, "   "):
+            decision = gate(
+                interpreted([open_intent(goal=goal)], raw_text="jobs.example.com")
+            )
+            self.assertDecision(decision, "clarify", "S3")
+            self.assertEqual(len(decision.questions), 1)
+            self.assertIn("jobs.example.com", decision.questions[0])
+
+    def test_s3_runs_after_s2(self):
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain="127.0.0.1", goal=None)],
+                raw_text="Find something on 127.0.0.1",
+            )
+        )
+        self.assertDecision(decision, "reject", "S2")
+
+    # -- S4: a vague ranking ------------------------------------------------ #
+
+    def test_s4_vague_rank_asks_the_approved_question(self):
+        decision = gate(
+            interpreted(
+                [
+                    open_intent(
+                        criteria=[
+                            criterion("best", "rank", span=(9, 13), confidence=0.4),
+                            criterion("10", "limit", parameter=10, span=(14, 16), confidence=0.99),
+                        ]
+                    )
+                ],
+                raw_text=OPEN_TEXT,
+            )
+        )
+        self.assertDecision(decision, "clarify", "S4")
+        self.assertEqual(decision.questions, [BEST_QUESTION])
+        self.assertIn("best", decision.reason)
+
+    def test_s4_uses_the_users_own_ranking_words(self):
+        decision = gate(
+            interpreted(
+                [open_intent(criteria=[criterion("most exciting", "rank", confidence=0.2)])],
+                raw_text="Find the most exciting jobs on jobs.example.com",
+            )
+        )
+        self.assertDecision(decision, "clarify", "S4")
+        self.assertEqual(
+            decision.questions, [RANK_QUESTION.format(text="most exciting")]
+        )
+        self.assertIn("most exciting", decision.questions[0])
+
+    def test_s4_threshold_is_inclusive_at_the_floor(self):
+        decision = gate(
+            interpreted(
+                [
+                    open_intent(
+                        criteria=[criterion("best", "rank", span=(9, 13), confidence=CONFIDENCE_FLOOR)]
+                    )
+                ],
+                raw_text=OPEN_TEXT,
+            )
+        )
+        self.assertDecision(decision, "accept", "S0")
+
+    def test_s4_ignores_a_filter_or_limit_criterion(self):
+        decision = gate(
+            interpreted(
+                [
+                    open_intent(
+                        criteria=[
+                            criterion("remote only", "filter", parameter="remote", confidence=0.2),
+                            criterion("10", "limit", parameter=10, confidence=0.1),
+                        ]
+                    )
+                ],
+                raw_text=SALARY_TEXT,
+            )
+        )
+        self.assertDecision(decision, "accept", "S0")
+
+    def test_s4_runs_before_s5(self):
+        decision = gate(
+            interpreted(
+                [open_intent(criteria=[criterion("best", "rank", confidence=0.3)])],
+                raw_text="Log in to jobs.example.com and find the best jobs",
+            )
+        )
+        self.assertDecision(decision, "clarify", "S4")
+
+    # -- S5: actions a read-only run never performs ------------------------- #
+
+    def test_s5_rejects_a_login_and_download_request(self):
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain="shop.example.com", goal="Download my invoices")],
+                raw_text="Log in to shop.example.com and download my invoices",
+            )
+        )
+        self.assertDecision(decision, "reject", "S5")
+        self.assertIn("ACTION_CLASS_NOT_ALLOWED", decision.reason)
+        self.assertIn("login", decision.reason)
+        self.assertEqual(decision.questions, [])
+
+    def test_s5_accepts_a_documentation_request_about_the_same_action(self):
+        decision = gate(
+            interpreted(
+                [
+                    open_intent(
+                        target_domain="shop.example.com",
+                        goal="Read the documentation explaining how to log in",
+                        expected_record_shape=("title", "url", "steps"),
+                    )
+                ],
+                raw_text="How do I log in to shop.example.com?",
+            )
+        )
+        self.assertDecision(decision, "accept", "S0")
+
+    def test_s5_reads_the_goal_as_well_as_the_request(self):
+        decision = gate(
+            interpreted(
+                [open_intent(target_domain="shop.example.com", goal="Buy the cheapest laptop")],
+                raw_text="Get me the cheapest laptop from shop.example.com",
+            )
+        )
+        self.assertDecision(decision, "reject", "S5")
+        self.assertIn("purchase", decision.reason)
+        self.assertIn("goal", decision.reason)
+
+    def test_s5_rejects_a_form_submission(self):
+        decision = gate(
+            interpreted(
+                [open_intent(goal="Submit my application form")],
+                raw_text="Submit my application form on jobs.example.com",
+            )
+        )
+        self.assertDecision(decision, "reject", "S5")
+        self.assertIn("form submission", decision.reason)
+
+    def test_s5_rejects_a_payment_and_a_checkout(self):
+        for goal, raw_text in (
+            ("Pay the outstanding invoice", "Pay the outstanding invoice on billing.example.com"),
+            ("Complete the purchase", "Add the laptop to my cart and complete the purchase"),
+        ):
+            decision = gate(
+                interpreted(
+                    [open_intent(target_domain="shop.example.com", goal=goal)],
+                    raw_text=raw_text,
+                )
+            )
+            self.assertDecision(decision, "reject", "S5")
+
+    def test_s5_leaves_an_ordinary_read_only_request_alone(self):
+        for raw_text in (
+            SALARY_TEXT,
+            "Find the highest paying remote jobs on jobs.example.com",
+            "What are the payment options on shop.example.com?",
+            "Summarise the checkout instructions on shop.example.com",
+        ):
+            decision = gate(
+                interpreted([open_intent()], raw_text=raw_text)
+            )
+            self.assertDecision(decision, "accept", "S0")
+
+    # -- S0 and mixed requests ---------------------------------------------- #
+
+    def test_s0_accepts_a_grounded_open_request(self):
+        decision = gate(
+            interpreted(
+                [
+                    open_intent(
+                        parameters={"query": origin("software engineering", span=(27, 47))},
+                        criteria=[
+                            criterion("highest salary", "rank", parameter="salary",
+                                      span=(9, 23), confidence=0.99),
+                            criterion("remote only", "filter", parameter="remote",
+                                      span=(54, 65), confidence=0.97),
+                        ],
+                        expected_record_shape=("title", "company", "url", "salary", "remote"),
+                    )
+                ],
+                raw_text=SALARY_TEXT,
+            )
+        )
+        self.assertDecision(decision, "accept", "S0")
+        self.assertIn("jobs.example.com", decision.reason)
+        self.assertEqual(decision.questions, [])
+
+    def test_catalog_rules_run_before_the_open_rules(self):
+        decision = gate(
+            interpreted(
+                [good_intent(site_id="example-shop"), open_intent(target_domain=None)],
+                raw_text="Find headphones on example-shop and jobs somewhere",
+            )
+        )
+        self.assertDecision(decision, "reject", "G2")
+
+    def test_a_mixed_request_can_be_accepted(self):
+        decision = gate(
+            interpreted([good_intent(), open_intent()], raw_text=TEXT)
+        )
+        self.assertDecision(decision, "accept", "S0")
+        self.assertIn("search_products", decision.reason)
+        self.assertIn("jobs.example.com", decision.reason)
+
+    def test_an_open_intent_is_not_judged_by_the_catalog_rules(self):
+        # G2/G3 would reject this site and operation; the S rules own it now.
+        self.assertNotIn("jobs.example.com", registry.SITES)
+        self.assertNotIn("find_jobs", registry.OPERATIONS)
+        decision = gate(interpreted([open_intent()], raw_text=OPEN_TEXT))
+        self.assertDecision(decision, "accept", "S0")
+
+    # -- shipped open fixtures ---------------------------------------------- #
+
+    def test_example_open_salary_request_matches_the_accept_fixture(self):
+        expected = GateDecision.from_dict(
+            json.loads((EXAMPLES / "gate_open_accept.json").read_text())
+        )
+        data = json.loads((EXAMPLES / "interpreted_request_open_salary.json").read_text())
+        decision = gate(InterpretedRequest.from_dict(data))
+        self.assertEqual(decision.decision, expected.decision)
+        self.assertEqual(decision.rule_id, expected.rule_id)
+        self.assertEqual(decision.questions, expected.questions)
+
+    def test_example_open_request_clarifies_on_s4(self):
+        data = json.loads((EXAMPLES / "interpreted_request_open.json").read_text())
+        decision = gate(InterpretedRequest.from_dict(data))
+        self.assertDecision(decision, "clarify", "S4")
+        self.assertEqual(decision.questions, [BEST_QUESTION])
+
+    def test_example_gate_open_reject_domain_matches_the_rules(self):
+        expected = GateDecision.from_dict(
+            json.loads((EXAMPLES / "gate_open_reject_domain.json").read_text())
+        )
+        data = json.loads((EXAMPLES / "interpreted_request_open_salary.json").read_text())
+        data["intents"][0]["target_domain"] = "127.0.0.1"
+        decision = gate(InterpretedRequest.from_dict(data))
+        self.assertEqual(decision.decision, expected.decision)
+        self.assertEqual(decision.rule_id, expected.rule_id)
+        self.assertEqual(decision.questions, expected.questions)
+        self.assertIn("127.0.0.1", decision.reason)
+        self.assertIn("DOMAIN_NOT_ALLOWED", decision.reason)
 
 
 if __name__ == "__main__":  # pragma: no cover

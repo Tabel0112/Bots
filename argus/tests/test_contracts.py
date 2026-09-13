@@ -9,6 +9,7 @@ from argus.contracts import (
     Budget,
     Claim,
     ContractError,
+    Criterion,
     Event,
     FinalAnswer,
     GateDecision,
@@ -34,16 +35,38 @@ WORKER_REPORT = REPO_ROOT / "workers" / "visual" / "examples" / "hn-top-story" /
 FIXTURES = {
     "final_answer.json": FinalAnswer,
     "gate_clarify.json": GateDecision,
+    "gate_open_accept.json": GateDecision,
+    "gate_open_reject_domain.json": GateDecision,
     "gate_reject.json": GateDecision,
     "interpreted_request.json": InterpretedRequest,
+    "interpreted_request_open.json": InterpretedRequest,
+    "interpreted_request_open_salary.json": InterpretedRequest,
     "moderator_decision_accept.json": ModeratorDecision,
     "plan.json": Plan,
+    "plan_open_chain.json": Plan,
     "worker_report.json": WorkerReport,
 }
 
 
 def load(name):
     return json.loads((EXAMPLES / name).read_text())
+
+
+def assert_payload_preserved(test_case, expected, actual, path="payload"):
+    """Assert every fixture value survives while permitting nested defaults."""
+    if isinstance(expected, dict):
+        test_case.assertIsInstance(actual, dict, msg=path)
+        for key, value in expected.items():
+            test_case.assertIn(key, actual, msg=path)
+            assert_payload_preserved(test_case, value, actual[key], f"{path}.{key}")
+        return
+    if isinstance(expected, list):
+        test_case.assertIsInstance(actual, list, msg=path)
+        test_case.assertEqual(len(actual), len(expected), msg=path)
+        for index, value in enumerate(expected):
+            assert_payload_preserved(test_case, value, actual[index], f"{path}[{index}]")
+        return
+    test_case.assertEqual(actual, expected, msg=path)
 
 
 class FixtureTests(unittest.TestCase):
@@ -63,8 +86,7 @@ class FixtureTests(unittest.TestCase):
             with self.subTest(fixture=name):
                 payload = load(name)
                 produced = message.from_dict(payload).to_dict()
-                for key, value in payload.items():
-                    self.assertEqual(produced[key], value, msg=f"{name}:{key}")
+                assert_payload_preserved(self, payload, produced, name)
 
     def test_fixtures_use_supported_sites_and_operations(self):
         for intent in InterpretedRequest.from_dict(load("interpreted_request.json")).intents:
@@ -91,6 +113,27 @@ class FixtureTests(unittest.TestCase):
         self.assertTrue(answer.claims)
         for claim in answer.claims:
             self.assertTrue(claim.evidence_refs)
+
+    def test_open_world_fixtures_round_trip_with_the_new_fields(self):
+        interpreted = InterpretedRequest.from_dict(load("interpreted_request_open.json"))
+        self.assertEqual(interpreted.intents[0].kind, "open")
+        self.assertIsInstance(interpreted.intents[0].criteria[0], Criterion)
+
+        plan = Plan.from_dict(load("plan_open_chain.json"))
+        self.assertEqual(plan.planned_by, "model")
+        self.assertEqual(plan.subtasks[1].inputs_from["result_urls"]["field"], "url")
+
+    def test_old_fixtures_receive_backward_compatible_defaults(self):
+        intent = InterpretedRequest.from_dict(load("interpreted_request.json")).intents[0]
+        self.assertEqual(intent.kind, "registry")
+        self.assertIsNone(intent.target_domain)
+        self.assertEqual(intent.criteria, [])
+
+        plan = Plan.from_dict(load("plan.json"))
+        self.assertEqual(plan.planned_by, "deterministic")
+        self.assertEqual(plan.caps, {"max_subtasks": 4, "max_depth": 3})
+        self.assertEqual(plan.subtasks[0].inputs_from, {})
+        self.assertEqual(plan.subtasks[0].kind, "registry")
 
 
 class WorkerReportTests(unittest.TestCase):
@@ -192,6 +235,21 @@ class StrictnessTests(unittest.TestCase):
             ParameterOrigin(value="x", source="text_span", confidence=1.0, span=[9, 2])
         with self.assertRaises(ContractError):
             ParameterOrigin(value="x", source="text_span", confidence=1.0, span=[1, 2, 3])
+
+    def test_criterion_span_and_vocab_are_checked(self):
+        criterion = Criterion(
+            text="top 10", kind="limit", parameter=10, confidence=0.99, span=[5, 11]
+        )
+        self.assertEqual(criterion.span, (5, 11))
+        self.assertEqual(Criterion.from_dict(criterion.to_dict()), criterion)
+        with self.assertRaises(ContractError):
+            Criterion(
+                text="recent", kind="sort", parameter=None, span=None, confidence=0.9
+            )
+        with self.assertRaises(ContractError):
+            Criterion(
+                text="best", kind="rank", parameter=None, span=[9, 2], confidence=0.4
+            )
 
     def test_contract_error_carries_a_typed_error(self):
         error = ContractError("the model refused", code="MODEL_REFUSED")
@@ -382,6 +440,110 @@ class RegistryTests(unittest.TestCase):
             registry.validate_parameters("search_products", ["query"]),
             ["parameters must be an object"],
         )
+
+    def test_domain_allowed_accepts_an_unlisted_domain(self):
+        allowed, reason = registry.domain_allowed("Jobs.Example.com.")
+        self.assertTrue(allowed)
+        self.assertIn("jobs.example.com", reason)
+
+    def test_domain_allowed_blocks_exact_domains_and_subdomains(self):
+        for domain in ("checkout.stripe.com", "pay.checkout.stripe.com", "accounts.google.com"):
+            with self.subTest(domain=domain):
+                allowed, reason = registry.domain_allowed(domain)
+                self.assertFalse(allowed)
+                self.assertIn("blocked", reason)
+
+    def test_domain_allowed_rejects_missing_and_url_shaped_values(self):
+        for domain in ("", "https://example.com", "bad domain.example"):
+            with self.subTest(domain=domain):
+                allowed, reason = registry.domain_allowed(domain)
+                self.assertFalse(allowed)
+                self.assertTrue(reason)
+
+
+class OpenContractValidationTests(unittest.TestCase):
+    def test_invalid_caps_are_rejected_at_deserialization(self):
+        for caps in (None, {}, {"max_subtasks": -1},
+                     {"max_subtasks": True, "max_depth": 3},
+                     {"max_subtasks": 4, "max_depth": 0},
+                     {"max_subtasks": 4.5, "max_depth": 3},
+                     {"max_subtasks": 4, "max_depth": 3, "extra": 1}):
+            with self.subTest(caps=caps), self.assertRaises(ContractError):
+                Plan.from_dict(load("plan.json") | {"caps": caps})
+
+    def test_caps_cannot_be_raised_above_controller_budgets(self):
+        for caps in ({"max_subtasks": 99, "max_depth": 3},
+                     {"max_subtasks": 4, "max_depth": 99}):
+            with self.subTest(caps=caps), self.assertRaises(ContractError) as caught:
+                Plan.from_dict(load("plan_open_chain.json") | {"caps": caps})
+            self.assertEqual(caught.exception.code, "PLAN_TOO_LARGE")
+
+    def test_open_and_mixed_plans_count_all_subtasks(self):
+        for mixed in (False, True):
+            payload = load("plan_open_chain.json")
+            template = payload["subtasks"][0]
+            payload["subtasks"] = [template | {"subtask_id": f"step-{i}"} for i in range(5)]
+            if mixed:
+                payload["subtasks"][0] = load("plan.json")["subtasks"][0]
+            with self.subTest(mixed=mixed), self.assertRaises(ContractError) as caught:
+                Plan.from_dict(payload)
+            self.assertEqual(caught.exception.code, "PLAN_TOO_LARGE")
+
+    def test_registry_only_plans_keep_their_existing_total_work_behavior(self):
+        payload = load("plan.json")
+        payload["subtasks"] = [payload["subtasks"][0] | {"subtask_id": f"step-{i}"} for i in range(5)]
+        from argus.planner import validate_plan
+        validate_plan(Plan.from_dict(payload))
+
+    def test_mutated_plan_budget_is_rechecked_by_planner(self):
+        from argus.planner import validate_plan
+        plan = Plan.from_dict(load("plan.json"))
+        plan.caps["max_subtasks"] = 99
+        with self.assertRaises(ContractError) as caught:
+            validate_plan(plan)
+        self.assertEqual(caught.exception.code, "PLAN_TOO_LARGE")
+
+    def test_malformed_dependency_inputs_are_rejected(self):
+        payload = load("plan_open_chain.json")["subtasks"][1]
+        for source in (None, [], {"urls": {"wrong_key": "step-1"}},
+                       {"urls": {"subtask_id": "subtask-open-search", "field": ""}},
+                       {"urls": {"subtask_id": "undeclared", "field": "url"}},
+                       {"urls": {"subtask_id": "subtask-open-search", "field": "url", "extra": 1}}):
+            with self.subTest(source=source), self.assertRaises(ContractError):
+                Subtask.from_dict(payload | {"inputs_from": source})
+
+    def test_invalid_confidence_and_spans_fail_with_contract_error(self):
+        payload = {"text": "best", "kind": "rank", "parameter": None, "span": None, "confidence": 0.4}
+        for confidence in ("not-a-number", None, True, -0.1, 1.1, float("nan"), float("inf")):
+            with self.subTest(confidence=confidence), self.assertRaises(ContractError):
+                Criterion.from_dict(payload | {"confidence": confidence})
+        for span in (7, "0,4", [True, 4], [-1, 4], [4, 1]):
+            with self.subTest(span=span), self.assertRaises(ContractError):
+                Criterion.from_dict(payload | {"span": span})
+
+    def test_open_context_survives_the_worker_input_boundary(self):
+        subtask = Plan.from_dict(load("plan_open_chain.json")).subtasks[1]
+        message = SubtaskInput("run-open", subtask, "fake-session", Budget(30, 120), "explore")
+        restored = SubtaskInput.from_dict(message.to_dict()).subtask
+        self.assertEqual(restored.target_domain, "jobs.example.com")
+        self.assertIn("sequentially", restored.goal)
+        self.assertEqual(restored.criteria[0].parameter, "salary")
+        self.assertIn("salary", restored.expected_record_shape)
+
+    def test_optional_open_context_is_checked_without_requiring_a_domain(self):
+        payload = load("interpreted_request_open.json")["intents"][0]
+        self.assertIsNone(Intent.from_dict(payload | {"target_domain": None}).target_domain)
+        for patch in ({"target_domain": 7}, {"goal": []}, {"expected_record_shape": "title"},
+                      {"expected_record_shape": [""]}, {"criteria": None}):
+            with self.subTest(patch=patch), self.assertRaises(ContractError):
+                Intent.from_dict(payload | patch)
+
+    def test_open_defaults_do_not_share_mutable_containers(self):
+        first, second = (Plan.from_dict(load("plan.json")) for _ in range(2))
+        first.caps["max_subtasks"] = 1
+        first.subtasks[0].expected_record_shape.append("salary")
+        self.assertEqual(second.caps["max_subtasks"], 4)
+        self.assertEqual(second.subtasks[0].expected_record_shape, [])
 
 
 if __name__ == "__main__":

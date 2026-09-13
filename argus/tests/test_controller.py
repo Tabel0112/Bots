@@ -14,6 +14,7 @@ from pathlib import Path
 from argus import interfaces
 from argus.contracts import (
     Claim,
+    ContractError,
     FinalAnswer,
     GateDecision,
     Intent,
@@ -56,6 +57,24 @@ def subtask(subtask_id, depends_on=(), group=None, query="headphones"):
         depends_on=list(depends_on),
         success_conditions=["results present or explicit empty state"],
     )
+
+
+def open_subtask(subtask_id, depends_on=(), inputs_from=None, *, operation="search",
+                 shape=("title", "url"), group=None):
+    """An open-world subtask on an allowed public domain; the in-test ghost
+    checks no URLs, so the fixture's demo-catalog records are fine as findings."""
+    return Subtask(
+        subtask_id=subtask_id, intent_index=0, site_id="jobs.example.com", operation=operation,
+        parameters={"query": "engineer"}, concurrency_group=group or f"group-{subtask_id}",
+        output_schema_id="open-records.v1", depends_on=list(depends_on),
+        success_conditions=["results present or explicit empty state"],
+        inputs_from=dict(inputs_from or {}), kind="open", target_domain="jobs.example.com",
+        goal="find engineering jobs", expected_record_shape=list(shape),
+    )
+
+
+def bind(parameter, subtask_id, field):
+    return {parameter: {"subtask_id": subtask_id, "field": field}}
 
 
 def plan_of(*subtasks):
@@ -175,7 +194,11 @@ class FakeModerator:
 
     def reconcile(self, plan, reports):
         self.reconcile_calls.append((plan, reports))
-        findings = [r for report in reports for r in report.findings]
+        findings = [
+            r for report in reports
+            for r in (report.findings if isinstance(report.findings, list)
+                      else (report.findings or {}).get("records", []))
+        ]
         return ModeratorDecision(
             "reconcile", self.reconcile_decision, "merged in test",
             next_action={"findings": findings, "gaps": ["second page not checked"], "conflicts": []},
@@ -191,19 +214,25 @@ class FakeModerator:
         return FinalAnswer(text=text, claims=claims, records=list(records), failures=list(failures))
 
 
+#: Marks a validate call made in the three-argument form (no keyword at all).
+NO_CONTEXT = object()
+
+
 class FakeGhost:
     def __init__(self, validation="passed"):
         self.validation = validation
         self.validate_calls = []
         self.compile_calls = []
         self.match_calls = []
+        self.contexts = {}  # subtask_id -> report_context, or NO_CONTEXT
 
     def match(self, subtask, skills):
         self.match_calls.append((subtask.subtask_id, skills))
         return {"decision": "explore", "reason": "no qualified skills", "skill": None}
 
-    def validate(self, subtask, records, evidence):
+    def validate(self, subtask, records, evidence, *, report_context=NO_CONTEXT):
         self.validate_calls.append((subtask.subtask_id, records, evidence))
+        self.contexts[subtask.subtask_id] = report_context
         return {"status": self.validation, "checks": [{"check_id": "c1", "status": self.validation}]}
 
     def compile(self, report, subtask):
@@ -384,6 +413,45 @@ class SingleSubtaskTests(ControllerTestCase):
 
 
 class ConcurrencyTests(ControllerTestCase):
+    def test_max_concurrency_rejects_non_integer_capacity(self):
+        for capacity in (True, 2.5, float("nan"), "4", None):
+            with self.subTest(capacity=capacity), self.assertRaises(ValueError):
+                self.build(max_concurrency=capacity)
+
+    def test_max_concurrency_cannot_exceed_the_hardware_limit(self):
+        with self.assertRaisesRegex(ValueError, "max_concurrency must be at most 4"):
+            self.build(max_concurrency=5)
+
+    def test_max_concurrency_accepts_the_hardware_limit(self):
+        self.build(max_concurrency=4)
+        self.assertEqual(self.controller.max_concurrency, 4)
+
+    def test_four_workers_can_run_together_and_are_cleaned_up(self):
+        barrier = threading.Barrier(4, timeout=2)
+
+        def behaviour(inp):
+            barrier.wait()
+            return report_for(inp)
+
+        self.build(FakeToolbox(behaviour), max_concurrency=4,
+                   plan=plan_of(*(subtask(str(i)) for i in range(4))))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(self.toolbox.max_active, 4)
+        self.assertEqual(len(self.toolbox.closed), 4)
+
+    def test_raised_plan_cap_fails_before_a_session_is_opened(self):
+        def oversized(_request, plan_id):
+            built = plan_of(subtask("a"))(_request, plan_id)
+            built.caps["max_subtasks"] = 99
+            return built
+
+        self.build(plan=oversized)
+        result = self.execute()
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error.code, "PLAN_TOO_LARGE")
+        self.assertEqual(self.toolbox.opened, [])
+
     def test_two_independent_subtasks_run_concurrently(self):
         barrier = threading.Barrier(2, timeout=2)
 
@@ -702,6 +770,176 @@ class RobustnessTests(ControllerTestCase):
         self.assertEqual(types[-1], "run_completed")
         self.assertEqual(types.count("run_completed"), 1)
         self.assertEqual(self.store.run_id_for_request("request-t"), result.run_id)
+
+
+class OpenWorldDataFlowTests(ControllerTestCase):
+    """``inputs_from`` transfer between subtasks and the open-world validate call."""
+
+    URLS = [record(1)["url"], record(2)["url"]]
+
+    def input_for(self, subtask_id):
+        [inp] = [i for i in self.toolbox.inputs if i.subtask.subtask_id == subtask_id]
+        return inp
+
+    def test_chain_transfers_the_url_list_in_order(self):
+        self.build(plan=plan_of(
+            open_subtask("search"),
+            open_subtask("details", ["search"], bind("result_urls", "search", "url"), operation="open_results"),
+        ))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual([i.subtask.subtask_id for i in self.toolbox.inputs], ["search", "details"])
+        details = self.input_for("details").subtask
+        self.assertEqual(details.parameters, {"query": "engineer", "result_urls": self.URLS})
+        self.assertNotIn("result_urls", self.input_for("search").subtask.parameters)
+        # The plan itself is what was planned, not what was resolved.
+        self.assertEqual(result.plan.subtasks[1].parameters, {"query": "engineer"})
+        resolved = [e for e in self.events if e["type"] == "subtask_inputs_resolved"]
+        self.assertEqual([e["data"]["subtask_id"] for e in resolved], ["details"])
+        self.assertEqual(resolved[0]["data"]["bindings"], bind("result_urls", "search", "url"))
+        self.assertEqual(result.metrics["subtasks"], {"search": "accepted", "details": "accepted"})
+
+    def test_an_empty_upstream_list_transfers_as_an_empty_list(self):
+        toolbox = FakeToolbox(lambda inp: report_for(
+            inp, records=[] if inp.subtask.subtask_id == "search" else None))
+        self.build(toolbox, plan=plan_of(
+            open_subtask("search"),
+            open_subtask("details", ["search"], bind("result_urls", "search", "url"), operation="open_results"),
+        ))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual(self.input_for("details").subtask.parameters["result_urls"], [])
+
+    def test_a_missing_field_fails_the_subtask_and_cancels_its_dependents(self):
+        self.build(plan=plan_of(
+            open_subtask("a", shape=("title", "url", "salary")),
+            open_subtask("b", ["a"], bind("salaries", "a", "salary")),
+            open_subtask("c", ["b"], bind("titles", "b", "title")),
+        ))
+        result = self.execute()
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error.code, "PRECONDITION_FAILED")
+        self.assertEqual(result.error.step_id, "b")
+        self.assertIn("salary", result.error.message)
+        self.assertEqual(result.metrics["subtasks"], {"a": "accepted", "b": "failed", "c": "cancelled"})
+        self.assertEqual([i.subtask.subtask_id for i in self.toolbox.inputs], ["a"])
+        self.assertEqual(self.toolbox.opened, ["session-1"], "no session is opened for a subtask that cannot start")
+        cancelled = [e["data"] for e in self.events if e["type"] == "subtask_cancelled"]
+        self.assertEqual(cancelled[0]["subtask_id"], "c")
+        self.assertIn("b", cancelled[0]["reason"])
+        codes = sorted(f.code for f in result.answer.failures)
+        self.assertEqual(codes, ["CANCELLED", "PRECONDITION_FAILED"])
+
+    def test_a_findings_mapping_transfers_a_field_and_the_whole_object(self):
+        page = {"records": [record(1)], "next_page": "https://jobs.example.com/page/2"}
+        toolbox = FakeToolbox(lambda inp: report_for(
+            inp, records=page if inp.subtask.subtask_id == "index" else None))
+        self.build(toolbox, plan=plan_of(
+            open_subtask("index", shape=("title", "url", "next_page")),
+            open_subtask("page", ["index"], {
+                **bind("page_url", "index", "next_page"), **bind("everything", "index", "findings"),
+            }),
+        ))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        params = self.input_for("page").subtask.parameters
+        self.assertEqual(params["page_url"], "https://jobs.example.com/page/2")
+        self.assertEqual(params["everything"], page)
+        self.assertIsNot(params["everything"], page, "a copy, so the worker cannot edit the report")
+
+    def test_binding_values_read_nothing_but_the_named_field(self):
+        from argus.controller import _bound_value
+        self.assertEqual(_bound_value([record(1), record(2)], "url", "a"), self.URLS)
+        self.assertEqual(_bound_value([], "url", "a"), [])
+        self.assertEqual(_bound_value({"k": 1}, "findings", "a"), {"k": 1})
+        self.assertIsNone(_bound_value(None, "findings", "a"))
+        for findings in (None, "text", [record(1), "loose"], [{"title": "x"}], {"other": 1}):
+            with self.subTest(findings=findings):
+                with self.assertRaises(ContractError) as caught:
+                    _bound_value(findings, "url", "a")
+                self.assertEqual(caught.exception.code, "PRECONDITION_FAILED")
+
+    def test_open_validate_receives_context_without_a_session_handle(self):
+        def behaviour(inp):
+            report = report_for(inp)
+            report.evidence["session_handle"] = inp.session_handle
+            report.evidence["handle_again"] = inp.session_handle
+            return report
+        self.build(FakeToolbox(behaviour), plan=plan_of(open_subtask("s")))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        context = self.ghost.contexts["s"]
+        self.assertEqual(set(context), {"run_id", "subtask_id", "evidence", "empty_state"})
+        self.assertEqual(context["run_id"], result.run_id)
+        self.assertEqual(context["subtask_id"], "s")
+        self.assertIs(context["empty_state"], False)
+        self.assertEqual(context["evidence"]["screenshots"], ["observation-000.png"])
+        self.assertNotIn("session_handle", context["evidence"])
+        self.assertNotIn("handle_again", context["evidence"])
+        self.assertNotIn("session-1", json.dumps(context))
+
+    def test_open_validate_reports_an_explicit_empty_state(self):
+        self.build(FakeToolbox(lambda inp: report_for(inp, records=[])), plan=plan_of(open_subtask("s")))
+        self.execute()
+        self.assertIs(self.ghost.contexts["s"]["empty_state"], True)
+
+    def test_registry_validate_keeps_the_three_argument_form(self):
+        self.build()
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded")
+        self.assertIs(self.ghost.contexts["subtask-1"], NO_CONTEXT)
+
+    def test_the_chain_respects_max_concurrency(self):
+        barrier = threading.Barrier(2, timeout=2)
+
+        def behaviour(inp):
+            if inp.subtask.subtask_id in ("a", "b"):
+                barrier.wait()  # the two roots must run together under a cap of 2
+            time.sleep(0.01)
+            return report_for(inp)
+
+        self.build(FakeToolbox(behaviour), max_concurrency=2, plan=plan_of(
+            open_subtask("a"), open_subtask("b"),
+            open_subtask("c", ["a"], bind("result_urls", "a", "url"), operation="open_results"),
+            open_subtask("d", ["b"], bind("result_urls", "b", "url"), operation="open_results"),
+        ))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual(self.toolbox.max_active, 2)
+        order = [i.subtask.subtask_id for i in self.toolbox.inputs]
+        self.assertLess(order.index("a"), order.index("c"))
+        self.assertLess(order.index("b"), order.index("d"))
+        for leaf in ("c", "d"):
+            self.assertEqual(self.input_for(leaf).subtask.parameters["result_urls"], self.URLS)
+
+    def test_the_chain_runs_one_at_a_time_under_a_cap_of_one(self):
+        self.build(max_concurrency=1, plan=plan_of(
+            open_subtask("a"), open_subtask("b"),
+            open_subtask("c", ["a"], bind("result_urls", "a", "url"), operation="open_results"),
+        ))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        self.assertEqual(self.toolbox.max_active, 1)
+        order = [i.subtask.subtask_id for i in self.toolbox.inputs]
+        self.assertEqual(len(order), 3)
+        self.assertLess(order.index("a"), order.index("c"))
+
+    def test_a_retry_keeps_the_resolved_inputs(self):
+        def behaviour(inp):
+            if inp.subtask.subtask_id == "details" and inp.subtask.preferred_tool == "dom":
+                return report_for(inp, outcome="failed", records=[],
+                                  typed_failures=[TypedError("TARGET_NOT_FOUND", "no list", True)])
+            return report_for(inp)
+        self.build(FakeToolbox(behaviour), FakeModerator({"details": ["retry_other_path", "accept"]}),
+                   plan=plan_of(
+                       open_subtask("search"),
+                       open_subtask("details", ["search"], bind("result_urls", "search", "url"), operation="open_results"),
+                   ))
+        result = self.execute()
+        self.assertEqual(result.status, "succeeded", result.error)
+        attempts = [i for i in self.toolbox.inputs if i.subtask.subtask_id == "details"]
+        self.assertEqual([a.subtask.preferred_tool for a in attempts], ["dom", "vision"])
+        self.assertTrue(all(a.subtask.parameters["result_urls"] == self.URLS for a in attempts))
 
 
 if __name__ == "__main__":

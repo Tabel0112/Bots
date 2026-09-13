@@ -1,0 +1,66 @@
+{
+  "plan_id": "plan-open-jobs-1",
+  "request_id": "request-open-jobs-clarified",
+  "subtasks": [
+    {
+      "subtask_id": "subtask-open-search",
+      "intent_index": 0,
+      "site_id": "jobs.example.com",
+      "operation": "search",
+      "parameters": {
+        "query": "software engineering",
+        "max_results": 10
+      },
+      "concurrency_group": "jobs-search",
+      "output_schema_id": "open-job-list.v1",
+      "depends_on": [],
+      "success_conditions": [
+        "results present or explicit empty state",
+        "every result has a title, company and url",
+        "the query is visibly applied"
+      ],
+      "preferred_tool": "dom",
+      "inputs_from": {},
+      "target_domain": "jobs.example.com",
+      "goal": "Search for up to ten software engineering jobs",
+      "criteria": [{"text": "10", "kind": "limit", "parameter": 10, "span": null, "confidence": 1.0}],
+      "expected_record_shape": ["title", "company", "url"],
+      "kind": "open"
+    },
+    {
+      "subtask_id": "subtask-open-details",
+      "intent_index": 0,
+      "site_id": "jobs.example.com",
+      "operation": "open_results",
+      "parameters": {},
+      "concurrency_group": "jobs-details",
+      "output_schema_id": "open-job-details.v1",
+      "depends_on": ["subtask-open-search"],
+      "success_conditions": [
+        "each opened result stays on the target domain",
+        "every record cites an observation from this run"
+      ],
+      "preferred_tool": "dom",
+      "target_domain": "jobs.example.com",
+      "goal": "Open each result sequentially and collect salary for ranking",
+      "criteria": [
+        {"text": "highest salary", "kind": "rank", "parameter": "salary", "span": null, "confidence": 1.0},
+        {"text": "10", "kind": "limit", "parameter": 10, "span": null, "confidence": 1.0}
+      ],
+      "expected_record_shape": ["title", "company", "url", "salary"],
+      "inputs_from": {
+        "result_urls": {
+          "subtask_id": "subtask-open-search",
+          "field": "url"
+        }
+      },
+      "kind": "open"
+    }
+  ],
+  "created_at": "2026-09-12T20:00:01Z",
+  "planned_by": "model",
+  "caps": {
+    "max_subtasks": 4,
+    "max_depth": 3
+  }
+}

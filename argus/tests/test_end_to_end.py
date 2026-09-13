@@ -1,21 +1,28 @@
-"""Phase 2: whole runs through the real controller and the shipped fakes.
+"""Phase 2 and 1b: whole runs through the real controller and the shipped fakes.
 
-Every test here builds its request from ``argus/examples/interpreted_request.json``
-and runs :class:`argus.controller.Controller` with
+Every test here builds its request from one of the fixtures in
+``argus/examples/`` and runs :class:`argus.controller.Controller` with
 :class:`~argus.fakes.FakeToolbox`, :class:`~argus.fakes.StubModerator`,
 :class:`~argus.fakes.FakeGhost` and a :class:`~argus.store.JsonStore` in a
 temporary directory.  Nothing calls the network: stage 1 is supplied as an
 already-interpreted request, which is exactly what ``python -m argus
---interpreted FILE`` does.
+--interpreted FILE`` does, and open-world planning is supplied by
+:class:`~argus.fakes.FakePlannerClient`, which is what ``--plan-fixture`` does.
 
-Covered: a single-subtask search, a compound request whose two subtasks really
-do run at the same time, a clarify that executes nothing, a scripted
+Registry path: a single-subtask search, a compound request whose two subtasks
+really do run at the same time, a clarify that executes nothing, a scripted
 ``target_not_found`` that retries on the other interpretation tool and then
 succeeds, a scripted ``auth_required`` that fails honestly, a thin-evidence
 report that the controller verifies before it is accepted, and a validation
-failure that the moderator cannot override.  Each dispatching run also asserts
-what the store holds afterwards: ``run.json``, ``events.jsonl`` and one report
-per subtask.
+failure that the moderator cannot override.
+
+Open-world path: a vague ranking that stops at the gate, the clarified salary
+request planned as a two-subtask chain whose second subtask is fed the first
+one's URLs, a private target rejected before anything opens, and a plan over the
+four-subtask cap rejected before anything opens.
+
+Each dispatching run also asserts what the store holds afterwards: ``run.json``,
+``events.jsonl`` and one report per subtask.
 """
 
 import copy
@@ -25,17 +32,38 @@ import tempfile
 import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from functools import partial
 from pathlib import Path
 
-from argus.__main__ import EXIT_NO_TOOLBOX, EXIT_OK, EXIT_USAGE, main
+from argus import planner
+from argus.__main__ import (
+    EXIT_NO_TOOLBOX,
+    EXIT_OK,
+    EXIT_RUN_NOT_SUCCEEDED,
+    EXIT_USAGE,
+    main,
+)
 from argus.contracts import InterpretedRequest
 from argus.controller import TERMINAL, Controller
-from argus.fakes import FakeGhost, FakeToolbox, StubModerator
+from argus.fakes import FakeGhost, FakePlannerClient, FakeToolbox, StubModerator
+from argus.gate import RANK_QUESTION
 from argus.store import JsonStore
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 FIXTURE_PATH = EXAMPLES / "interpreted_request.json"
 FIXTURE = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+#: The open-world fixtures: the ambiguous "best 10 jobs" request, the same
+#: request once "best" has been clarified, and the chain a planner returns for it.
+OPEN_PATH = EXAMPLES / "interpreted_request_open.json"
+OPEN_FIXTURE = json.loads(OPEN_PATH.read_text(encoding="utf-8"))
+SALARY_PATH = EXAMPLES / "interpreted_request_open_salary.json"
+SALARY_FIXTURE = json.loads(SALARY_PATH.read_text(encoding="utf-8"))
+CHAIN_PATH = EXAMPLES / "plan_open_chain.json"
+CHAIN = json.loads(CHAIN_PATH.read_text(encoding="utf-8"))
+
+#: The clarification the gate's S4 asks for the fixture's "best".
+S4_QUESTION = RANK_QUESTION.format(text="best")
 
 #: Text of the compound request, so the spans below are real spans of it.
 COMPOUND_TEXT = "Find headphones under $150 and keyboards under $100 in the demo catalog"
@@ -86,6 +114,49 @@ def missing_query(request_id="request-demo-clarify"):
     return InterpretedRequest.from_dict(data)
 
 
+def open_request(request_id="request-open-jobs-1", *, target_domain=None):
+    """The shipped open fixture: "best 10 jobs", where "best" means nothing yet.
+
+    ``target_domain`` replaces the intent's domain, which is how the two
+    blocked-target cases are built without editing the fixture on disk.
+    """
+    data = copy.deepcopy(OPEN_FIXTURE)
+    data["request_id"] = request_id
+    if target_domain is not None:
+        data["intents"][0]["target_domain"] = target_domain
+    return InterpretedRequest.from_dict(data)
+
+
+def salary_request(request_id="request-open-jobs-salary"):
+    """The same request after "best" was clarified: rank by salary, remote only."""
+    data = copy.deepcopy(SALARY_FIXTURE)
+    data["request_id"] = request_id
+    return InterpretedRequest.from_dict(data)
+
+
+def five_step_plan():
+    """A Plan payload one step over the four-subtask cap, all steps independent."""
+    payload = copy.deepcopy(CHAIN)
+    template = payload["subtasks"][0]
+    payload["subtasks"] = []
+    for step_number in range(1, 6):
+        step = copy.deepcopy(template)
+        step.update(
+            subtask_id=f"subtask-open-{step_number}",
+            concurrency_group=f"jobs-{step_number}",
+            depends_on=[],
+            inputs_from={},
+        )
+        payload["subtasks"].append(step)
+    return payload
+
+
+def injected_planner(plan_payload):
+    """What ``--plan-fixture`` builds: ``planner.plan`` with an offline client."""
+    client = FakePlannerClient(plan_payload)
+    return client, partial(planner.plan, client=client)
+
+
 # ------------------------------------------------------------------ harness
 
 class BarrierToolbox(FakeToolbox):
@@ -104,6 +175,46 @@ class BarrierToolbox(FakeToolbox):
     def run_subtask(self, subtask_input):
         self.barrier.wait(timeout=self.timeout)
         return super().run_subtask(subtask_input)
+
+
+class RecordingToolbox(FakeToolbox):
+    """A :class:`FakeToolbox` that keeps every ``SubtaskInput`` it was handed.
+
+    The fake's own ``calls`` record identity and mode but not parameters, and a
+    chain has to be checked on exactly that: what the second subtask received
+    from the first.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.inputs = []
+
+    def run_subtask(self, subtask_input):
+        self.inputs.append(subtask_input)
+        return super().run_subtask(subtask_input)
+
+    def input_for(self, subtask_id):
+        for subtask_input in self.inputs:
+            if subtask_input.subtask.subtask_id == subtask_id:
+                return subtask_input
+        raise AssertionError(f"{subtask_id} was never dispatched")
+
+
+class RecordingGhost(FakeGhost):
+    """A :class:`FakeGhost` that records how ``validate`` was called.
+
+    Open subtasks must be validated with the ``report_context`` keyword and
+    registry subtasks with the original three arguments; nothing else in the
+    run makes that visible.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.validate_kwargs = {}
+
+    def validate(self, subtask, records, evidence, **kwargs):
+        self.validate_kwargs[subtask.subtask_id] = kwargs
+        return super().validate(subtask, records, evidence, **kwargs)
 
 
 class EndToEndCase(unittest.TestCase):
@@ -388,6 +499,207 @@ class ValidationFailureTest(EndToEndCase):
         self.assert_store_layout(["subtask-1"])
 
 
+# ----------------------------------------------------------- open-world cases
+
+class OpenVagueRankingTest(EndToEndCase):
+    """"The best 10 jobs": S4 asks what "best" means and nothing runs."""
+
+    def setUp(self):
+        self.run_request(open_request())
+
+    def test_the_run_needs_input_on_the_ranking_criterion(self):
+        self.assertEqual(self.result.status, "needs_input")
+        self.assertEqual(self.result.gate.decision, "clarify")
+        self.assertEqual(self.result.gate.rule_id, "S4")
+        self.assertEqual(self.result.error.code, "NEEDS_INPUT")
+        self.assertIsNone(self.result.plan)
+
+    def test_the_question_offers_the_approved_examples(self):
+        self.assertEqual(
+            S4_QUESTION,
+            "What should 'best' mean? For example, highest salary, remote-only "
+            "roles, or closest match to your experience.",
+        )
+        self.assertEqual(self.result.gate.questions, [S4_QUESTION])
+        self.assertIn(S4_QUESTION, self.result.answer.text)
+        self.assertEqual(self.result.answer.unverified, [S4_QUESTION])
+        self.assertEqual(self.result.answer.claims, [])
+
+    def test_no_session_was_opened_and_the_store_holds_the_run(self):
+        self.assertEqual(self.toolbox.calls, [])
+        self.assertEqual(self.toolbox.sessions, {})
+        self.assertEqual(self.ghost.calls, [])
+        self.assertEqual(self.moderator.calls, [])
+        self.assert_run_is_terminal_and_clean()
+        self.assert_store_layout([])
+
+
+class OpenSalaryChainTest(EndToEndCase):
+    """The clarified request: search, then open each result, then one answer."""
+
+    SEARCH = "subtask-open-search"
+    DETAILS = "subtask-open-details"
+
+    def setUp(self):
+        self.client, plan_fn = injected_planner(CHAIN)
+        self.run_request(
+            salary_request(),
+            toolbox=RecordingToolbox(),
+            ghost=RecordingGhost(),
+            plan=plan_fn,
+        )
+
+    def records(self):
+        return self.result.answer.records
+
+    def findings(self, subtask_id):
+        report = next(r for r in self.result.reports if r.subtask_id == subtask_id)
+        return report.findings
+
+    def test_the_plan_came_from_one_injected_planner_call(self):
+        self.assertEqual(self.result.status, "succeeded", self.result.error)
+        self.assertEqual(len(self.client.calls), 1, self.client.calls)
+        self.assertEqual(self.result.plan.planned_by, "model")
+        self.assertEqual(
+            [task.subtask_id for task in self.result.plan.subtasks],
+            [self.SEARCH, self.DETAILS],
+        )
+        self.assertEqual(self.result.plan.subtasks[1].depends_on, [self.SEARCH])
+        self.assertEqual({task.kind for task in self.result.plan.subtasks}, {"open"})
+
+    def test_the_two_subtasks_ran_in_order_and_the_second_got_the_first_urls(self):
+        self.assertEqual(
+            [inp.subtask.subtask_id for inp in self.toolbox.inputs],
+            [self.SEARCH, self.DETAILS],
+        )
+        urls = [record["url"] for record in self.findings(self.SEARCH)]
+        self.assertTrue(urls)
+        received = self.toolbox.input_for(self.DETAILS).subtask.parameters["result_urls"]
+        self.assertIsInstance(received, list)
+        self.assertEqual(received, urls, "the URLs arrived out of order or incomplete")
+        self.assertIn("subtask_inputs_resolved", self.event_types())
+
+    def test_generic_validation_passed_with_the_report_context(self):
+        self.assertEqual(self.result.validation["status"], "passed")
+        for subtask_id in (self.SEARCH, self.DETAILS):
+            checks = self.result.validation["subtasks"][subtask_id]["checks"]
+            self.assertTrue(all(checks.values()), (subtask_id, checks))
+            self.assertIn("urls_on_target_domain", checks)
+            context = self.ghost.validate_kwargs[subtask_id]["report_context"]
+            self.assertEqual(context["subtask_id"], subtask_id)
+            self.assertEqual(context["run_id"], self.result.run_id)
+            self.assertNotIn("session_handle", context["evidence"])
+        self.assertIn(
+            "completeness",
+            " ".join(self.result.validation["subtasks"][self.DETAILS]["unverified"]),
+        )
+
+    def test_the_answer_applies_the_criteria_to_one_record_per_job(self):
+        records = self.records()
+        urls = [record["url"] for record in records]
+        self.assertEqual(len(urls), len(set(urls)), urls)
+        self.assertLessEqual(len(records), 10)
+        self.assertTrue(records)
+        self.assertTrue(all(record["remote"] is True for record in records), records)
+        salaries = [record["salary"] for record in records]
+        self.assertEqual(salaries, sorted(salaries, reverse=True), salaries)
+        # The detail subtask is the one that opened each job, so its record wins.
+        detail_observations = {
+            record["source_observation_id"] for record in self.findings(self.DETAILS)
+        }
+        self.assertTrue(
+            {record["source_observation_id"] for record in records} <= detail_observations
+        )
+
+    def test_every_claim_cites_an_observation_of_this_run(self):
+        claims = self.result.answer.claims
+        self.assertEqual(len(claims), len(self.records()))
+        self.assert_every_claim_is_cited()
+        evidence = set(self.result.validation["evidence"])
+        for claim in claims:
+            self.assertTrue(set(claim.evidence_refs) <= evidence, claim.evidence_refs)
+
+    def test_the_store_holds_one_report_per_subtask(self):
+        self.assert_run_is_terminal_and_clean()
+        self.assert_store_layout([self.SEARCH, self.DETAILS])
+
+
+class OpenBlockedDomainTest(EndToEndCase):
+    """A private or non-public target is rejected before anything is opened."""
+
+    def test_each_blocked_target_fails_with_domain_not_allowed(self):
+        for domain in ("127.0.0.1", "intranet.corp"):
+            with self.subTest(domain=domain):
+                result = self.run_request(
+                    open_request(request_id=f"request-open-{domain}", target_domain=domain)
+                )
+                self.assertEqual(result.status, "failed")
+                self.assertEqual(result.gate.decision, "reject")
+                self.assertEqual(result.gate.rule_id, "S2")
+                self.assertEqual(result.error.code, "DOMAIN_NOT_ALLOWED")
+                self.assertIn(domain, result.error.message)
+                self.assertIsNone(result.plan)
+                self.assertEqual(self.toolbox.calls, [])
+                self.assertEqual(result.reports, [])
+                self.assert_run_is_terminal_and_clean()
+
+
+class OpenPlanTooLargeTest(EndToEndCase):
+    """Five subtasks are over the cap: the run fails before a session opens."""
+
+    def setUp(self):
+        self.client, plan_fn = injected_planner(five_step_plan())
+        self.run_request(salary_request(), toolbox=RecordingToolbox(), plan=plan_fn)
+
+    def test_the_plan_is_rejected_with_plan_too_large(self):
+        self.assertEqual(self.result.status, "failed")
+        self.assertEqual(self.result.error.code, "PLAN_TOO_LARGE")
+        self.assertEqual(self.result.gate.decision, "accept")
+        self.assertIsNone(self.result.plan)
+
+    def test_nothing_was_opened_or_run(self):
+        self.assertEqual(len(self.client.calls), 1)
+        self.assertEqual(self.toolbox.calls, [], "the toolbox was used for an over-cap plan")
+        self.assertEqual(self.toolbox.inputs, [])
+        self.assertEqual(self.toolbox.sessions, {})
+        self.assertEqual(self.result.reports, [])
+        self.assert_run_is_terminal_and_clean()
+        self.assert_store_layout([])
+
+
+class RegistryPathUnchangedTest(EndToEndCase):
+    """The registry fixture still produces exactly what it did before 1b."""
+
+    def setUp(self):
+        self.run_request(single(), ghost=RecordingGhost())
+
+    def test_the_result_matches_the_phase_2_expectations(self):
+        self.assertEqual(self.result.status, "succeeded", self.result.error)
+        self.assertEqual(self.result.gate.rule_id, "G0")
+        self.assertEqual(self.result.plan.planned_by, "deterministic")
+        self.assertEqual([task.kind for task in self.result.plan.subtasks], ["registry"])
+        self.assertEqual(
+            [claim.text for claim in self.result.answer.claims],
+            [
+                "Studio headphones costs 129.0 USD at https://demo-catalog.invalid/products/0.",
+                "Travel headphones costs 79.0 USD at https://demo-catalog.invalid/products/1.",
+            ],
+        )
+        self.assertEqual(
+            [claim.evidence_refs for claim in self.result.answer.claims],
+            [["observation-000.png"], ["observation-000.png"]],
+        )
+        self.assertEqual(self.result.answer.unverified, [])
+
+    def test_registry_validation_keeps_the_three_argument_form(self):
+        self.assertEqual(self.result.validation["status"], "passed")
+        self.assertEqual(self.ghost.validate_kwargs, {"subtask-1": {}})
+        self.assertEqual(
+            self.result.validation["subtasks"]["subtask-1"]["failed_checks"], []
+        )
+        self.assert_store_layout(["subtask-1"])
+
+
 class CommandLineTest(unittest.TestCase):
     """``python -m argus`` end to end, through ``main`` rather than a subprocess."""
 
@@ -439,6 +751,48 @@ class CommandLineTest(unittest.TestCase):
         status, _, err = self.call("--store", self.store_dir)
         self.assertEqual(status, EXIT_USAGE)
         self.assertIn("nothing to run", err)
+
+    def test_an_open_request_with_a_vague_ranking_asks_and_exits_one(self):
+        status, out, err = self.call(
+            "--fake", "--interpreted", str(OPEN_PATH), "--store", self.store_dir
+        )
+        self.assertEqual(status, EXIT_RUN_NOT_SUCCEEDED, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["status"], "needs_input")
+        self.assertEqual(payload["gate"]["rule_id"], "S4")
+        self.assertEqual(payload["gate"]["questions"], [S4_QUESTION])
+        self.assertIsNone(payload["plan"])
+        self.assertEqual(payload["metrics"]["sessions_opened"], 0)
+
+    def test_the_plan_fixture_runs_the_chain_and_answers_once_per_job(self):
+        status, out, err = self.call(
+            "--fake", "--interpreted", str(SALARY_PATH),
+            "--plan-fixture", str(CHAIN_PATH), "--store", self.store_dir,
+        )
+        self.assertEqual(status, EXIT_OK, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["status"], "succeeded")
+        self.assertEqual(payload["plan"]["planned_by"], "model")
+        self.assertEqual(len(payload["reports"]), 2)
+        urls = [record["url"] for record in payload["answer"]["records"]]
+        self.assertEqual(len(urls), len(set(urls)), urls)
+        self.assertEqual(len(payload["answer"]["claims"]), len(urls))
+        self.assertEqual(payload["validation"]["status"], "passed")
+
+    def test_a_plan_fixture_without_an_interpreted_request_is_a_usage_error(self):
+        status, _, err = self.call(
+            "--plan-fixture", str(CHAIN_PATH), "Find the best jobs on jobs.example.com"
+        )
+        self.assertEqual(status, EXIT_USAGE)
+        self.assertIn("--plan-fixture requires --interpreted", err)
+
+    def test_an_unreadable_plan_fixture_is_a_usage_error(self):
+        status, _, err = self.call(
+            "--interpreted", str(SALARY_PATH), "--plan-fixture", str(FIXTURE_PATH),
+            "--store", self.store_dir,
+        )
+        self.assertEqual(status, EXIT_USAGE)
+        self.assertIn("is not a Plan", err)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -8,19 +8,90 @@ from argus import interfaces
 from argus.contracts import (
     Budget,
     ContractError,
+    Criterion,
     FinalAnswer,
+    Intent,
     InterpretedRequest,
+    ParameterOrigin,
     Plan,
     Subtask,
     SubtaskInput,
     TypedError,
     WorkerReport,
 )
-from argus.fakes import CATALOG, SCRIPTED_OUTCOMES, FakeGhost, FakeToolbox, StubModerator
+from argus.fakes import (
+    CATALOG,
+    OPEN_DATASET,
+    OPEN_RECORD_SHAPE,
+    SCRIPTED_OUTCOMES,
+    FakeGhost,
+    FakePlannerClient,
+    FakeToolbox,
+    StubModerator,
+)
+from argus.model_client import ModelClient
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / "argus" / "examples"
 ORIGIN = "https://demo-catalog.invalid"
+DOMAIN = "jobs.example.com"
+CHAIN = json.loads((EXAMPLES / "plan_open_chain.json").read_text())
+STEP_FIELDS = {
+    "subtask_id", "intent_index", "operation", "depends_on", "inputs_from",
+    "concurrency_group", "success_conditions", "preferred_tool",
+}
+
+
+def open_subtask(subtask_id="subtask-open-search", *, operation="search",
+                 query="software engineering", shape=OPEN_RECORD_SHAPE,
+                 target_domain=DOMAIN, **overrides):
+    fields = {
+        "subtask_id": subtask_id,
+        "intent_index": 0,
+        "site_id": target_domain,
+        "operation": operation,
+        "parameters": {"query": query},
+        "concurrency_group": "jobs",
+        "output_schema_id": "open-records.v1",
+        "depends_on": [],
+        "success_conditions": ["results present or explicit empty state"],
+        "preferred_tool": "dom",
+        "kind": "open",
+        "target_domain": target_domain,
+        "goal": "Find software engineering jobs",
+        "expected_record_shape": list(shape),
+    }
+    fields.update(overrides)
+    return Subtask(**fields)
+
+
+def context_for(report, *, run_id="run-1", empty_state=False):
+    """What the controller passes as report_context for an open subtask."""
+    evidence = dict(report.evidence)
+    evidence.pop("session_handle", None)
+    return {
+        "run_id": run_id,
+        "subtask_id": report.subtask_id,
+        "evidence": evidence,
+        "empty_state": empty_state,
+    }
+
+
+def open_interpreted(*criteria, request_id="request-open-t"):
+    text = "Find the highest salary 10 software engineering jobs, remote only, on jobs.example.com"
+    return InterpretedRequest(
+        request_id=request_id, raw_text=text, model="test", interpreted_at="2026-09-12T00:00:00Z",
+        intents=[Intent(
+            site_id=DOMAIN, operation="find_jobs", confidence=0.9, kind="open", target_domain=DOMAIN,
+            parameters={"query": ParameterOrigin("software engineering", "text_span", 0.9, (27, 47))},
+            goal="Find software engineering jobs", criteria=list(criteria),
+            expected_record_shape=list(OPEN_RECORD_SHAPE),
+        )],
+    )
+
+
+def criterion(kind, parameter, text=None):
+    return Criterion(text or f"{kind} {parameter}", kind, parameter, None, 0.95)
 
 
 def subtask(
@@ -359,6 +430,91 @@ class StubModeratorReconcileTests(unittest.TestCase):
         )
         self.assertEqual(decision.next_action["conflicts"], [])
 
+    # -- merging by url ---------------------------------------------------
+
+    def report_with(self, subtask_id, records):
+        """A schema-valid report for ``subtask_id`` carrying exactly ``records``."""
+        return WorkerReport.from_dict(
+            dict(self.reports[0].to_dict(), subtask_id=subtask_id, findings=records)
+        )
+
+    def merged(self, *reports):
+        return StubModerator().reconcile(self.plan, list(reports)).next_action["findings"]
+
+    def test_a_later_subtask_supersedes_the_earlier_record_for_the_same_url(self):
+        """The search-then-open_results chain: one entry per job, the detailed one."""
+        search = self.report_with(
+            "subtask-1",
+            [
+                {"title": "Staff Software Engineer", "url": f"{ORIGIN}/jobs/3",
+                 "source_observation_id": "observation-000.png"},
+                {"title": "Senior Software Engineer", "url": f"{ORIGIN}/jobs/1",
+                 "source_observation_id": "observation-000.png"},
+            ],
+        )
+        details = self.report_with(
+            "subtask-2",
+            [
+                {"title": "Senior Software Engineer", "url": f"{ORIGIN}/jobs/1",
+                 "salary": 185000, "source_observation_id": "observation-002.png"},
+                {"title": "Staff Software Engineer", "url": f"{ORIGIN}/jobs/3",
+                 "salary": 210000, "source_observation_id": "observation-003.png"},
+            ],
+        )
+        findings = self.merged(search, details)
+        self.assertEqual([record["url"] for record in findings],
+                         [f"{ORIGIN}/jobs/1", f"{ORIGIN}/jobs/3"])
+        self.assertEqual([record["salary"] for record in findings], [185000, 210000])
+        self.assertEqual(
+            [record["source_observation_id"] for record in findings],
+            ["observation-002.png", "observation-003.png"],
+            "the earlier, thinner record survived",
+        )
+
+    def test_the_merged_order_follows_the_later_report(self):
+        earlier = self.report_with(
+            "subtask-1",
+            [{"url": f"{ORIGIN}/a"}, {"url": f"{ORIGIN}/b"}, {"url": f"{ORIGIN}/c"}],
+        )
+        later = self.report_with(
+            "subtask-2", [{"url": f"{ORIGIN}/c", "seen": 2}, {"url": f"{ORIGIN}/a", "seen": 2}]
+        )
+        findings = self.merged(earlier, later)
+        self.assertEqual(
+            [record["url"] for record in findings],
+            [f"{ORIGIN}/b", f"{ORIGIN}/c", f"{ORIGIN}/a"],
+        )
+        self.assertEqual([record.get("seen") for record in findings], [None, 2, 2])
+
+    def test_records_without_a_url_are_kept_as_they_are(self):
+        first = self.report_with(
+            "subtask-1",
+            [{"title": "No link here"}, {"title": "Blank link", "url": "  "},
+             "not even an object"],
+        )
+        second = self.report_with(
+            "subtask-2", [{"title": "Also no link"}, {"title": "Blank link", "url": "  "}]
+        )
+        findings = self.merged(first, second)
+        self.assertEqual(
+            findings,
+            [{"title": "No link here"}, {"title": "Blank link", "url": "  "},
+             "not even an object",
+             {"title": "Also no link"}, {"title": "Blank link", "url": "  "}],
+        )
+
+    def test_two_independent_subtasks_keep_all_their_records(self):
+        """Nothing overlaps, so merging is the concatenation it always was."""
+        decision = StubModerator().reconcile(self.plan, self.reports)
+        findings = decision.next_action["findings"]
+        self.assertEqual(
+            findings, list(self.reports[0].findings) + list(self.reports[1].findings)
+        )
+        self.assertEqual(
+            len({record["url"] for record in findings}), len(findings), findings
+        )
+        self.assertNotIn("superseded", decision.reason)
+
 
 class StubModeratorSynthesizeTests(unittest.TestCase):
     def setUp(self):
@@ -519,6 +675,339 @@ class FakeGhostCompileTests(unittest.TestCase):
         report = run(FakeToolbox(), task)
         actionless = WorkerReport.from_dict(dict(report.to_dict(), actions=[]))
         self.assertIsNone(FakeGhost().compile(actionless, task))
+
+
+class FakePlannerClientTests(unittest.TestCase):
+    def test_satisfies_the_model_client_protocol(self):
+        self.assertIsInstance(FakePlannerClient(CHAIN), ModelClient)
+
+    def test_returns_only_step_fields_with_bindings_as_a_list(self):
+        client = FakePlannerClient(CHAIN)
+        result = client.parse_json("system text", "user text", dict, 4096)
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(set(result.parsed), {"subtasks"})
+        search, details = result.parsed["subtasks"]
+        for step in (search, details):
+            self.assertEqual(set(step), STEP_FIELDS)
+        self.assertEqual(search["inputs_from"], [])
+        self.assertEqual(
+            details["inputs_from"],
+            [{"parameter": "result_urls", "subtask_id": "subtask-open-search", "field": "url"}],
+        )
+        self.assertEqual(details["depends_on"], ["subtask-open-search"])
+        self.assertEqual(
+            client.calls,
+            [{"system": "system text", "user": "user text", "output_model": dict, "max_tokens": 4096}],
+        )
+
+    def test_status_override_returns_that_status_with_no_content(self):
+        for status in ("refusal", "truncated", "invalid"):
+            with self.subTest(status=status):
+                client = FakePlannerClient(CHAIN, status=status)
+                result = client.parse_json("s", "u", dict, 1)
+                self.assertEqual(result.status, status)
+                self.assertIsNone(result.parsed)
+                self.assertEqual(len(client.calls), 1)
+
+    def test_bad_construction_is_rejected(self):
+        with self.assertRaises(ContractError):
+            FakePlannerClient(CHAIN, status="done")
+        with self.assertRaises(ContractError):
+            FakePlannerClient({})
+        with self.assertRaises(ContractError):
+            FakePlannerClient({"subtasks": [{"subtask_id": "s"}]})  # no intent_index etc.
+        with self.assertRaises(ContractError):
+            FakePlannerClient({"subtasks": ["not an object"]})
+
+    def test_omitted_optional_scheduling_fields_get_subtask_defaults(self):
+        client = FakePlannerClient({"subtasks": [
+            {"subtask_id": "s", "intent_index": 0, "operation": "search", "concurrency_group": "g"},
+        ]})
+        [step] = client.parse_json("s", "u", dict, 1).parsed["subtasks"]
+        self.assertEqual(step["depends_on"], [])
+        self.assertEqual(step["inputs_from"], [])
+        self.assertEqual(step["success_conditions"], [])
+        self.assertEqual(step["preferred_tool"], "dom")
+
+    def test_each_call_gets_a_fresh_copy(self):
+        client = FakePlannerClient(CHAIN)
+        first = client.parse_json("s", "u", dict, 1).parsed
+        first["subtasks"].clear()
+        second = client.parse_json("s", "u", dict, 1).parsed
+        self.assertEqual(len(second["subtasks"]), 2)
+
+
+class OpenWorldToolboxTests(unittest.TestCase):
+    def test_the_dataset_has_at_least_six_complete_jobs(self):
+        rows = OPEN_DATASET[DOMAIN]
+        self.assertGreaterEqual(len(rows), 6)
+        for row in rows:
+            self.assertIsInstance(row["title"], str)
+            self.assertIsInstance(row["company"], str)
+            self.assertIsInstance(row["salary"], (int, float))
+            self.assertNotIsInstance(row["salary"], bool)
+            self.assertIsInstance(row["remote"], bool)
+
+    def test_search_returns_shaped_cited_records_on_the_domain(self):
+        report = run(FakeToolbox(), open_subtask())
+        self.assertEqual(report.outcome, "succeeded")
+        self.assertGreaterEqual(len(report.findings), 6)
+        self.assertEqual(report.evidence["screenshots"], ["observation-000.png"])
+        for record in report.findings:
+            self.assertEqual(set(record), set(OPEN_RECORD_SHAPE) | {"source_observation_id"})
+            self.assertTrue(record["url"].startswith(f"https://{DOMAIN}/"))
+            self.assertIsInstance(record["salary"], (int, float))
+            self.assertIsInstance(record["remote"], bool)
+            self.assertEqual(record["source_observation_id"], "observation-000.png")
+        self.assertNotIn("keywords", report.findings[0])
+        self.assertEqual(report.worker, "fake")
+        self.assertEqual(WorkerReport.from_dict(report.to_dict()), report)
+
+    def test_records_follow_the_subtasks_expected_record_shape(self):
+        report = run(FakeToolbox(), open_subtask(shape=("title", "url", "rating")))
+        for record in report.findings:
+            self.assertEqual(set(record), {"title", "url", "rating", "source_observation_id"})
+            self.assertIsNone(record["rating"], "a field the dataset lacks is present but empty")
+
+    def test_every_query_word_must_match(self):
+        counts = {}
+        for query in ("engineering", "software engineering", "contoso", "no-such-job"):
+            counts[query] = len(run(FakeToolbox(), open_subtask(query=query)).findings)
+        self.assertEqual(counts["engineering"], len(OPEN_DATASET[DOMAIN]))
+        self.assertEqual(counts["software engineering"], 6)
+        self.assertEqual(counts["contoso"], 2)
+        self.assertEqual(counts["no-such-job"], 0)
+
+    def test_an_empty_result_is_still_a_succeeded_report(self):
+        report = run(FakeToolbox(), open_subtask(query="no-such-job"))
+        self.assertEqual(report.outcome, "succeeded")
+        self.assertEqual(report.findings, [])
+        self.assertEqual(report.evidence["screenshots"], ["observation-000.png"])
+
+    def test_max_results_caps_the_search(self):
+        task = open_subtask(parameters={"query": "software", "max_results": 2})
+        self.assertEqual(len(run(FakeToolbox(), task).findings), 2)
+
+    def test_an_unknown_domain_yields_an_explicit_empty_result(self):
+        report = run(FakeToolbox(), open_subtask(target_domain="docs.example.org"))
+        self.assertEqual(report.outcome, "succeeded")
+        self.assertEqual(report.findings, [])
+        self.assertEqual(report.actions[0]["url"], "https://docs.example.org/search")
+
+    def test_open_results_returns_one_record_per_url_in_order_each_with_its_own_observation(self):
+        urls = [f"https://{DOMAIN}/jobs/3", f"https://{DOMAIN}/jobs/1", f"https://{DOMAIN}/jobs/999"]
+        task = open_subtask("subtask-open-details", operation="open_results",
+                            parameters={"result_urls": urls})
+        report = run(FakeToolbox(), task)
+        self.assertEqual(report.outcome, "succeeded")
+        self.assertEqual([r["url"] for r in report.findings], urls)
+        self.assertEqual([r["title"] for r in report.findings],
+                         ["Staff Software Engineer", "Senior Software Engineer", None])
+        observations = [r["source_observation_id"] for r in report.findings]
+        self.assertEqual(len(set(observations)), 3, "each record cites its own observation")
+        self.assertEqual(report.evidence["screenshots"], ["observation-000.png"] + observations)
+        self.assertEqual(
+            [a["action"]["name"] for a in report.actions],
+            ["open_url", "open_url", "open_url", "open_url", "extract", "finished"],
+        )
+        self.assertEqual([a["url"] for a in report.actions[1:4]], urls)
+        self.assertEqual([a["observation_after"] for a in report.actions[1:4]], observations)
+
+    def test_open_results_without_urls_falls_back_to_a_search(self):
+        task = open_subtask("subtask-open-details", operation="open_results")
+        self.assertEqual(len(run(FakeToolbox(), task).findings), 6)
+
+    def test_scripted_outcomes_apply_to_open_subtasks(self):
+        failed = run(FakeToolbox({"subtask-open-search": "auth_required"}), open_subtask())
+        self.assertEqual(failed.outcome, "failed")
+        self.assertIsNone(failed.findings)
+        self.assertEqual(failed.typed_failures[0].code, "AUTH_REQUIRED")
+        self.assertEqual(failed.typed_failures[0].step_id, failed.failures[0]["step_id"])
+        empty = run(FakeToolbox({"subtask-open-search": "empty"}), open_subtask())
+        self.assertEqual((empty.outcome, empty.findings, empty.evidence["screenshots"]),
+                         ("succeeded", [], []))
+        with self.assertRaises(RuntimeError):
+            run(FakeToolbox({"subtask-open-search": "raise"}), open_subtask())
+
+    def test_open_calls_are_recorded_like_registry_calls(self):
+        toolbox = FakeToolbox()
+        run(toolbox, open_subtask())
+        self.assertEqual([c[0] for c in toolbox.calls], ["open_session", "run_subtask"])
+        self.assertEqual(toolbox.calls[1][1:], ("subtask-open-search", "explore", "dom", "fake-session-1"))
+
+    def test_observations_are_numbered_across_open_and_registry_runs(self):
+        toolbox = FakeToolbox()
+        first = run(toolbox, subtask())
+        second = run(toolbox, open_subtask())
+        self.assertEqual(first.evidence["screenshots"], ["observation-000.png"])
+        self.assertEqual(second.evidence["screenshots"], ["observation-001.png"])
+
+
+class OpenWorldGhostTests(unittest.TestCase):
+    def setUp(self):
+        self.ghost = FakeGhost()
+        self.task = open_subtask()
+        self.report = run(FakeToolbox(), self.task)
+        self.records = self.report.findings
+        self.context = context_for(self.report)
+
+    def validate(self, records, *, evidence=None, context="default", task=None):
+        if context == "default":
+            context = self.context
+        evidence = self.report.evidence["screenshots"] if evidence is None else evidence
+        return self.ghost.validate(task or self.task, records, evidence, report_context=context)
+
+    def test_passes_on_the_fakes_own_open_report(self):
+        result = self.validate(self.records)
+        self.assertEqual(result["status"], "passed", result["failed_checks"])
+        self.assertEqual(
+            set(result["checks"]),
+            {"records_are_objects", "records_cite_observations", "results_present_or_empty_state",
+             "query_visibly_applied", "urls_on_target_domain"},
+        )
+        self.assertTrue(any("completeness" in note for note in result["unverified"]))
+        self.assertIn("generic", result["scope"])
+        self.assertEqual(self.ghost.calls, [("validate", "subtask-open-search", len(self.records))])
+
+    def test_the_open_report_passes_without_a_context_too(self):
+        result = self.validate(self.records, context=None)
+        self.assertEqual(result["status"], "passed", result["failed_checks"])
+
+    def test_an_uncited_record_fails(self):
+        uncited = [dict(self.records[0], source_observation_id="observation-999.png")]
+        result = self.validate(uncited)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failed_checks"], ["records_cite_observations"])
+        missing = [dict(self.records[0], source_observation_id=None)]
+        self.assertIn("records_cite_observations", self.validate(missing)["failed_checks"])
+
+    def test_context_observations_count_as_cited(self):
+        verified = [dict(self.records[0], source_observation_id="observation-fake-1")]
+        context = dict(self.context, evidence={
+            "screenshots": [], "verifications": [{"observation_id": "observation-fake-1"}],
+        })
+        result = self.validate(verified, evidence=[], context=context)
+        self.assertEqual(result["status"], "passed", result["failed_checks"])
+
+    def test_empty_records_need_an_explicit_empty_state(self):
+        result = self.validate([], context=dict(self.context, empty_state=False))
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failed_checks"], ["results_present_or_empty_state"])
+        result = self.validate([], context=dict(self.context, empty_state=True))
+        self.assertEqual(result["status"], "passed", result["failed_checks"])
+
+    def test_the_query_needs_at_least_one_observation(self):
+        bare = dict(self.context, evidence={"screenshots": []}, empty_state=True)
+        result = self.validate([], evidence=[], context=bare)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failed_checks"], ["query_visibly_applied"])
+
+    def test_a_url_off_the_target_domain_fails(self):
+        off = [dict(self.records[0], url="https://evil.example.org/jobs/1")]
+        result = self.validate(off)
+        self.assertEqual(result["failed_checks"], ["urls_on_target_domain"])
+        sub = [dict(self.records[0], url=f"https://www.{DOMAIN}/jobs/1")]
+        self.assertEqual(self.validate(sub)["status"], "passed")
+        for bad in (None, 7, f"https://{DOMAIN}.evil.example.org/x", "not a url"):
+            with self.subTest(url=bad):
+                self.assertIn("urls_on_target_domain",
+                              self.validate([dict(self.records[0], url=bad)])["failed_checks"])
+
+    def test_a_record_that_is_not_an_object_fails(self):
+        result = self.validate(["Staff Software Engineer"])
+        self.assertIn("records_are_objects", result["failed_checks"])
+
+    def test_registry_validation_is_unchanged_and_takes_no_context(self):
+        task = subtask()
+        records = run(FakeToolbox(), task).findings
+        result = FakeGhost().validate(task, records, ["observation-000.png"])
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(
+            set(result["checks"]),
+            {"records_are_objects", "title_present", "price_present", "currency_usd",
+             "url_on_site", "price_within_max"},
+        )
+        self.assertNotIn("unverified", result)
+
+
+class StubModeratorCriteriaTests(unittest.TestCase):
+    def setUp(self):
+        self.task = open_subtask()
+        self.report = run(FakeToolbox(), self.task)
+        self.records = self.report.findings
+        self.validation = FakeGhost().validate(
+            self.task, self.records, self.report.evidence["screenshots"],
+            report_context=context_for(self.report),
+        )
+
+    def synthesize(self, *criteria, records=None):
+        return StubModerator().synthesize(
+            open_interpreted(*criteria), list(self.records if records is None else records),
+            self.validation, ["observation-000.png"], [],
+        )
+
+    def test_filter_rank_and_limit_apply_in_that_order(self):
+        answer = self.synthesize(
+            criterion("limit", 3, "10"),
+            criterion("rank", "salary", "highest salary"),
+            criterion("filter", "remote", "remote only"),
+        )
+        self.assertEqual(
+            [(r["title"], r["salary"], r["remote"]) for r in answer.records],
+            [("Staff Software Engineer", 210000, True),
+             ("Senior Software Engineer", 185000, True),
+             ("Site Reliability Engineer", 160000, True)],
+        )
+        self.assertEqual(len(answer.claims), 3)
+        for claim, record in zip(answer.claims, answer.records):
+            self.assertEqual(claim.evidence_refs, [record["source_observation_id"]])
+            self.assertIn(record["title"], claim.text)
+        self.assertEqual(answer.unverified, [])
+        self.assertEqual(FinalAnswer.from_dict(answer.to_dict()), answer)
+
+    def test_without_criteria_records_are_passed_through(self):
+        answer = self.synthesize()
+        self.assertEqual(answer.records, self.records)
+        self.assertEqual(len(answer.claims), len(self.records))
+
+    def test_a_criterion_whose_field_is_absent_is_named_unverified(self):
+        answer = self.synthesize(criterion("rank", "rating", "best rated"))
+        self.assertEqual(answer.records, self.records, "nothing was reordered")
+        [note] = answer.unverified
+        self.assertIn("'best rated'", note)
+        self.assertIn("was not applied", note)
+        self.assertIn("'rating'", note)
+
+    def test_a_rank_without_a_field_is_unverified(self):
+        answer = self.synthesize(Criterion("best", "rank", None, None, 0.4))
+        [note] = answer.unverified
+        self.assertIn("'best'", note)
+        self.assertIn("names no record field", note)
+        self.assertEqual(answer.records, self.records)
+
+    def test_a_limit_must_be_a_non_negative_integer(self):
+        for bad in ("ten", -1, True, 2.5):
+            with self.subTest(limit=bad):
+                answer = self.synthesize(criterion("limit", bad, "some"))
+                self.assertEqual(len(answer.records), len(self.records))
+                self.assertTrue(any("was not applied" in n for n in answer.unverified))
+        self.assertEqual(len(self.synthesize(criterion("limit", 0)).records), 0)
+
+    def test_a_filter_can_match_an_explicit_value(self):
+        answer = self.synthesize(criterion("filter", {"field": "company", "value": "Contoso"}, "at Contoso"))
+        self.assertEqual({r["company"] for r in answer.records}, {"Contoso"})
+        self.assertEqual(len(answer.records), 2)
+
+    def test_criteria_are_skipped_when_there_are_no_records(self):
+        answer = self.synthesize(criterion("filter", "remote", "remote only"), records=[])
+        self.assertEqual(answer.records, [])
+        self.assertTrue(any("'remote'" in n for n in answer.unverified))
+
+    def test_job_claims_name_the_fields_without_a_price_sentence(self):
+        [claim] = self.synthesize(records=self.records[:1]).claims
+        self.assertNotIn("costs", claim.text)
+        self.assertIn("salary", claim.text)
+        self.assertIn(self.records[0]["url"], claim.text)
 
 
 if __name__ == "__main__":

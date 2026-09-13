@@ -27,13 +27,20 @@ Standard library only; no third-party dependency and no I/O.
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import MISSING, dataclass, field, fields
 from typing import Any, ClassVar, Mapping
 
 __all__ = [
     "SCHEMA_VERSION",
+    "MAX_CONCURRENT_WORKERS",
+    "MAX_OPEN_SUBTASKS",
+    "MAX_OPEN_DEPTH",
     "ERROR_CODES",
     "PARAMETER_SOURCES",
+    "INTENT_KINDS",
+    "CRITERION_KINDS",
+    "PLANNED_BY_VALUES",
     "GATE_DECISIONS",
     "MODERATOR_STAGES",
     "PREFERRED_TOOLS",
@@ -43,6 +50,7 @@ __all__ = [
     "Message",
     "TypedError",
     "ParameterOrigin",
+    "Criterion",
     "Intent",
     "MissingParameter",
     "InterpretedRequest",
@@ -61,7 +69,12 @@ __all__ = [
 ]
 
 #: Version of the message shapes in this module.  Bump it when a field changes.
-SCHEMA_VERSION = "0.2-argus-draft"
+SCHEMA_VERSION = "0.3-argus-draft"
+
+#: Local VLM capacity and the separate MVP open-plan size budget.
+MAX_CONCURRENT_WORKERS = 4
+MAX_OPEN_SUBTASKS = 4
+MAX_OPEN_DEPTH = 3
 
 #: Typed failure codes.  Every failure that reaches the user carries one of these.
 ERROR_CODES = (
@@ -79,10 +92,23 @@ ERROR_CODES = (
     "BUDGET_EXCEEDED",
     "CANCELLED",
     "MODEL_REFUSED",
+    "DOMAIN_NOT_ALLOWED",
+    "ACTION_CLASS_NOT_ALLOWED",
+    "PLAN_TOO_LARGE",
 )
 
 #: Where a parameter value came from.
 PARAMETER_SOURCES = ("text_span", "default", "structured")
+
+#: Whether an intent or subtask uses a qualified registry operation or an
+#: open-world navigation path.
+INTENT_KINDS = ("registry", "open")
+
+#: Ways a user can constrain or order open-world results.
+CRITERION_KINDS = ("rank", "filter", "limit")
+
+#: Which planning path produced a plan.
+PLANNED_BY_VALUES = ("deterministic", "model")
 
 #: Outcomes of the acceptance gate (stage 2).
 GATE_DECISIONS = ("accept", "clarify", "reject")
@@ -160,6 +186,19 @@ def _check_choice(owner: str, name: str, value: Any, allowed: tuple[str, ...]) -
         raise ContractError(
             f"{owner}.{name} must be one of {', '.join(allowed)}; got {value!r}"
         )
+
+
+def _check_open_context(owner: str, target_domain: Any, goal: Any,
+                        criteria: Any, expected_record_shape: Any) -> None:
+    """Check optional context without deciding whether an intent can execute."""
+    for name, value in (("target_domain", target_domain), ("goal", goal)):
+        if value is not None and not isinstance(value, str):
+            raise ContractError(f"{owner}.{name} must be a string or null")
+    if not isinstance(criteria, list) or any(not isinstance(c, Criterion) for c in criteria):
+        raise ContractError(f"{owner}.criteria must be a list of Criterion messages")
+    if (not isinstance(expected_record_shape, list)
+            or any(not isinstance(name, str) or not name.strip() for name in expected_record_shape)):
+        raise ContractError(f"{owner}.expected_record_shape must be a list of nonempty field names")
 
 
 class Message:
@@ -268,21 +307,68 @@ class ParameterOrigin(Message):
 
 
 @dataclass
+class Criterion(Message):
+    """One explicit ranking, filtering or limiting request from the user.
+
+    Produced by stage 1 for open-world intents.  ``span`` is the half-open
+    character range in ``InterpretedRequest.raw_text`` when the criterion came
+    from the request.  ``parameter`` carries its resolved value when there is
+    one, such as ``10`` for a result limit or ``"salary"`` for a ranking.
+    """
+
+    text: str
+    kind: str
+    parameter: Any | None
+    span: tuple[int, int] | None
+    confidence: float
+
+    def __post_init__(self) -> None:
+        _check_choice("Criterion", "kind", self.kind, CRITERION_KINDS)
+        if not isinstance(self.text, str) or not self.text.strip():
+            raise ContractError("Criterion.text must be a nonempty string")
+        if (type(self.confidence) not in (int, float)
+                or not 0 <= self.confidence <= 1 or not math.isfinite(self.confidence)):
+            raise ContractError("Criterion.confidence must be a finite number from 0 to 1")
+        if self.span is not None:
+            if not isinstance(self.span, (list, tuple)):
+                raise ContractError("Criterion.span must be two integers or null")
+            span = tuple(self.span)
+            if len(span) != 2 or not all(type(part) is int for part in span):
+                raise ContractError("Criterion.span must be two integers or null")
+            if span[0] < 0 or span[1] < span[0]:
+                raise ContractError(f"Criterion.span {span} is not a valid range")
+            self.span = span
+
+
+@dataclass
 class Intent(Message):
-    """One supported site operation the user asked for.
+    """One registry operation or open-world navigation goal from the user.
 
     Produced by stage 1.  A compound request yields several intents; the planner
-    turns each one into a subtask.
+    turns each one into one or more subtasks.  Registry intents retain the phase
+    1 fields; open intents additionally carry a target domain, plain-language
+    goal, explicit criteria and the expected record field names.
     """
 
     site_id: str
     operation: str
     parameters: dict[str, ParameterOrigin]
     confidence: float
+    kind: str = "registry"
+    target_domain: str | None = None
+    goal: str | None = None
+    criteria: list[Criterion] = field(default_factory=list)
+    expected_record_shape: list[str] = field(default_factory=list)
 
     _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {
         "parameters": ("map", ParameterOrigin),
+        "criteria": ("list", Criterion),
     }
+
+    def __post_init__(self) -> None:
+        _check_choice("Intent", "kind", self.kind, INTENT_KINDS)
+        _check_open_context("Intent", self.target_domain, self.goal,
+                            self.criteria, self.expected_record_shape)
 
 
 @dataclass
@@ -324,7 +410,7 @@ class GateDecision(Message):
     """Stage 2 output: whether the interpreted request may execute.
 
     Pure rules, no model call.  ``clarify`` ends the run as ``needs_input`` with
-    ``questions``; ``reject`` ends it with ``INVALID_INPUT``.  ``rule_id`` names
+    ``questions``; ``reject`` ends it with ``INVALID_INPUT``, or ``DOMAIN_NOT_ALLOWED`` (S2) and ``ACTION_CLASS_NOT_ALLOWED`` (S5) for open intents.  ``rule_id`` names
     the rule that fired so the decision can be explained.
     """
 
@@ -344,7 +430,11 @@ class Subtask(Message):
     ``parameters`` holds plain resolved values, unlike the intent it came from.
     ``depends_on`` and ``concurrency_group`` are fixed at creation time: the
     dispatcher starts subtasks whose dependencies are satisfied and never
-    reorders them later.
+    reorders them later.  The planner copies approved open-intent context into
+    target_domain, goal, criteria and expected_record_shape for the worker.
+    Each inputs_from field names either all "findings" or one top-level field:
+    from record lists, that field is collected in record order; from mappings,
+    it is the corresponding value.  Missing fields fail rather than being skipped.
     """
 
     subtask_id: str
@@ -357,9 +447,30 @@ class Subtask(Message):
     depends_on: list[str] = field(default_factory=list)
     success_conditions: list[str] = field(default_factory=list)
     preferred_tool: str = "dom"
+    inputs_from: dict[str, dict[str, str]] = field(default_factory=dict)
+    kind: str = "registry"
+    target_domain: str | None = None
+    goal: str | None = None
+    criteria: list[Criterion] = field(default_factory=list)
+    expected_record_shape: list[str] = field(default_factory=list)
+
+    _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {"criteria": ("list", Criterion)}
 
     def __post_init__(self) -> None:
         _check_choice("Subtask", "preferred_tool", self.preferred_tool, PREFERRED_TOOLS)
+        _check_choice("Subtask", "kind", self.kind, INTENT_KINDS)
+        _check_open_context("Subtask", self.target_domain, self.goal,
+                            self.criteria, self.expected_record_shape)
+        if not isinstance(self.inputs_from, dict):
+            raise ContractError("Subtask.inputs_from must be an object")
+        for parameter, source in self.inputs_from.items():
+            if not isinstance(parameter, str) or not parameter.strip():
+                raise ContractError("Subtask.inputs_from keys must be nonempty parameter names")
+            if (not isinstance(source, dict) or set(source) != {"subtask_id", "field"}
+                    or any(not isinstance(v, str) or not v.strip() for v in source.values())):
+                raise ContractError("Subtask.inputs_from entries require only nonempty subtask_id and field")
+            if source["subtask_id"] not in self.depends_on:
+                raise ContractError("Subtask.inputs_from must name a declared dependency")
 
 
 @dataclass
@@ -370,8 +481,35 @@ class Plan(Message):
     request_id: str
     subtasks: list[Subtask]
     created_at: str
+    planned_by: str = "deterministic"
+    caps: dict[str, int] = field(
+        default_factory=lambda: {"max_subtasks": MAX_OPEN_SUBTASKS, "max_depth": MAX_OPEN_DEPTH}
+    )
 
     _NESTED: ClassVar[Mapping[str, tuple[str, type]]] = {"subtasks": ("list", Subtask)}
+
+    def __post_init__(self) -> None:
+        _check_choice("Plan", "planned_by", self.planned_by, PLANNED_BY_VALUES)
+        self.validate_limits()
+
+    def validate_limits(self) -> None:
+        """Validate controller-owned budgets, including after a plan is mutated.
+
+        A mixed plan counts all its subtasks toward the open-plan budget.
+        Registry-only plans retain their existing sequential-work behavior.
+        Graph/depth validation remains the planner's responsibility.
+        """
+        if not isinstance(self.caps, dict) or set(self.caps) != {"max_subtasks", "max_depth"}:
+            raise ContractError("Plan.caps requires only max_subtasks and max_depth")
+        for name, ceiling in (("max_subtasks", MAX_OPEN_SUBTASKS), ("max_depth", MAX_OPEN_DEPTH)):
+            value = self.caps[name]
+            if type(value) is not int or value < 1:
+                raise ContractError(f"Plan.caps.{name} must be a positive integer")
+            if value > ceiling:
+                raise ContractError(f"Plan.caps.{name} must be at most {ceiling}", code="PLAN_TOO_LARGE")
+        if (self.planned_by == "model" or any(s.kind == "open" for s in self.subtasks)):
+            if len(self.subtasks) > self.caps["max_subtasks"]:
+                raise ContractError("Open plan exceeds max_subtasks", code="PLAN_TOO_LARGE")
 
 
 @dataclass

@@ -3,14 +3,28 @@
 Phase D of docs/hackathon/ARGUS-IMPLEMENTATION.md.  These let the whole run
 execute offline, with no browser, no model call and no network:
 
+* :class:`FakeModelClient` - the :mod:`argus.model_client` boundary reduced to a
+  scripted list of results, so stage 1 and the open-world planner can be driven
+  through every outcome (including a refusal) without an SDK or a key.
+* :class:`FakePlannerClient` - the same boundary answering the open-world
+  planner from a Plan JSON fixture, so ``python -m argus --plan-fixture`` and
+  the tests can replay a scheduling offline.  It is only ever injected
+  explicitly; nothing substitutes it for a real model call.
 * :class:`FakeToolbox` - hands out session handles, answers ``run_subtask``
-  from a small product catalog, and can be scripted to force failures.
+  from a small product catalog for registry subtasks and from
+  :data:`OPEN_DATASET` for open-world ones, and can be scripted to force
+  failures.
 * :class:`StubModerator` - the three moderator callables reduced to rules, so
   the controller's intake, reconciliation and synthesis paths are exercised
   without a model.  It is a placeholder for Thomas's moderator.
-* :class:`FakeGhost` - always explores, validates records against the fixture
-  ground truth, and compiles a candidate skill.  Modelled on Sting's simulated
-  demo (``ghostapi/demo/ghost_demo.py``): the catalog rows and the shape of the
+  Reconciliation merges the accepted reports by record ``url``, so a
+  search-then-open_results chain answers with one entry per result rather than
+  two.  Synthesis applies the request's explicit criteria and names the ones it
+  could not.
+* :class:`FakeGhost` - always explores, validates registry records against the
+  fixture ground truth and open-world records with the generic checks only, and
+  compiles a candidate skill.  Modelled on Sting's simulated demo
+  (``ghostapi/demo/ghost_demo.py``): the catalog rows and the shape of the
   compiled definition come from there.  His demo prices in CAD while
   ``argus.registry`` fixes USD, so the prices here are USD.
 
@@ -27,17 +41,20 @@ never drift out of that format.
 
 from __future__ import annotations
 
+import copy
 import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlsplit
 
 from argus import registry
 from argus.contracts import (
     ERROR_CODES,
     Claim,
     ContractError,
+    Criterion,
     FinalAnswer,
     InterpretedRequest,
     ModeratorDecision,
@@ -47,11 +64,16 @@ from argus.contracts import (
     TypedError,
     WorkerReport,
 )
+from argus.model_client import MODEL_STATUSES, ModelResult
 
 __all__ = [
     "CATALOG",
+    "OPEN_DATASET",
+    "OPEN_RECORD_SHAPE",
     "DEFAULT_SITE_ID",
     "SCRIPTED_OUTCOMES",
+    "FakeModelClient",
+    "FakePlannerClient",
     "FakeToolbox",
     "StubModerator",
     "FakeGhost",
@@ -71,6 +93,34 @@ CATALOG: tuple[dict[str, Any], ...] = (
     {"index": 3, "title": "Mechanical keyboard", "price": 99.0},
     {"index": 4, "title": "Compact keyboard", "price": 49.0},
 )
+
+#: Record fields an open-world subtask gets when it declares no
+#: ``expected_record_shape`` of its own.
+OPEN_RECORD_SHAPE: tuple[str, ...] = ("title", "company", "url", "salary", "remote")
+
+#: The open-world fixture, keyed by ``target_domain``.  A row's ``url`` is
+#: ``https://<domain>/jobs/<index>``; ``keywords`` only feeds the query match
+#: and is never emitted.  Seven rows so that the query "software engineering"
+#: selects six (the manager row lacks "software") and there is something for
+#: the moderator's filter, rank and limit criteria to act on.
+OPEN_DATASET: dict[str, tuple[dict[str, Any], ...]] = {
+    "jobs.example.com": (
+        {"index": 1, "title": "Senior Software Engineer", "company": "Northwind",
+         "salary": 185000, "remote": True, "keywords": "software engineering backend"},
+        {"index": 2, "title": "Software Engineer, Platform", "company": "Contoso",
+         "salary": 150000, "remote": False, "keywords": "software engineering platform"},
+        {"index": 3, "title": "Staff Software Engineer", "company": "Fabrikam",
+         "salary": 210000, "remote": True, "keywords": "software engineering staff"},
+        {"index": 4, "title": "Software Engineering Intern", "company": "Northwind",
+         "salary": 48000, "remote": False, "keywords": "software engineering intern"},
+        {"index": 5, "title": "Frontend Software Engineer", "company": "Adatum",
+         "salary": 132000, "remote": True, "keywords": "software engineering frontend"},
+        {"index": 6, "title": "Site Reliability Engineer", "company": "Contoso",
+         "salary": 160000, "remote": True, "keywords": "software engineering reliability"},
+        {"index": 7, "title": "Engineering Manager", "company": "Adatum",
+         "salary": 195000, "remote": False, "keywords": "engineering management"},
+    ),
+}
 
 #: Outcomes :class:`FakeToolbox` can be scripted to force per subtask.
 #:
@@ -110,6 +160,10 @@ _SCRIPTED_FAILURES: dict[str, tuple[str, bool, str]] = {
 #: Fixed clock for action timestamps, so two runs of a test compare equal.
 _BASE_TIMESTAMP = 1789237040.0
 
+#: Marks a record that a later subtask superseded while reconciling, so the
+#: positions taken during the merge stay valid until the list is filtered.
+_SUPERSEDED = object()
+
 
 def _now() -> str:
     """Current UTC time in the fixtures' ``...Z`` format."""
@@ -124,6 +178,36 @@ def _origin(site_id: str) -> str:
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _open_origin(subtask: Subtask) -> str:
+    """The origin an open-world subtask browses: its target domain over https."""
+    return f"https://{subtask.target_domain or ''}"
+
+
+def _open_rows(domain: str | None) -> tuple[dict[str, Any], ...]:
+    """The dataset rows for a target domain, each with its ``url`` filled in."""
+    if not isinstance(domain, str):
+        return ()
+    rows = OPEN_DATASET.get(domain.strip().lower(), ())
+    return tuple(
+        dict(row, url=f"https://{domain.strip().lower()}/jobs/{row['index']}") for row in rows
+    )
+
+
+def _on_domain(url: Any, domain: str | None) -> bool:
+    """True when ``url`` is a string whose host is ``domain`` or a subdomain of it."""
+    if not isinstance(url, str) or not isinstance(domain, str) or not domain.strip():
+        return False
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        return False
+    if not host:
+        return False
+    wanted = domain.strip().lower().removesuffix(".")
+    host = host.lower().removesuffix(".")
+    return host == wanted or host.endswith(f".{wanted}")
 
 
 def _records_of(report: WorkerReport) -> list[dict[str, Any]]:
@@ -158,14 +242,184 @@ def _verifications_of(report: WorkerReport) -> list[str]:
     return refs
 
 
+class FakeModelClient:
+    """A scripted :class:`argus.model_client.ModelClient`.  Never calls anything.
+
+    Construct it with the :class:`~argus.model_client.ModelResult` each call
+    should return, in order - one result, or a list for a caller that calls
+    more than once.  Running out is an error rather than a silent repeat, so a
+    test that expects two calls cannot pass while making one.
+
+    Every call is appended to :attr:`calls` as a mapping with ``system``,
+    ``user``, ``output_model`` and ``max_tokens``, so a test can assert what the
+    caller asked for - the prompt it sent, the schema it demanded and the bound
+    it set - without asserting anything about a model's judgement.
+    """
+
+    def __init__(self, results: Sequence[ModelResult] | ModelResult) -> None:
+        if isinstance(results, ModelResult):
+            results = [results]
+        scripted = list(results)
+        for index, result in enumerate(scripted):
+            if not isinstance(result, ModelResult):
+                raise ContractError(
+                    f"FakeModelClient result {index} is {type(result).__name__}, "
+                    f"not a ModelResult"
+                )
+        self.results: list[ModelResult] = scripted
+        self.calls: list[dict[str, Any]] = []
+
+    def parse_json(
+        self, system: str, user: str, output_model: type, max_tokens: int
+    ) -> ModelResult:
+        self.calls.append(
+            {
+                "system": system,
+                "user": user,
+                "output_model": output_model,
+                "max_tokens": max_tokens,
+            }
+        )
+        if len(self.calls) > len(self.results):
+            raise ContractError(
+                f"FakeModelClient was scripted with {len(self.results)} result(s) "
+                f"but was called {len(self.calls)} time(s)"
+            )
+        return self.results[len(self.calls) - 1]
+
+
+#: The scheduling fields of one planner step, exactly as ``planner._output_model``
+#: declares them.  Everything else in a Plan JSON subtask - parameters, target,
+#: goal, criteria, record shape, kind, output schema - is controller-owned and
+#: is dropped, so the fake can only ever hand the planner what a model could.
+_STEP_FIELDS: tuple[str, ...] = (
+    "subtask_id",
+    "intent_index",
+    "operation",
+    "depends_on",
+    "inputs_from",
+    "concurrency_group",
+    "success_conditions",
+    "preferred_tool",
+)
+
+#: ``Subtask`` defaults for the optional scheduling fields, so a Plan JSON that
+#: omits them (the way ``Subtask.from_dict`` allows) still yields a full step.
+_STEP_DEFAULTS: dict[str, Any] = {
+    "depends_on": [],
+    "inputs_from": {},
+    "success_conditions": [],
+    "preferred_tool": "dom",
+}
+
+
+class FakePlannerClient:
+    """A :class:`argus.model_client.ModelClient` that replays a Plan JSON's scheduling.
+
+    ``plan_payload`` is a Plan object (``argus/examples/plan_open_chain.json``
+    or any ``Plan.to_dict()``).  Each subtask is reduced to the planner's
+    ``Step`` schema: the seven scheduling fields only, with ``inputs_from``
+    converted from the contract's ``{parameter: {subtask_id, field}}`` mapping
+    to the schema's list of ``{parameter, subtask_id, field}`` bindings.  Context
+    the fixture carries - parameters, target domain, goal, criteria, record
+    shape, caps - never reaches the planner, which copies those from the
+    accepted request the same way it would after a real call.
+
+    ``status`` overrides the outcome for refusal and truncation tests: anything
+    but ``"ok"`` is returned as that status with no parsed content.  Every call
+    is recorded in :attr:`calls` so a test can assert the planner was called
+    once, or not at all for a registry-only request.  The caller constructs it
+    explicitly; ``planner.plan_open`` never substitutes it for a real client.
+    """
+
+    def __init__(self, plan_payload: Mapping[str, Any], status: str = "ok") -> None:
+        if status not in MODEL_STATUSES:
+            raise ContractError(
+                f"unknown model result status {status!r}; expected one of "
+                f"{', '.join(MODEL_STATUSES)}"
+            )
+        if not isinstance(plan_payload, Mapping) or not isinstance(
+            plan_payload.get("subtasks"), list
+        ):
+            raise ContractError("FakePlannerClient needs a Plan object with a subtasks list")
+        self.status = status
+        self.steps: list[dict[str, Any]] = [
+            self._step(index, raw) for index, raw in enumerate(plan_payload["subtasks"])
+        ]
+        self.calls: list[dict[str, Any]] = []
+
+    @staticmethod
+    def _step(index: int, raw: Any) -> dict[str, Any]:
+        if not isinstance(raw, Mapping):
+            raise ContractError(f"FakePlannerClient subtask {index} is not an object")
+        step: dict[str, Any] = {}
+        for name in _STEP_FIELDS:
+            if name in raw:
+                step[name] = copy.deepcopy(raw[name])
+            elif name in _STEP_DEFAULTS:
+                step[name] = copy.deepcopy(_STEP_DEFAULTS[name])
+            else:
+                raise ContractError(
+                    f"FakePlannerClient subtask {index} lacks scheduling field {name!r}"
+                )
+        bindings = step["inputs_from"]
+        if isinstance(bindings, Mapping):
+            step["inputs_from"] = [
+                {
+                    "parameter": parameter,
+                    "subtask_id": source.get("subtask_id") if isinstance(source, Mapping) else None,
+                    "field": source.get("field") if isinstance(source, Mapping) else None,
+                }
+                for parameter, source in bindings.items()
+            ]
+        elif not isinstance(bindings, list):
+            raise ContractError(
+                f"FakePlannerClient subtask {index}: inputs_from must be an object or a list"
+            )
+        return step
+
+    def parse_json(
+        self, system: str, user: str, output_model: type, max_tokens: int
+    ) -> ModelResult:
+        self.calls.append(
+            {
+                "system": system,
+                "user": user,
+                "output_model": output_model,
+                "max_tokens": max_tokens,
+            }
+        )
+        if self.status != "ok":
+            return ModelResult(
+                status=self.status,
+                raw_text=f"fake planner scripted as {self.status}",
+                model="fake-planner",
+            )
+        return ModelResult(
+            status="ok",
+            parsed={"subtasks": copy.deepcopy(self.steps)},
+            raw_text=None,
+            model="fake-planner",
+        )
+
+
 class FakeToolbox:
     """A toolbox that never opens a browser.  Implements :class:`argus.interfaces.Toolbox`.
 
     Sessions are handed out as ``fake-session-N`` and tracked, so a test can
     assert the controller closed every one of them and closed each only once.
-    ``run_subtask`` answers from :data:`CATALOG`, filtered by the subtask's
-    ``query`` substring and ``max_price`` (and capped at ``max_results`` when
-    the subtask carries one).
+    ``run_subtask`` answers registry subtasks from :data:`CATALOG`, filtered by
+    the subtask's ``query`` substring and ``max_price`` (and capped at
+    ``max_results`` when the subtask carries one).
+
+    Open-world subtasks (``kind == "open"``) are answered from
+    :data:`OPEN_DATASET` for their ``target_domain``: a search keeps the rows
+    whose title, company or keywords contain every word of ``query``, and an
+    ``open_results`` operation with a ``result_urls`` parameter returns one
+    record per URL in that order, each cited to its own observation.  Records
+    carry exactly the subtask's ``expected_record_shape`` (or
+    :data:`OPEN_RECORD_SHAPE`) plus ``source_observation_id``; every URL stays
+    on the target domain.  An unknown domain yields an explicit empty result.
 
     ``script`` maps a ``subtask_id`` to one of :data:`SCRIPTED_OUTCOMES`, or to
     a sequence of them consumed one per call (``None`` for a normal success, and
@@ -319,6 +573,55 @@ class FakeToolbox:
             for row in rows
         ]
 
+    @staticmethod
+    def _shape(subtask: Subtask, row: Mapping[str, Any], observation: str | None) -> dict[str, Any]:
+        """One open-world record in the subtask's expected shape, cited."""
+        shape = subtask.expected_record_shape or list(OPEN_RECORD_SHAPE)
+        record: dict[str, Any] = {name: copy.deepcopy(row.get(name)) for name in shape}
+        record["source_observation_id"] = observation
+        return record
+
+    def open_records_for(
+        self, subtask: Subtask, observations: Sequence[str | None]
+    ) -> list[dict[str, Any]]:
+        """The dataset rows an open-world subtask selects, as shaped records.
+
+        ``observations`` supplies the observation each record cites: for
+        ``open_results`` one per URL in order (the last one repeats if fewer
+        were given), otherwise the first one for every record.
+        """
+        params = subtask.parameters if isinstance(subtask.parameters, Mapping) else {}
+        rows = _open_rows(subtask.target_domain)
+        observations = list(observations) or [None]
+
+        if subtask.operation == "open_results" and isinstance(params.get("result_urls"), list):
+            by_url = {row["url"]: row for row in rows}
+            records = []
+            for index, url in enumerate(params["result_urls"]):
+                row = dict(by_url.get(url) or {}, url=url)
+                observation = observations[min(index, len(observations) - 1)]
+                records.append(self._shape(subtask, row, observation))
+            return records
+
+        query = str(params.get("query") or "").casefold().split()
+        selected = [
+            row for row in rows
+            if all(
+                word in f"{row['title']} {row['company']} {row.get('keywords', '')}".casefold()
+                for word in query
+            )
+        ]
+        max_results = params.get("max_results")
+        if isinstance(max_results, int) and not isinstance(max_results, bool):
+            selected = selected[: max(max_results, 0)]
+        return [self._shape(subtask, row, observations[0]) for row in selected]
+
+    def _next_observation(self) -> tuple[str, int]:
+        with self._lock:
+            self._observation_n += 1
+            n = self._observation_n
+        return f"observation-{n - 1:03d}.png", n
+
     def _action(
         self,
         template: dict[str, Any],
@@ -351,21 +654,28 @@ class FakeToolbox:
         subtask = subtask_input.subtask
         data = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
         template = data["actions"][0]
-        origin = _origin(subtask.site_id)
-        search_url = f"{origin}/catalog"
+        is_open = subtask.kind == "open"
+        origin = _open_origin(subtask) if is_open else _origin(subtask.site_id)
+        search_url = f"{origin}/search" if is_open else f"{origin}/catalog"
         params = subtask.parameters if isinstance(subtask.parameters, Mapping) else {}
         query = params.get("query")
+        result_urls = params.get("result_urls") if is_open else None
+        opens_results = subtask.operation == "open_results" and isinstance(result_urls, list)
 
-        with self._lock:
-            self._observation_n += 1
-            observation_n = self._observation_n
-        observation = f"observation-{observation_n - 1:03d}.png"
+        observation, observation_n = self._next_observation()
+        # ``open_results`` cites one further observation per opened URL.
+        opened: list[str] = (
+            [self._next_observation()[0] for _ in result_urls] if opens_results else []
+        )
 
         if forced == "empty":
             # Nothing found and nothing captured: records and evidence are both
             # empty, which is what StubModerator answers with ``verify``.
             observation = None
+            opened = []
             records: list[dict[str, Any]] = []
+        elif is_open:
+            records = self.open_records_for(subtask, opened or [observation])
         else:
             records = self.records_for(subtask, observation)
 
@@ -378,16 +688,36 @@ class FakeToolbox:
                 url=search_url,
                 observation_after=observation,
             ),
-            self._action(
-                template,
-                step=1,
-                name="type",
-                payload={"text": query},
-                url=search_url,
-                semantic_target="Search products",
-                observation_before=observation,
-            ),
         ]
+        if opens_results:
+            for index, url in enumerate(result_urls):
+                actions.append(
+                    self._action(
+                        template,
+                        step=len(actions),
+                        name="open_url",
+                        payload={"url": url},
+                        url=str(url),
+                        observation_before=observation if index == 0 else opened[index - 1],
+                        observation_after=opened[index] if opened else None,
+                    )
+                )
+        else:
+            actions.append(
+                self._action(
+                    template,
+                    step=1,
+                    name="type",
+                    payload={"text": query},
+                    url=search_url,
+                    semantic_target="Search jobs" if is_open else "Search products",
+                    observation_before=observation,
+                )
+            )
+        last_url = str(result_urls[-1]) if opens_results and result_urls else search_url
+        last_observation = opened[-1] if opened else observation
+        subject = f"site {subtask.target_domain}" if is_open else "catalog"
+        noun = "record" if is_open else "product"
 
         if forced in _SCRIPTED_FAILURES:
             code, retryable, message = _SCRIPTED_FAILURES[forced]
@@ -397,12 +727,12 @@ class FakeToolbox:
             actions.append(
                 self._action(
                     template,
-                    step=2,
+                    step=len(actions),
                     name="extract",
                     payload={"schema": subtask.output_schema_id},
-                    url=search_url,
+                    url=last_url,
                     outcome="failed",
-                    observation_before=observation,
+                    observation_before=last_observation,
                 )
             )
             typed_failures = [
@@ -410,40 +740,40 @@ class FakeToolbox:
                     code=code,
                     message=message,
                     retryable=retryable,
-                    step_id="step-002",
+                    step_id=actions[-1]["step_id"],
                     evidence_refs=[observation] if observation else [],
                 )
             ]
-            failures = [{"step_id": "step-002", "reason": message}]
+            failures = [{"step_id": actions[-1]["step_id"], "reason": message}]
         else:
             outcome = "succeeded"
             findings = records
             if records:
-                titles = ", ".join(record["title"] for record in records)
+                titles = ", ".join(str(record.get("title")) for record in records)
                 summary = (
-                    f"The fake catalog returned {len(records)} product(s) for "
+                    f"The fake {subject} returned {len(records)} {noun}(s) for "
                     f"{query!r}: {titles}."
                 )
             else:
-                summary = f"The fake catalog returned no products for {query!r}."
+                summary = f"The fake {subject} returned no {noun}s for {query!r}."
             actions.append(
                 self._action(
                     template,
-                    step=2,
+                    step=len(actions),
                     name="extract",
                     payload={"schema": subtask.output_schema_id},
-                    url=search_url,
-                    observation_before=observation,
+                    url=last_url,
+                    observation_before=last_observation,
                 )
             )
             actions.append(
                 self._action(
                     template,
-                    step=3,
+                    step=len(actions),
                     name="finished",
                     payload={"content": summary},
-                    url=search_url,
-                    observation_before=observation,
+                    url=last_url,
+                    observation_before=last_observation,
                 )
             )
             typed_failures = []
@@ -469,7 +799,7 @@ class FakeToolbox:
             evidence={
                 "session_id": f"fake-browser-{observation_n}",
                 "session_replay_url": None,
-                "screenshots": [observation] if observation else [],
+                "screenshots": ([observation] if observation else []) + opened,
                 "network_requests": [
                     {
                         "type": "network",
@@ -510,6 +840,10 @@ class StubModerator:
     design: a run driven by this stub proves the controller's plumbing, not that
     an answer is any good.  Every decision uses the vocabulary
     ``contracts.MODERATOR_DECISIONS`` allows for its stage.
+
+    ``reconcile`` merges the accepted reports' records by ``url``: a later
+    subtask's record supersedes an earlier subtask's record for the same URL,
+    and records without a URL are carried through untouched.
 
     ``retry_codes`` is off by default: a failed report is answered with ``fail``
     carrying its first typed failure.  Set it to the codes ARGUS.md lets the
@@ -595,14 +929,18 @@ class StubModerator:
         )
 
     def reconcile(self, plan: Plan, reports: list[WorkerReport]) -> ModeratorDecision:
-        """Stage 8: merge the reports' records; name missing subtasks as gaps."""
+        """Stage 8: merge the reports' records; name missing subtasks as gaps.
+
+        Records are merged by ``url`` rather than concatenated: see
+        :meth:`_merge_records`.  Independent subtasks share no URL, so their
+        records are simply appended one report after another.
+        """
         subtask_ids = [report.subtask_id for report in reports]
         self.calls.append(("reconcile", tuple(subtask_ids)))
 
-        findings: list[Any] = []
+        findings, superseded = self._merge_records(reports)
         evidence_refs: list[str] = []
         for report in reports:
-            findings.extend(_records_of(report))
             for ref in _screenshots_of(report):
                 if ref not in evidence_refs:
                     evidence_refs.append(ref)
@@ -622,8 +960,14 @@ class StubModerator:
             decision="merged",
             reason=(
                 f"Merged {len(findings)} record(s) from subtask(s) "
-                f"{', '.join(subtask_ids) or 'none'}; the stub compares nothing, so it "
-                "finds no conflicts."
+                f"{', '.join(subtask_ids) or 'none'}"
+                + (
+                    f"; {superseded} earlier record(s) were superseded by a later "
+                    "subtask's record for the same url"
+                    if superseded
+                    else ""
+                )
+                + "; the stub compares nothing else, so it finds no conflicts."
             ),
             evidence_refs=evidence_refs,
             next_action={
@@ -633,6 +977,38 @@ class StubModerator:
                 "conflicts": [],
             },
         )
+
+    @staticmethod
+    def _merge_records(reports: Sequence[WorkerReport]) -> tuple[list[Any], int]:
+        """Merge the reports' records by ``url``; count the superseded ones.
+
+        A dependent chain reports the same thing twice: ``search`` finds a
+        result and ``open_results`` opens it and comes back with more of its
+        fields.  Concatenating both reports would answer with every result
+        duplicated, so a later report's record *supersedes* an earlier record
+        carrying the same non-empty ``url``, keeping the later one because it is
+        the more detailed of the two.  The survivor takes the later report's
+        position, so the merged order follows the last report that mentioned
+        each record.  A record with no ``url`` - anything that is not an object,
+        or an object without one - is never matched against another and is kept
+        exactly where it was.
+        """
+        merged: list[Any] = []
+        position: dict[str, int] = {}
+        superseded = 0
+        for report in reports:
+            for record in _records_of(report):
+                url = record.get("url") if isinstance(record, Mapping) else None
+                key = url.strip() if isinstance(url, str) and url.strip() else None
+                if key is None:
+                    merged.append(record)
+                    continue
+                if key in position:
+                    merged[position[key]] = _SUPERSEDED
+                    superseded += 1
+                position[key] = len(merged)
+                merged.append(record)
+        return [record for record in merged if record is not _SUPERSEDED], superseded
 
     def synthesize(
         self,
@@ -644,6 +1020,15 @@ class StubModerator:
     ) -> FinalAnswer:
         """Stage 10: one claim per record, each citing that record's observation.
 
+        The request's explicit criteria are applied first, in order: ``filter``
+        keeps records whose named field is truthy (or equals the criterion's
+        ``value`` when its parameter is ``{"field", "value"}``), ``rank`` sorts
+        descending on the named field and ``limit`` truncates.  A criterion
+        whose field is absent from the records, or that names no field, is not
+        applied and is named in ``unverified`` with the reason, so the answer
+        never pretends a ranking it could not do.  The answer's ``records`` are
+        the records after the criteria.
+
         A record with no observation of its own falls back to the run's first
         evidence reference; a record with neither is named in ``unverified``
         instead of becoming a claim, so no claim is ever emitted without an
@@ -654,15 +1039,18 @@ class StubModerator:
         claims: list[Claim] = []
         unverified: list[str] = []
 
+        criteria = [
+            criterion for intent in interpreted.intents for criterion in intent.criteria
+        ]
+        records, not_applied = self._apply_criteria(criteria, list(records))
+        unverified.extend(not_applied)
+
         for index, record in enumerate(records):
             label = f"record {index}"
             if isinstance(record, Mapping):
                 label = str(record.get("title") or label)
                 ref = record.get("source_observation_id") or fallback
-                text = (
-                    f"{label} costs {record.get('price')} {record.get('currency')} "
-                    f"at {record.get('url')}."
-                )
+                text = self._claim_text(label, record)
             else:
                 ref = fallback
                 text = f"{label}: {record!r}."
@@ -695,17 +1083,93 @@ class StubModerator:
             unverified=unverified,
         )
 
+    @staticmethod
+    def _claim_text(label: str, record: Mapping[str, Any]) -> str:
+        """The registry sentence for priced records; field pairs for anything else."""
+        if "price" in record:
+            return (
+                f"{label} costs {record.get('price')} {record.get('currency')} "
+                f"at {record.get('url')}."
+            )
+        details = ", ".join(
+            f"{name} {value}"
+            for name, value in record.items()
+            if name not in ("title", "source_observation_id", "retrieved_at") and value is not None
+        )
+        return f"{label}: {details}." if details else f"{label}."
+
+    @staticmethod
+    def _apply_criteria(
+        criteria: Sequence[Criterion], records: list[Any]
+    ) -> tuple[list[Any], list[str]]:
+        """Filter, rank and limit ``records``; say which criteria could not apply."""
+        not_applied: list[str] = []
+
+        def rows_carry(field: Any) -> bool:
+            return bool(records) and all(
+                isinstance(record, Mapping) and field in record for record in records
+            )
+
+        def skipped(criterion: Criterion, why: str) -> None:
+            not_applied.append(
+                f"Criterion {criterion.text!r} ({criterion.kind}) was not applied: {why}"
+            )
+
+        ordered = sorted(
+            criteria, key=lambda c: {"filter": 0, "rank": 1, "limit": 2}.get(c.kind, 3)
+        )
+        for criterion in ordered:
+            parameter = criterion.parameter
+            if criterion.kind == "limit":
+                if not isinstance(parameter, int) or isinstance(parameter, bool) or parameter < 0:
+                    skipped(criterion, "its limit is not a non-negative integer.")
+                    continue
+                records = records[:parameter]
+                continue
+
+            field, wanted, exact = parameter, None, False
+            if isinstance(parameter, Mapping) and "field" in parameter:
+                field, wanted, exact = parameter["field"], parameter.get("value"), "value" in parameter
+            if not isinstance(field, str) or not field.strip():
+                skipped(criterion, "it names no record field to apply it to.")
+                continue
+            if not rows_carry(field):
+                skipped(
+                    criterion,
+                    f"no record carries the field {field!r}, so it could not be checked.",
+                )
+                continue
+            if criterion.kind == "filter":
+                records = [
+                    record for record in records
+                    if (record[field] == wanted if exact else bool(record[field]))
+                ]
+            elif criterion.kind == "rank":
+                records = sorted(records, key=lambda r: _rank_key(r[field]), reverse=True)
+        return records, not_applied
+
+
+def _rank_key(value: Any) -> tuple[int, Any]:
+    """An ordering that never raises: numbers above everything else, then text."""
+    if _is_number(value):
+        return (1, value)
+    return (0, str(value))
+
 
 class FakeGhost:
     """Skill matching, validation and compilation without a skill store.
 
     Implements :class:`argus.interfaces.Ghost`.  ``match`` always explores,
-    because the fake holds no qualified skills.  ``validate`` checks the records
-    against the fixture's ground truth the way Sting's ``verify`` does - named
-    checks, independent of the steps that produced the records - and the
-    moderator cannot override a failure.  ``compile`` stages a candidate skill
-    in the shape of his ``simulated_discovery`` definition; session handles and
-    evidence never enter it.
+    because the fake holds no qualified skills.  ``validate`` checks registry
+    records against the fixture's ground truth the way Sting's ``verify`` does
+    - named checks, independent of the steps that produced the records - and
+    the moderator cannot override a failure.  Open-world subtasks get the
+    generic checks only (every record cites an observation of this report,
+    results present or an explicit empty state, the query evidenced by an
+    observation, every URL on the target domain), read from the controller's
+    ``report_context`` keyword; completeness stays unverified.  ``compile``
+    stages a candidate skill in the shape of his ``simulated_discovery``
+    definition; session handles and evidence never enter it.
     """
 
     def __init__(self, site_id: str = DEFAULT_SITE_ID, origin: str | None = None) -> None:
@@ -733,9 +1197,19 @@ class FakeGhost:
         subtask: Subtask,
         records: list[Any],
         evidence: list[str],
+        *,
+        report_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Stage 9: ``passed`` only when every record satisfies every named check."""
+        """Stage 9: ``passed`` only when every record satisfies every named check.
+
+        ``report_context`` is what the controller passes for open-world
+        subtasks only (``run_id``, ``subtask_id``, the report's ``evidence``
+        without any session handle, ``empty_state``); registry calls keep the
+        three-argument form and it stays ``None``.
+        """
         self.calls.append(("validate", subtask.subtask_id, len(records or [])))
+        if subtask.kind == "open":
+            return self._validate_open(subtask, records, evidence, report_context)
         origin = self._origin_for(subtask)
         params = subtask.parameters if isinstance(subtask.parameters, Mapping) else {}
         max_price = params.get("max_price")
@@ -766,6 +1240,58 @@ class FakeGhost:
             "record_count": len(records or []),
             "evidence_refs": list(evidence or []),
             "scope": "synthetic fixture only; no live website was visited",
+        }
+
+    @staticmethod
+    def _validate_open(
+        subtask: Subtask,
+        records: list[Any],
+        evidence: list[str],
+        report_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """The generic open-world checks; nothing operation-specific."""
+        context = report_context if isinstance(report_context, Mapping) else {}
+        known: set[str] = {str(ref) for ref in (evidence or [])}
+        report_evidence = context.get("evidence")
+        if isinstance(report_evidence, Mapping):
+            shots = report_evidence.get("screenshots")
+            for shot in shots if isinstance(shots, list) else []:
+                known.add(str(shot))
+            verifications = report_evidence.get("verifications")
+            for entry in verifications if isinstance(verifications, list) else []:
+                observation = entry.get("observation_id") if isinstance(entry, Mapping) else None
+                if isinstance(observation, str):
+                    known.add(observation)
+        rows = [record for record in (records or []) if isinstance(record, Mapping)]
+        empty_state = context.get("empty_state") is True
+
+        checks = {
+            "records_are_objects": len(rows) == len(records or []),
+            "records_cite_observations": all(
+                isinstance(row.get("source_observation_id"), str)
+                and row["source_observation_id"] in known
+                for row in rows
+            ),
+            "results_present_or_empty_state": bool(rows) or empty_state,
+            # The fake accepts any observation of this report as evidence that
+            # the query or filter took effect; a real Ghost reads the page.
+            "query_visibly_applied": bool(known),
+            "urls_on_target_domain": all(
+                _on_domain(row["url"], subtask.target_domain) for row in rows if "url" in row
+            ),
+        }
+        failed = sorted(name for name, passed in checks.items() if not passed)
+        return {
+            "status": "passed" if not failed else "failed",
+            "checks": checks,
+            "failed_checks": failed,
+            "record_count": len(records or []),
+            "evidence_refs": sorted(known),
+            "unverified": [
+                "completeness: generic checks cannot tell whether every matching "
+                "record was collected"
+            ],
+            "scope": "generic open-world checks on synthetic records; no live website was visited",
         }
 
     def compile(self, report: WorkerReport, subtask: Subtask) -> dict[str, Any] | None:

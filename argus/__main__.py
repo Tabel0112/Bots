@@ -9,6 +9,8 @@ calls out through is a fake.
     python -m argus "Find headphones under $150 in the demo catalog"
     python -m argus --interpreted argus/examples/interpreted_request.json \
         --store /tmp/argus-demo
+    python -m argus --interpreted argus/examples/interpreted_request_open_salary.json \
+        --plan-fixture argus/examples/plan_open_chain.json --store /tmp/argus-open
 
 ``--fake`` is the default and wires :class:`~argus.fakes.FakeToolbox`,
 :class:`~argus.fakes.StubModerator`, :class:`~argus.fakes.FakeGhost` and
@@ -17,10 +19,22 @@ pretending: no real toolbox, moderator or Ghost is connected yet (phase 3).
 
 ``--interpreted FILE`` skips stage 1 and reads an
 :class:`~argus.contracts.InterpretedRequest` from JSON, so the whole path from
-gate to published result runs offline.  Without it, stage 1 calls the model and
-needs the ``anthropic`` SDK installed and ``ANTHROPIC_API_KEY`` set; ``ARGUS_MODEL``
-overrides the model.  A missing SDK is not a crash: the run ends as a normal
-failed result carrying ``PRECONDITION_FAILED``.
+gate to published result runs offline.  Without it, stage 1 calls a model
+through :mod:`argus.model_client`, which needs the ``openai`` package installed,
+``ARGUS_MODEL`` naming the model and the SDK's own ``OPENAI_API_KEY`` (plus
+``OPENAI_BASE_URL`` for a self-hosted endpoint).  A missing package or model
+name is not a crash: the run ends as a normal failed result carrying
+``PRECONDITION_FAILED``.
+
+``--plan-fixture FILE`` is explicit offline planner injection and requires
+``--interpreted``.  It reads a :class:`~argus.contracts.Plan` JSON, wraps it in
+:class:`argus.fakes.FakePlannerClient` - which replays only the plan's
+*scheduling* fields, the way a model's answer would arrive - and injects it
+through ``Controller(plan=...)``.  It is never substituted for a real planning
+call: without the flag, an open request still calls the model through the same
+boundary as stage 1.  Everything the user asked for (target domain, goal,
+criteria, parameters, record shape) and every cap is still copied and checked by
+:func:`argus.planner.plan_open`, not taken from the fixture.
 
 Output: the terminal :class:`~argus.contracts.RunResult` as JSON on stdout,
 nothing else, so it can be piped.  Progress notes and the store location go to
@@ -35,13 +49,15 @@ import argparse
 import json
 import sys
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Any, Sequence
 
 from argus.contracts import ContractError, InterpretedRequest, RunResult
 from argus.controller import Controller
-from argus.fakes import FakeGhost, FakeToolbox, StubModerator
+from argus.fakes import FakeGhost, FakePlannerClient, FakeToolbox, StubModerator
 from argus.store import JsonStore
+from argus import planner
 
 __all__ = ["DEFAULT_STORE_DIR", "EXIT_OK", "EXIT_RUN_NOT_SUCCEEDED", "EXIT_NO_TOOLBOX",
            "build_parser", "main"]
@@ -74,8 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
             "result as JSON."
         ),
         epilog=(
-            "Interpretation calls the model unless --interpreted supplies an "
-            "already-interpreted request."
+            "Interpretation calls the model (openai package, $ARGUS_MODEL, the "
+            "SDK's $OPENAI_API_KEY and optional $OPENAI_BASE_URL) unless "
+            "--interpreted supplies an already-interpreted request. Planning an "
+            "open request calls the model too, unless --plan-fixture injects a "
+            "scheduling offline."
         ),
     )
     parser.add_argument(
@@ -104,6 +123,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--interpreted",
         metavar="FILE",
         help="JSON InterpretedRequest to run instead of calling the model",
+    )
+    parser.add_argument(
+        "--plan-fixture",
+        metavar="FILE",
+        help=(
+            "explicit offline planner injection: replay a Plan JSON's scheduling "
+            "through argus.fakes.FakePlannerClient instead of calling the model "
+            "(requires --interpreted). It never replaces a real model call: "
+            "without this flag an open request still calls the planner model. "
+            "Target domain, goal, criteria, parameters, record shape and the "
+            "plan caps are still ARGUS-owned and are re-checked."
+        ),
     )
     return parser
 
@@ -153,6 +184,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_USAGE
+    if args.plan_fixture and not args.interpreted:
+        print("--plan-fixture requires --interpreted FILE for an explicit offline run.", file=sys.stderr)
+        return EXIT_USAGE
 
     request: Any
     if args.interpreted:
@@ -162,12 +196,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         request = args.text
         request_id = args.request_id or f"request-{uuid.uuid4().hex[:8]}"
 
+    plan_fn = None
+    if args.plan_fixture:
+        try:
+            payload = json.loads(Path(args.plan_fixture).read_text(encoding="utf-8"))
+            client = FakePlannerClient(payload)
+        except OSError as exc:
+            print(
+                f"cannot read --plan-fixture {args.plan_fixture}: {exc.strerror or exc}",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
+        except json.JSONDecodeError as exc:
+            print(f"--plan-fixture {args.plan_fixture} is not valid JSON: {exc}", file=sys.stderr)
+            return EXIT_USAGE
+        except ContractError as exc:
+            print(
+                f"--plan-fixture {args.plan_fixture} is not a Plan this planner can "
+                f"replay: {exc}",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
+        # The planner still owns everything but the scheduling; the fixture only
+        # stands in for the one model call plan_open would otherwise make.
+        plan_fn = partial(planner.plan, client=client)
+
     store = JsonStore(args.store)
     controller = Controller(
         toolbox=FakeToolbox(),
         moderator=StubModerator(),
         ghost=FakeGhost(),
         store=store,
+        plan=plan_fn,
     )
     result = controller.run(request, request_id)
 

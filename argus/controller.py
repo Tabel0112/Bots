@@ -22,6 +22,15 @@ bounded by ``max_concurrency`` and by one running subtask per
 ``concurrency_group``.  Sessions are opened by the controller before a subtask
 runs and closed in a ``finally`` block at run end, never by subagents.
 
+Data flow between subtasks: a subtask's ``inputs_from`` bindings are resolved
+from the named dependencies' accepted reports just before it is dispatched,
+before a session is opened for it.  Field ``findings`` passes the whole
+findings object; any other field is collected from every record of a findings
+list in order, or read from a findings mapping.  A missing field, or a
+dependency without an accepted report, fails the subtask with
+``PRECONDITION_FAILED`` and its dependents are cancelled like any other failed
+dependency.  Resolved values are placed in ``subtask.parameters`` unchanged.
+
 Nothing that a provider or a worker said verbatim reaches events or results:
 unexpected exceptions become ``EXTRACTION_FAILED`` carrying only the exception
 class name, and session handles are stripped from every report that is
@@ -30,6 +39,7 @@ persisted.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import importlib
 import threading
@@ -41,6 +51,7 @@ from typing import Any, Callable
 
 from argus import interfaces, planner
 from argus.contracts import (
+    MAX_CONCURRENT_WORKERS,
     Budget,
     Claim,
     ContractError,
@@ -61,9 +72,15 @@ __all__ = [
     "STAGES",
     "TERMINAL",
     "TRANSITIONS",
+    "GATE_REJECT_CODES",
     "TERMINAL_STATE_FOR_STATUS",
+    "MAX_SUBAGENTS",
     "Controller",
 ]
+
+#: Per-run worker ceiling: each worker may need one of four local VLM slots.
+#: The shared live toolbox must also arbitrate VLM capacity across runs.
+MAX_SUBAGENTS = MAX_CONCURRENT_WORKERS
 
 #: Non-terminal stages, in the order a successful run passes through them.
 STAGES = (
@@ -94,6 +111,15 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "validating": frozenset({"synthesizing"}),
     "synthesizing": frozenset({"publishing"}),
     "publishing": frozenset(),
+}
+
+#: Gate rule -> the typed code a rejection carries.  Most rejections are simply
+#: an unusable request (``INVALID_INPUT``), but the two open-world rules reject
+#: for a reason the contracts name in their own right, and flattening those into
+#: ``INVALID_INPUT`` would hide from the caller *why* the run never started.
+GATE_REJECT_CODES = {
+    "S2": "DOMAIN_NOT_ALLOWED",
+    "S5": "ACTION_CLASS_NOT_ALLOWED",
 }
 
 #: RunResult.status -> terminal stage.
@@ -157,6 +183,56 @@ def _evidence_of(report: WorkerReport) -> list[str]:
         if isinstance(obs, str) and obs not in refs:
             refs.append(obs)
     return refs
+
+
+def _bound_value(findings: Any, field: str, dependency: str) -> Any:
+    """The value one ``inputs_from`` binding reads from a dependency's findings.
+
+    ``findings`` hands over the whole object.  From a list, ``field`` is
+    collected from every record in order (an empty list stays empty); from a
+    mapping it is that entry.  Anything missing raises ``PRECONDITION_FAILED``
+    rather than being skipped, and nothing is transformed on the way.
+    """
+    if field == "findings":
+        return copy.deepcopy(findings)
+    if isinstance(findings, list):
+        values = []
+        for index, record in enumerate(findings):
+            if not isinstance(record, dict) or field not in record:
+                raise ContractError(
+                    f"record {index} of {dependency}'s findings has no field {field!r}",
+                    code="PRECONDITION_FAILED",
+                )
+            values.append(copy.deepcopy(record[field]))
+        return values
+    if isinstance(findings, dict):
+        if field not in findings:
+            raise ContractError(
+                f"{dependency}'s findings have no field {field!r}", code="PRECONDITION_FAILED"
+            )
+        return copy.deepcopy(findings[field])
+    raise ContractError(
+        f"{dependency}'s findings are not a list or mapping, so field {field!r} cannot be read",
+        code="PRECONDITION_FAILED",
+    )
+
+
+def _empty_state_of(report: WorkerReport) -> bool:
+    """Whether a succeeded report explicitly says there was nothing to find:
+    an empty findings list, or a findings mapping flagged ``empty_state`` or
+    holding an empty ``records`` list.  No findings at all is not an empty
+    state, it is missing evidence."""
+    if report.outcome != "succeeded":
+        return False
+    findings = report.findings
+    if isinstance(findings, list):
+        return not findings
+    if isinstance(findings, dict):
+        if findings.get("empty_state") is True:
+            return True
+        records = findings.get("records")
+        return isinstance(records, list) and not records
+    return False
 
 
 class _RunState:
@@ -298,8 +374,12 @@ class Controller:
         gate: Callable[[InterpretedRequest], GateDecision] | None = None,
         plan: Callable[[InterpretedRequest, str], Plan] | None = None,
     ) -> None:
+        if type(max_concurrency) is not int:
+            raise ValueError("max_concurrency must be an integer from 1 to 4")
         if max_actions < 1 or max_seconds <= 0 or max_concurrency < 1:
             raise ValueError("max_actions, max_seconds and max_concurrency must be positive")
+        if max_concurrency > MAX_SUBAGENTS:
+            raise ValueError(f"max_concurrency must be at most {MAX_SUBAGENTS}")
         self.toolbox = toolbox
         self.moderator = moderator
         self.ghost = ghost
@@ -388,7 +468,8 @@ class Controller:
             ))
         if state.gate.decision == "reject":
             return self._result(state, "failed", error=TypedError(
-                code="INVALID_INPUT", message=f"{state.gate.rule_id}: {state.gate.reason}",
+                code=GATE_REJECT_CODES.get(state.gate.rule_id, "INVALID_INPUT"),
+                message=f"{state.gate.rule_id}: {state.gate.reason}",
                 retryable=False,
             ))
         self._check_run_limits(state)
@@ -609,6 +690,8 @@ class Controller:
                     retryable=False, step_id=sid,
                 ))
                 return
+            if not self._resolve_inputs(state, st):
+                return
             handle = self.toolbox.open_session(st.subtask.site_id)
             st.handle = handle
             with state.lock:
@@ -621,6 +704,54 @@ class Controller:
             self._intake(state, st, report)
         except Exception as exc:  # noqa: BLE001 - the pool must not see it
             self._fail_subtask(state, st, _unexpected(exc, sid, sid))
+
+    def _resolve_inputs(self, state: _RunState, st: _SubtaskState) -> bool:
+        """Fill the subtask's ``inputs_from`` bindings from accepted reports.
+
+        Replaces ``st.subtask`` with a copy whose ``parameters`` carry the bound
+        values, so the worker, a retry, validation and compilation all see the
+        same resolved subtask; the plan itself is untouched.  Returns ``False``
+        after failing the subtask when a binding cannot be resolved.
+        """
+        subtask = st.subtask
+        if not subtask.inputs_from:
+            return True
+        sid = st.subtask_id
+        resolved: dict[str, Any] = {}
+        try:
+            for parameter, source in subtask.inputs_from.items():
+                dependency = state.subtasks.get(source["subtask_id"])
+                with state.lock:
+                    report = (
+                        dependency.report
+                        if dependency is not None and dependency.status == _ACCEPTED
+                        else None
+                    )
+                if report is None:
+                    raise ContractError(
+                        f"dependency {source['subtask_id']!r} has no accepted report "
+                        f"to read {parameter!r} from",
+                        code="PRECONDITION_FAILED",
+                    )
+                resolved[parameter] = _bound_value(
+                    report.findings, source["field"], source["subtask_id"]
+                )
+        except ContractError as exc:
+            self._fail_subtask(state, st, TypedError(
+                code="PRECONDITION_FAILED", message=f"{sid}: {exc}",
+                retryable=False, step_id=sid,
+            ))
+            return False
+        parameters = dict(subtask.parameters) if isinstance(subtask.parameters, dict) else {}
+        parameters.update(resolved)
+        st.subtask = dataclasses.replace(subtask, parameters=parameters)
+        state.emit("subtask_inputs_resolved", sid, {
+            "subtask_id": sid,
+            "bindings": {
+                parameter: dict(source) for parameter, source in subtask.inputs_from.items()
+            },
+        })
+        return True
 
     def _run_worker(self, state: _RunState, st: _SubtaskState, subtask: Subtask) -> WorkerReport | None:
         """Run the worker once on the lent session; ``None`` when the subtask
@@ -933,7 +1064,13 @@ class Controller:
         statuses: list[str] = []
         for st in accepted:
             assert st.report is not None
-            result = self.ghost.validate(st.subtask, _records_of(st.report), _evidence_of(st.report))
+            records, refs = _records_of(st.report), _evidence_of(st.report)
+            if st.subtask.kind == "open":
+                result = self.ghost.validate(
+                    st.subtask, records, refs, report_context=self._report_context(state, st)
+                )
+            else:
+                result = self.ghost.validate(st.subtask, records, refs)
             if not isinstance(result, dict) or result.get("status") not in ("passed", "failed", "inconclusive"):
                 raise ContractError(f"ghost.validate returned no status for {st.subtask_id}")
             per_subtask[st.subtask_id] = result
@@ -962,6 +1099,29 @@ class Controller:
                       "evidence": list(evidence)}
         state.emit("validated", overall, {"status": overall, "subtasks": {k: v["status"] for k, v in per_subtask.items()}})
         return validation
+
+    @staticmethod
+    def _report_context(state: _RunState, st: _SubtaskState) -> dict[str, Any]:
+        """What open-world validation gets to know about the report, handle-free.
+
+        The evidence dict is copied with a ``session_handle`` entry and any
+        value equal to the lent handle removed, so Ghost never sees a session.
+        """
+        assert st.report is not None
+        report = st.report
+        evidence = copy.deepcopy(report.evidence) if isinstance(report.evidence, dict) else {}
+        evidence.pop("session_handle", None)
+        handles = {handle for handle in (st.handle, report.session_handle) if handle}
+        evidence = {
+            key: value for key, value in evidence.items()
+            if not (isinstance(value, str) and value in handles)
+        }
+        return {
+            "run_id": state.run_id,
+            "subtask_id": st.subtask_id,
+            "evidence": evidence,
+            "empty_state": _empty_state_of(report),
+        }
 
     def _stage_synthesize(
         self, state: _RunState, records: list[Any], evidence: list[str],
