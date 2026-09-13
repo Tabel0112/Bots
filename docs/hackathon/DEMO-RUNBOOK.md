@@ -29,7 +29,7 @@ GHOST_DATABASE_PATH=ghostapi/ghost-demo.sqlite3 python -m uvicorn ghostapi.api.a
 ```
 
 ```bash
-ARGUS_RUNTIME=connected ARGUS_MODERATOR=module GHOST_API_URL=http://127.0.0.1:8766 WORKER_BROWSER=steel WORKER_SITES_FILE=demo-site/sites.hosted.json ARGUS_STORE=argus-runs-demo python -m argus.api
+ARGUS_RUNTIME=connected ARGUS_MODERATOR=module GHOST_API_URL=http://127.0.0.1:8766 WORKER_BROWSER=steel WORKER_SITES_FILE=demo-site/sites.hosted.json ARGUS_STORE=argus-runs/demo python -m argus.api
 ```
 
    (The third terminal is spare for the qualification script.) Open
@@ -97,7 +97,7 @@ same environment as terminal 2, run the qualification script used on 2026-09-13
 (`docs/hackathon/scripts/qualify_hosted.py`) with the run id shown in the UI:
 
 ```bash
-python docs/hackathon/scripts/qualify_hosted.py argus-runs-demo/runs/<run-id> demo-catalog.search_extract 1 docs/hackathon/scripts/qualify-inputs-steel.json
+python docs/hackathon/scripts/qualify_hosted.py argus-runs/demo/runs/<run-id> demo-catalog.search_extract 1 docs/hackathon/scripts/qualify-inputs-steel.json
 ```
 
 Expect three succeeded replays with zero model calls and `status: qualified`.
