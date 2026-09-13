@@ -6,3 +6,10 @@
 # real. Versions pinned to what was verified on 2026-09-13.
 openai>=2.14,<3
 pydantic>=2.10,<3
+# argus.api (Mission Control) and argus.live_runtime import FastAPI, python-dotenv
+# and the Ghost API package; the test client needs httpx. FastAPI is pinned to
+# the same range as ghostapi/requirements.txt so both install in one environment.
+fastapi>=0.116,<0.129
+uvicorn>=0.35,<0.53
+python-dotenv>=1.0,<2
+httpx>=0.28,<1

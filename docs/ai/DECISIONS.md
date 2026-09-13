@@ -4,6 +4,11 @@ Updated: 2026-09-13. Keep status explicit; a proposal is not an implementation c
 
 ## Confirmed user direction
 
+- **Ownership and merge rule (2026-09-13):** Abel owns and integrates all repository
+  changes from this date. Changes reach `main` only through a reviewed pull request.
+  The demo must never answer a request it did not understand: unsupported requests are
+  rejected with an explicit message, and offline fixture runs are labeled as such in the UI.
+
 - **End-to-end planning (2026-09-13):** the user requested the complete workflow and
   implementation plan connecting input, ARGUS decomposition, Steel-connected workers,
   Ghost and the final UI conclusion. The [plan](../hackathon/END-TO-END-PLAN.md) is a
@@ -70,7 +75,7 @@ The PR #7 review reiterates no required HTTP layer between ARGUS and its toolbox
 | Contract | Historical 0.1 remains provisional; DOM worker 0.2 is implemented locally, awaiting INT-1 agreement and ARGUS/Ghost/visual receiver checks |
 | Validation/qualification details | Agree evidence, changed-input coverage, empty-state check and controlled truth set |
 | Schedule and remaining work | Four workstreams assigned in TEAM; deadlines and ownership of other deliverables remain open |
-| Framework pull requests before integration | User direction: component skeletons merge to `main` through pull requests with status **Building**; **Ready to connect** requires the TEAM handoff checklist. AI recommendation, not decided: CI running offline checks and branch protection requiring one review from someone other than the author |
+| Framework pull requests before integration | User decision 2026-09-13: every change to `main` goes through a pull request with one review from someone other than the author, and Abel owns/integrates all changes from that date. CI must be green before merge. Sting's direct push `7e28641` predates this decision and broke CI; fixed on `fix/main-stabilize`. Branch protection enforcing this is still an AI recommendation until enabled in GitHub |
 
 ## Corrections that must survive a tool switch
 

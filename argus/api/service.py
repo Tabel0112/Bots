@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
-import os
 from pathlib import Path
 
-from argus.demo_runtime import DEFAULT_REQUESTS, build_demo_controller, infer_scenario, interpreted_request
+from argus.demo_runtime import (
+    DEFAULT_REQUESTS,
+    build_demo_controller,
+    infer_scenario,
+    interpreted_request,
+)
 from argus.live_runtime import build_live_controller
 
 
@@ -36,7 +41,9 @@ class RunService:
             raise ValueError("Request text is required.")
         request_id = f"request-{uuid.uuid4().hex[:10]}"
         run_id = f"run-{uuid.uuid4().hex[:10]}"
-        interpreted = interpreted_request(scenario, request_id, text, live=self.runtime != "controlled")
+        interpreted = interpreted_request(
+            scenario, request_id, text, live=self.runtime != "controlled"
+        )
         self.scenarios[run_id] = scenario
 
         def execute():
@@ -53,6 +60,7 @@ class RunService:
     def get(self, run_id: str) -> dict:
         payload = self.store.run(run_id)
         payload["scenario"] = self.scenarios.get(run_id) or self._scenario(payload)
+        payload["runtime"] = self._runtime(payload) or self.runtime
         return payload
 
     def events(self, run_id: str) -> list[dict]:
@@ -65,15 +73,35 @@ class RunService:
         if not self.store.index_path.exists():
             return []
         items = []
-        for run_dir in self.store.runs_dir.iterdir() if self.store.runs_dir.exists() else []:
+        for run_dir in (
+            self.store.runs_dir.iterdir() if self.store.runs_dir.exists() else []
+        ):
             try:
                 run = self.get(run_dir.name)
             except (OSError, ValueError):
                 continue
-            items.append({"run_id": run["run_id"], "status": run.get("status"), "scenario": run.get("scenario"), "stage": run.get("stage")})
+            items.append(
+                {
+                    "run_id": run["run_id"],
+                    "status": run.get("status"),
+                    "scenario": run.get("scenario"),
+                    "stage": run.get("stage"),
+                    "runtime": run.get("runtime"),
+                }
+            )
         return sorted(items, key=lambda item: item["run_id"], reverse=True)
 
     @staticmethod
+    def _runtime(payload: dict) -> str | None:
+        """Runtime recorded in the persisted run: interpreted.model is argus-demo/... or argus-live/..."""
+        model = (payload.get("interpreted") or {}).get("model") or ""
+        if model.startswith("argus-demo"):
+            return "controlled"
+        if model.startswith("argus-live"):
+            return "live"
+        return None
+
+    @staticmethod
     def _scenario(payload: dict) -> str | None:
-        model = ((payload.get("interpreted") or {}).get("model") or "")
+        model = (payload.get("interpreted") or {}).get("model") or ""
         return model.rsplit("/", 1)[-1] or None

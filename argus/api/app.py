@@ -7,11 +7,11 @@ import json
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from dotenv import load_dotenv
 
 from .service import RunService
 
@@ -31,7 +31,12 @@ def create_app(store_root: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "runtime": service.runtime, "steel_configured": bool(os.getenv("STEEL_API_KEY")), "scenarios": ["shopping", "travel", "jobs"]}
+        return {
+            "status": "ok",
+            "runtime": service.runtime,
+            "steel_configured": bool(os.getenv("STEEL_API_KEY")),
+            "scenarios": ["shopping", "travel", "jobs"],
+        }
 
     @app.post("/api/runs", status_code=202)
     def submit(body: RunRequest):
@@ -70,14 +75,22 @@ def create_app(store_root: str | Path | None = None) -> FastAPI:
             service.get(run_id)
         except (OSError, ValueError):
             raise HTTPException(404, "run not found") from None
-        last = int(request.headers.get("last-event-id") or request.query_params.get("after") or 0)
+        last = int(
+            request.headers.get("last-event-id")
+            or request.query_params.get("after")
+            or 0
+        )
 
         async def stream():
             cursor = last
             while True:
                 if await request.is_disconnected():
                     break
-                available = [event for event in service.events(run_id) if event["sequence"] > cursor]
+                available = [
+                    event
+                    for event in service.events(run_id)
+                    if event["sequence"] > cursor
+                ]
                 for event in available:
                     cursor = event["sequence"]
                     yield f"id: {cursor}\nevent: argus\ndata: {json.dumps(event)}\n\n"
@@ -85,13 +98,21 @@ def create_app(store_root: str | Path | None = None) -> FastAPI:
                     snapshot = service.get(run_id)
                 except (OSError, ValueError):
                     break
-                if snapshot.get("status") in {"succeeded", "failed", "cancelled", "needs_input"} and not available:
+                if (
+                    snapshot.get("status")
+                    in {"succeeded", "failed", "cancelled", "needs_input"}
+                    and not available
+                ):
                     break
                 if not available:
                     yield ": keepalive\n\n"
                 await asyncio.sleep(0.2)
 
-        return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/")
     def index():

@@ -1278,7 +1278,9 @@ class Controller:
                 },
             ),
         )
-        for index, action in enumerate(report.actions if isinstance(report.actions, list) else []):
+        for index, action in enumerate(
+            report.actions if isinstance(report.actions, list) else []
+        ):
             if not isinstance(action, dict):
                 continue
             operation = action.get("action")
