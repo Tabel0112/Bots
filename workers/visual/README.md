@@ -7,10 +7,13 @@ compile into candidate skills.
 
 Two interchangeable VLM backends:
 
-- **`uitars` (default)** — UI-TARS-1.5-7B running locally on an OpenAI-compatible server
-  (llama.cpp `llama-server`, Q4_K_M quant, fits an 8GB GPU). No API cost.
+- **`uitars` (default)** — a UI-TARS model on any OpenAI-compatible server (llama.cpp
+  `llama-server`). No API cost. **Use UI-TARS-72B on a GPU node**: it decides to magnify
+  before reading a value 12/12 of the time against the 7B's 2/12, and is right 83% vs
+  58% (see "Self-direction"). The 7B Q4 fits an 8GB GPU and is the laptop fallback, but
+  it mostly answers small text from the full page, which is a coin flip.
 - **`claude`** — Claude Opus 5 with the `computer_toolset_20260801` computer-use tool.
-  Needs `ANTHROPIC_API_KEY`.
+  Needs `ANTHROPIC_API_KEY`. Written but untested.
 
 ## Entry point
 
@@ -39,25 +42,48 @@ Names only, values in an untracked `.env` in this directory (`KEY=value` lines):
 - `READER_BASE_URL` — optional second endpoint used only to read exact values off
   magnified crops (see "Split driver and reader"). Unset by default.
 
-## Local UI-TARS server
+## Serving the model
 
-One-time setup (model files live outside the repo, any location):
+llama.cpp build required either way (from ggml-org/llama.cpp releases; on Windows CUDA,
+`llama-bNNNN-bin-win-cuda-12.4-x64.zip` plus the matching `cudart-...zip`, unzipped
+together). Weights live outside the repo, any location.
 
-1. llama.cpp release build for your GPU (from ggml-org/llama.cpp releases; on Windows
-   CUDA, `llama-bNNNN-bin-win-cuda-12.4-x64.zip` + the matching `cudart-...zip`,
-   unzipped together).
-2. `UI-TARS-1.5-7B.Q4_K_M.gguf` + `UI-TARS-1.5-7B.mmproj-f16.gguf` from HF
-   `mradermacher/UI-TARS-1.5-7B-GGUF` (Q4 fits an 8GB GPU; F16 on 24GB+ removes
-   quantization grounding error).
+### UI-TARS-72B on a GPU node — the configuration to use
 
-Start the server (local example — substitute your own paths):
+Q4_K_M is ~47GB of weights plus a 1.4GB projector, so it needs roughly 60GB of VRAM
+with context; it fits one H100 80GB, and llama.cpp will otherwise split it across
+several GPUs. Download on a login node — compute nodes usually have no internet — and
+write runtime files to `$SCRATCH`, because SciNet Trillium mounts `$HOME` read-only on
+compute nodes:
 
 ```bash
-llama-server -m <models>/UI-TARS-1.5-7B.Q4_K_M.gguf --mmproj <models>/UI-TARS-1.5-7B.mmproj-f16.gguf -ngl 99 -c 8192 --port 8080
+hf download mradermacher/UI-TARS-72B-DPO-GGUF UI-TARS-72B-DPO.Q4_K_M.gguf \
+    UI-TARS-72B-DPO.mmproj-fp16.gguf --local-dir $SCRATCH/models
+llama-server -m $SCRATCH/models/UI-TARS-72B-DPO.Q4_K_M.gguf \
+    --mmproj $SCRATCH/models/UI-TARS-72B-DPO.mmproj-fp16.gguf \
+    -ngl 99 -c 8192 --port 8080 > $SCRATCH/server.log 2>&1 &
 ```
 
-Point `UITARS_BASE_URL` at the server if it is not on `127.0.0.1:8080` (e.g. a LAN
-workstation running a larger model).
+Then point the worker at it, over an SSH tunnel if it is not the local machine:
+
+```bash
+ssh -N -L 8080:localhost:8080 user@gpu-node &
+export UITARS_BASE_URL=http://127.0.0.1:8080/v1
+```
+
+The `-i1-` GGUF repos ship no `mmproj` and therefore cannot do vision — do not
+substitute them.
+
+### UI-TARS-1.5-7B locally — fallback
+
+Fits an 8GB GPU and is fine for grounding and for developing the harness, but see
+"Self-direction" before trusting it to read exact values.
+
+```bash
+hf download mradermacher/UI-TARS-1.5-7B-GGUF UI-TARS-1.5-7B.Q4_K_M.gguf \
+    UI-TARS-1.5-7B.mmproj-f16.gguf --local-dir <models>
+llama-server -m <models>/UI-TARS-1.5-7B.Q4_K_M.gguf --mmproj <models>/UI-TARS-1.5-7B.mmproj-f16.gguf -ngl 99 -c 8192 --port 8080
+```
 
 ### Measured: resolution, not model size, is the bottleneck
 
@@ -208,33 +234,36 @@ maximum in code.
 
 ### Choosing a model
 
-Two different weaknesses show up in practice, and they respond differently to model
-size:
+Three abilities behave differently with size, which is why the 72B is the configured
+driver and the 7B is only a fallback:
 
 - **Grounding (where to click)** — the 7B Q4 is already good: clicks land within ~10px
-  on real pages.
-- **Reading small text and self-directing (when to zoom, when to scan)** — the 7B is
-  weak: it misreads small numbers (unstable across runs) and does not reliably invoke
-  `zoom()` even when instructed to.
+  on real pages. Size buys little here.
+- **Reading small text** — magnification matters more than parameters; every model
+  tested reads a magnified crop near-perfectly and a full page unreliably. At equal
+  pixels the 72B is still ahead (Holo1.5: 11/12 vs 10/12 full page, 12/12 vs 11/12
+  magnified).
+- **Self-direction (deciding to magnify at all)** — this is where size is decisive, and
+  it is what makes the 7B unusable for exact values unaided: zoom_rate 12/12 vs 2/12,
+  overall 83% vs 58%.
 
-Sizes for a fixed memory budget (GGUF, plus ~1.4GB mmproj and context on top):
+Sizes to plan VRAM against (GGUF, plus ~1.4GB mmproj and context on top):
 
-| Model | Quant | File | Fits 36GB unified? |
+| Model | Quant | File | Notes |
 | --- | --- | --- | --- |
-| UI-TARS-1.5-7B | Q4_K_M | 4.7GB | yes, easily |
-| UI-TARS-1.5-7B | F16 | 15.2GB | yes — same weights, so no gain in self-direction |
-| UI-TARS-72B-DPO | Q2_K | 29.6GB | borderline; Q2 degrades instruction-following badly |
-| UI-TARS-72B-DPO | Q3_K_S | 34.5GB | no — leaves nothing for mmproj/context/KV |
-| UI-TARS-72B-DPO | Q4_K_S | 43.9GB | no |
+| UI-TARS-72B-DPO | Q4_K_M | 47.4GB | **the configuration in use**; ~60GB with context, fits one H100 80GB |
+| UI-TARS-72B-DPO | Q4_K_S | 43.9GB | fits a 48GB card only without much context |
+| UI-TARS-72B-DPO | Q2_K | 29.6GB | fits 36GB, but Q2 degrades the instruction-following that is the whole point |
+| UI-TARS-1.5-7B | Q4_K_M | 4.7GB | laptop fallback, 8GB GPU |
+| UI-TARS-1.5-7B | F16 | 15.2GB | same weights as the Q4 — no gain in self-direction |
 
-On an Apple-silicon machine also raise the GPU wired limit
-(`sudo sysctl iogpu.wired_limit_mb=...`), and expect slow image prefill: a 72B at low
-quant may take tens of seconds per step, which multiplies across an agent loop.
+The `-i1-` 72B repos ship no `mmproj` and cannot do vision. On Apple silicon also raise
+the GPU wired limit (`sudo sysctl iogpu.wired_limit_mb=...`) and expect slow image
+prefill, which multiplies across an agent loop.
 
-Practical reading: F16 of the same 7B is not worth it (identical weights), and 72B does
-not comfortably fit 36GB. If 7B self-direction is the blocker, the higher-leverage move
-is the `--backend claude` path for accuracy-critical steps rather than a bigger local
-model. Untested alternatives worth a try at the same size: `Holo1.5-7B`.
+If no GPU node is available, the alternative to a bigger model is to stop depending on
+self-direction: locate with the 7B and magnify deterministically in code (see "Split
+driver and reader"), or use `--backend claude` for accuracy-critical steps.
 
 ## Coordinate convention
 
@@ -286,11 +315,12 @@ python smoke_test.py     # live Steel session: navigate/screenshot/act/element/n
   visual grounding; no auth flows (out of MVP scope).
 - Q4 grounding error is roughly 10-40px on sparse synthetic images (better on real
   pages).
-- **The 7B does not reliably use `zoom()`.** The action exists and works, and the
-  prompt instructs the model to zoom before reporting exact values, but in a live
-  Hacker News run the model took 8 steps, called `zoom()` zero times, wandered into a
-  story page, and still misread the points (197 vs 182 actual; 168 and 162 on earlier
-  runs). Exact-value reading on a DOM-less page therefore needs a driver that follows
-  the instruction — see "Choosing a model". Where a DOM exists, prefer structural
-  extraction over reading pixels.
+- **The 7B fallback does not reliably use `zoom()`** — 2/12, and in a live Hacker News
+  run it took 8 steps, called `zoom()` zero times, wandered into a story page and
+  misread the points (197 vs 182 actual; 168 and 162 on earlier runs). This is the
+  reason the 72B is the configured driver. Where a DOM exists, prefer structural
+  extraction over reading pixels regardless of model.
+- **The 72B's measured 83% is on a generated page**, not a live browser session: the
+  agent-loop run against a real site has not been repeated with it yet. Its two misses
+  were reading errors after a correct zoom, not planning failures.
 - Report shape is provisional (`0.1-provisional`), to be settled at INT-1.
