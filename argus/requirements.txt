@@ -13,3 +13,9 @@ fastapi>=0.116,<0.129
 uvicorn>=0.35,<0.53
 python-dotenv>=1.0,<2
 httpx>=0.28,<1
+# ARGUS-3: the adapters and their tests import the DOM worker package
+# (Agents/browser_worker: pydantic schemas, jsonschema site config, playwright
+# types at module import) and the Ghost API package. Ranges cover the worker's
+# tested pins (Agents/browser_worker/requirements-tested.txt).
+jsonschema>=4.20,<5
+playwright>=1.60,<2
