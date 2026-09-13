@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=vlm-bench
-#SBATCH --gpus-per-node=1
+#SBATCH --gpus-per-node=h100:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=02:00:00
@@ -9,12 +9,13 @@
 # Unattended setup + serve + benchmark, for when you do not want to babysit an
 # interactive allocation.
 #
-#   sbatch --account=def-YOURPI job.sbatch
-#   VLM_MODEL=holo-72b sbatch --account=def-YOURPI --export=ALL,VLM_MODEL job.sbatch
+#   sbatch --account=def-csutton-ab job.sbatch
+#   VLM_MODEL=holo-72b sbatch --account=def-csutton-ab --export=ALL,VLM_MODEL job.sbatch
 #
-# Adjust --gpus-per-node to fit the model: a 72B Q4_K_M needs ~60GB of VRAM, so one
-# H100 80GB is enough, while smaller cards need several (llama.cpp splits automatically).
-# An account is mandatory on Alliance clusters.
+# Nibi rejects an untyped GPU request ("There is no 4 GPU-type on the system"), hence
+# h100:1 rather than 1. One H100 80GB holds a 72B Q4_K_M (~60GB with context); the MIG
+# slices (nvidia_h100_80gb_hbm3_*) are 10-40GB and suit the 7B only. An account is
+# mandatory on Alliance clusters, and the prefix varies (def-/rrg-/ctb-).
 set -euo pipefail
 cd "$(dirname "$(scontrol show job "$SLURM_JOB_ID" | awk -F= '/Command=/{print $2}' | awk '{print $1}')" 2>/dev/null || echo .)"
 

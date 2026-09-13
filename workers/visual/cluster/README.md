@@ -15,8 +15,9 @@ worker — see [`../README.md`](../README.md) for why.
 # from a login node
 git clone <this repo> ~/Bots && cd ~/Bots/workers/visual/cluster
 
-# grab an interactive GPU node (an account is mandatory on Alliance clusters)
-salloc --account=def-YOURPI --gpus-per-node=1 --cpus-per-task=8 --mem=64G --time=2:00:00
+# grab an interactive GPU node. Nibi requires a GPU *type*: a bare count is rejected
+# ("There is no 4 GPU-type on the system"). One H100 80GB holds the 72B.
+salloc --account=def-csutton-ab --gpus-per-node=h100:1 --cpus-per-task=8 --mem=64G --time=2:00:00
 
 bash doctor.sh     # what can this node do? read-only, changes nothing
 bash setup.sh      # build llama.cpp + fetch weights (~47GB for a 72B), idempotent
@@ -27,7 +28,7 @@ bash bench.sh      # reading accuracy + self-direction
 Unattended instead:
 
 ```bash
-sbatch --account=def-YOURPI job.sbatch
+sbatch --account=def-csutton-ab job.sbatch
 ```
 
 ## Scripts
@@ -71,12 +72,32 @@ export UITARS_BASE_URL=http://127.0.0.1:8080/v1
 python -m browser_subagent "<subtask>" --url <start>
 ```
 
-## VRAM
+## Requesting resources
 
 A 72B at Q4_K_M is ~47GB of weights plus a 1.4GB projector, so budget ~60GB with
-context: one H100 80GB, or several smaller cards. `doctor.sh` checks the total against
-the selected model and says so before you spend 47GB of transfer. The 7B models need
-~8GB.
+context. `doctor.sh` checks the node's total against the selected model before you
+spend 47GB of transfer.
+
+**Nibi rejects an untyped GPU request** — `--gpus-per-node=4` fails with "There is no 4
+GPU-type on the system". Name the type:
+
+| Want | Request | Notes |
+| --- | --- | --- |
+| 72B driver | `--gpus-per-node=h100:1` | one 80GB card is enough; schedules fastest |
+| 72B driver + a second reader model | `--gpus-per-node=h100:2` | one model per port |
+| 7B fallback | `--gpus-per-node=nvidia_h100_80gb_hbm3_1g.10gb:1` | a MIG slice; near-instant queue |
+
+Nibi's advertised types: `h100`, the MIG slices
+`nvidia_h100_80gb_hbm3_{1g.10gb,2g.20gb,3g.40gb,4g.40gb}`, plus `mi300a`, `a100`,
+`a5000`, `t4`. The MIG slices are 10–40GB, so they suit the 7B but never a 72B.
+`-ngl 99` makes llama.cpp split a model across whatever GPUs the job can see, so more
+smaller cards also work — at the cost of a longer queue wait.
+
+Confirm your account string (the prefix varies: `def-`, `rrg-`, `ctb-`) with:
+
+```bash
+sacctmgr -n show assoc user=$USER format=account%20,qos%30
+```
 
 ## Gotchas this package already handles
 
