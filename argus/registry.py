@@ -27,6 +27,7 @@ __all__ = [
     "operation_spec",
     "required_parameters",
     "site_supports",
+    "sites_carrying",
     "validate_parameters",
 ]
 
@@ -37,9 +38,44 @@ SITES: dict[str, dict[str, Any]] = {
         "label": "Demo catalog",
         "origin": "https://demo-catalog.invalid",
         "description": "Controlled product catalog with a known expected result set.",
+        # What the site carries. The interpreter maps a request for these products
+        # to this site even when the request names no site, instead of treating it
+        # as an open-world search that the runtime would then aim at a public
+        # retailer.
+        "subjects": ["headphones", "keyboard"],
         "operations": ["search_products"],
     },
 }
+
+
+def sites_carrying(text: str) -> list[dict[str, Any]]:
+    """Configured sites whose declared ``subjects`` the request text mentions.
+
+    Word-level and case-insensitive, tolerating an English plural ("keyboards"
+    mentions "keyboard").  The interpreter uses it to keep a request for a
+    carried product on the registry tier when no site is named, and site
+    suggestion uses it to avoid aiming such a request at a public retailer.
+    Returns ``[{"site_id", "operations", "subjects"}]``, empty when nothing
+    matches or no site declares subjects.
+    """
+    lowered = text.casefold()
+    matches: list[dict[str, Any]] = []
+    for site in SITES.values():
+        found = [
+            subject
+            for subject in site.get("subjects", [])
+            if re.search(rf"\b{re.escape(subject.casefold())}s?\b", lowered)
+        ]
+        if found:
+            matches.append(
+                {
+                    "site_id": site["site_id"],
+                    "operations": list(site["operations"]),
+                    "subjects": found,
+                }
+            )
+    return matches
+
 
 #: Supported operations.  Each parameter declares its type, whether it is
 #: required, its default and its scope (``minimum``, ``fixed``).

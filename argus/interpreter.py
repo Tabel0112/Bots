@@ -106,6 +106,8 @@ def system_prompt() -> str:
             f"  - {site['site_id']} ({site['label']}) at {site['origin']}: "
             f"{site['description']}"
         )
+        if site.get("subjects"):
+            lines.append(f"    carries: {', '.join(site['subjects'])}")
         lines.append(f"    operations: {', '.join(site['operations'])}")
     lines.append("")
     lines.append("Supported operations:")
@@ -128,13 +130,21 @@ def system_prompt() -> str:
             ),
             (
                 '2. Prefer kind="registry" and the listed site_id/operation when a '
-                'qualified operation fits. Otherwise use kind="open", a short '
-                "operation name, target_domain, goal, criteria and expected_record_shape. "
-                "Set site_id to the named site (or an empty string if none). Unknown "
-                "sites are valid open requests, not unsupported registry requests. "
-                "Never invent a domain. Extract the hostname from an explicit URL or "
-                "domain; a named site may resolve only if unambiguous. If no site is "
-                "named, leave target_domain null and add an ambiguity asking for it."
+                "qualified operation fits. A request for products a supported site "
+                "carries (its 'carries' list), using only that operation's "
+                "parameters such as a price limit or a result count, fits that site "
+                "even when the request names no site: map it to the registry, and "
+                "read the query from the words that name the product, matching the "
+                "site's spelling when the text contains it (the span 'keyboard' "
+                'inside "keyboards"). Use kind="open" only when the request names '
+                "a different site or asks for products or filters no supported site "
+                "covers; then give a short operation name, target_domain, goal, "
+                "criteria and expected_record_shape. Set site_id to the named site "
+                "(or an empty string if none). Unknown sites are valid open "
+                "requests, not unsupported registry requests. Never invent a "
+                "domain. Extract the hostname from an explicit URL or domain; a "
+                "named site may resolve only if unambiguous. If no site is named, "
+                "leave target_domain null and add an ambiguity asking for it."
             ),
             (
                 "3. Every parameter must come from the request. Set source to "
@@ -743,8 +753,59 @@ def interpret(
 
     active_client = OpenAICompatibleClient(model=model) if client is None else client
 
+    first = _interpret_once(active_client, text, request_id, system_prompt())
+    if not _open_intents(first):
+        return first
+
+    # Every run is served by the configured registry sites. An open reading,
+    # whether it names a site or not, is asked once more with the mapping
+    # spelled out so the model reads the parameters from the text itself; if it
+    # still will not map the request, keep the first reading rather than invent
+    # parameters here.
+    try:
+        second = _interpret_once(
+            active_client, text, request_id, system_prompt() + _registry_hint(text)
+        )
+    except ContractError:
+        return first
+    if _open_intents(second):
+        return first
+    return second
+
+
+def _open_intents(interpreted: InterpretedRequest) -> list[Intent]:
+    return [intent for intent in interpreted.intents if intent.kind == "open"]
+
+
+def _registry_hint(text: str) -> str:
+    carried = {
+        match["site_id"]: match["subjects"] for match in registry.sites_carrying(text)
+    }
+    lines = ["", "Registry mapping required for this request:"]
+    for site in registry.SITES.values():
+        operation = site["operations"][0]
+        subjects = carried.get(site["site_id"])
+        reason = (
+            f"It asks for {', '.join(subjects)}, which {site['site_id']} carries. "
+            if subjects
+            else ""
+        )
+        lines.append(
+            f'  - {reason}Return kind="registry" intents on {site["site_id"]} with '
+            f"operation {operation}, one intent per thing to find, with query read "
+            "from the words that name what to find (a product, a topic or a "
+            "place; the site's spelling when the text contains it) and max_price "
+            "from any price limit. Ignore any website named in the request. Do "
+            'not return kind="open" and do not ask which site to use.'
+        )
+    return "\n".join(lines)
+
+
+def _interpret_once(
+    active_client: ModelClient, text: str, request_id: str, system: str
+) -> InterpretedRequest:
     result = active_client.parse_json(
-        system=system_prompt(),
+        system=system,
         user=text,
         output_model=_output_model(),
         max_tokens=MAX_TOKENS,

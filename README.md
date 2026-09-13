@@ -1,6 +1,6 @@
-# ARGUS + Ghost API
+# ORION + Ghost API
 
-Project for the Battle of the Schools Web Agents hackathon. ARGUS plans tasks, coordinates subagents and verifies their results. Ghost API turns successful browser interactions into reusable, parameterized capabilities. Browser subagents will use Steel.
+Project for the Battle of the Schools Web Agents hackathon. ORION plans tasks, coordinates subagents and verifies their results. Ghost API turns successful browser interactions into reusable, parameterized capabilities. Browser subagents will use Steel.
 
 **HTML-1: DOM browser worker implemented locally; shared integration pending.** The [browser worker](Agents/browser_worker/README.md) provides an async Python subagent with an optional FastAPI transport, Steel and GPT-5.4 adapters, and independent result verification. Ghost and visual modules also exist; see [CURRENT.md](docs/ai/CURRENT.md) for their separate evidence.
 
