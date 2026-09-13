@@ -2,3 +2,4 @@
 coverage-*.xml
 coverage-*.lcov
 htmlcov/
+*.sqlite3

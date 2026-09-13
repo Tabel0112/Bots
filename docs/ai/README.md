@@ -11,12 +11,14 @@ Purpose: allow a new AI session to continue ARGUS + Ghost API without replaying 
 | Task | Read next |
 | --- | --- |
 | Understand the product or moderator/subagent flow | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Plan the complete input-to-conclusion UI integration | [End-to-end integration plan](../hackathon/END-TO-END-PLAN.md); proposed build order based on the 2026-09-13 checkout |
 | Find assignments, progress, blockers or integration handoffs | [TEAM.md](TEAM.md) |
 | Decide scope or resolve conflicting assumptions | [DECISIONS.md](DECISIONS.md) |
 | Research Steel, canvas or vision | [Research notes](../hackathon/RESEARCH.md) |
 | Work on shared messages or component integration | [Provisional contract 0.1](../hackathon/CONTRACTS.md); inspect actual implementation files only if present in your checkout |
 | Understand the historical synthetic scaffold | [CURRENT.md](CURRENT.md); the old experiment is distinct from the new browser worker |
-| Run or change the DOM browser worker | [Worker README](../../browser_worker/README.md), [TEAM.md](TEAM.md) HTML-1; inspect `browser_worker/` and its tests |
+| Run or change the DOM browser worker | [Worker README](../../Agents/browser_worker/README.md), [TEAM.md](TEAM.md) HTML-1; inspect `Agents/browser_worker/` and its tests |
+| Connect workers to Ghost or run DOM-first visual fallback | [Connection guide](../../ghostapi/INTEGRATION.md); module READMEs and TEAM local connection update |
 | Work on UI/API examples | JSON examples in [CONTRACTS.md](../hackathon/CONTRACTS.md); the experimental generated fixtures are not in this documentation commit |
 | Plan evidence or the demonstration | [Evaluation checklist](../hackathon/EVALUATION.md) |
 | Work on ARGUS (controller, interpreter, gate, planner) | [ARGUS design and moderator boundary](../hackathon/ARGUS.md), then [ARGUS implementation plan and prompts](../hackathon/ARGUS-IMPLEMENTATION.md); code and tests under `argus/` |

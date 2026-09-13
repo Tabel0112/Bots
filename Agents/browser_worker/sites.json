@@ -1,0 +1,51 @@
+[
+  {
+    "site_id": "demo-catalog",
+    "start_url": "http://127.0.0.1:8765/",
+    "allowed_domains": ["127.0.0.1"],
+    "allowed_url_patterns": ["http://127.0.0.1:8765/", "http://127.0.0.1:8765/products/*"],
+    "allowed_query_keys": ["q", "max_price"],
+    "controls": [
+      {"selector": "input[name='q']", "actions": ["fill"], "parameter": "query"},
+      {"selector": "select[name='max_price']", "actions": ["select"], "parameter": "max_price"},
+      {"selector": "button[data-action='search']", "actions": ["click"]},
+      {"selector": "article a", "actions": ["click"]}
+    ],
+    "parameters_schema": {
+      "type": "object", "additionalProperties": false, "required": ["query", "max_price"],
+      "properties": {
+        "query": {"type": "string", "minLength": 1, "maxLength": 100},
+        "max_price": {"type": "integer", "enum": [50, 100, 150, 200]}
+      }
+    },
+    "output_schema_id": "product-list.v1",
+    "extraction_fields": [
+      {"field": "title", "attribute": "text", "target": {"tag": "h3", "role": "generic", "attributes": {}}},
+      {"field": "price", "attribute": "text", "target": {"tag": "span", "role": "generic", "attributes": {"data-testid": "price"}}},
+      {"field": "currency", "attribute": "text", "target": {"tag": "span", "role": "generic", "attributes": {"data-testid": "currency"}}},
+      {"field": "url", "attribute": "href", "target": {"tag": "a", "role": "link", "attributes": {}}}
+    ],
+    "record_schema": {
+      "type": "object", "additionalProperties": false,
+      "required": ["title", "price", "currency", "url"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "price": {"type": ["number", "null"], "minimum": 0},
+        "currency": {"type": ["string", "null"]},
+        "url": {"type": "string", "format": "uri"}
+      }
+    },
+    "results_selector": "#results[data-ready='true']",
+    "record_selector": "#results article",
+    "empty_selector": "#empty",
+    "parameter_evidence": [
+      {"parameter": "query", "selector": "#applied-query"},
+      {"parameter": "max_price", "selector": "#applied-max"}
+    ],
+    "mandatory_conditions": [
+      {"kind": "field_contains", "field": "title", "parameter": "query"},
+      {"kind": "field_lte", "field": "price", "parameter": "max_price"},
+      {"kind": "field_equals", "field": "currency", "value": "USD"}
+    ]
+  }
+]

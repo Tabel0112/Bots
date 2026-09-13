@@ -31,7 +31,7 @@ from argus.contracts import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / "argus" / "examples"
 WORKER_REPORT = (
-    REPO_ROOT / "workers" / "visual" / "examples" / "hn-top-story" / "report.json"
+    REPO_ROOT / "Agents" / "visual" / "examples" / "hn-top-story" / "report.json"
 )
 
 #: Every fixture file and the message it must load as.  A new fixture without an

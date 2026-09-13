@@ -2,12 +2,17 @@ import asyncio
 
 import pytest
 
-from browser_worker.browser.adapter import BrowserAdapter
-from browser_worker.demo.run import CatalogHandler, ScriptedCatalogReasoner, action, catalog_server
-from browser_worker.policy import validate_request
-from browser_worker.runner import Worker
-from browser_worker.schemas import Decision, WorkerError
-from browser_worker.verifier import verify
+from Agents.browser_worker.browser.adapter import BrowserAdapter
+from Agents.browser_worker.demo.run import (
+    CatalogHandler,
+    ScriptedCatalogReasoner,
+    action,
+    catalog_server,
+)
+from Agents.browser_worker.policy import validate_request
+from Agents.browser_worker.runner import Worker
+from Agents.browser_worker.schemas import Decision, WorkerError
+from Agents.browser_worker.verifier import verify
 
 pytestmark = pytest.mark.browser
 
@@ -102,6 +107,7 @@ class VisualReasoner(EarlySuccess):
 
 
 async def test_visual_handoff(catalog, request_data, sites, local_settings):
+    request_data["visual_fallback_available"] = False
     report = await run_local(request_data, sites, local_settings, VisualReasoner)
     assert report.outcome == "needs_visual"
     assert report.visual_handoff.run_id == request_data["run_id"]
@@ -348,7 +354,7 @@ async def test_malformed_model_call_recovery_in_worker(
 async def test_fastapi_to_real_browser_report(catalog, request_data, sites, local_settings):
     import httpx
 
-    from browser_worker.api import create_app
+    from Agents.browser_worker.api import create_app
 
     app = create_app(
         Worker(sites=sites, settings=local_settings, reasoner_factory=ScriptedCatalogReasoner)

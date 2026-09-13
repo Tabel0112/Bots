@@ -632,7 +632,7 @@ class WorkerReport(Message):
     """What a subagent returns for one subtask; read at stage 7.
 
     The first thirteen fields are the visual worker's report format adopted
-    verbatim (``workers/visual/examples/hn-top-story/report.json``), including
+    verbatim (``Agents/visual/examples/hn-top-story/report.json``), including
     its own ``schema_version`` and its untyped ``failures``.  ARGUS adds the
     returned ``session_handle`` and ``typed_failures``; both are optional so a
     worker's report loads unchanged.

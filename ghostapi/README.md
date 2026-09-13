@@ -1,6 +1,56 @@
 # Ghost API
 
-## Live workflow demo
+Ghost API is a shared workflow-memory service for Steel-powered agents. Agents own
+their browser sessions and research; Ghost finds reusable procedures, binds current
+inputs, saves successful traces as candidates, records executions, and qualifies
+versions for later reuse.
+
+## Worker connection: DOM first, visual fallback
+
+The [connection guide](INTEGRATION.md) covers setup, messages, examples, testing and
+limitations. `GHOST_API_URL` connects the existing DOM worker to Ghost. It explores or
+replays through DOM first, then uses UI-TARS in the same Steel session when page content
+requires visual interpretation. Validated traces become candidates; explicit fresh
+qualification runs unlock reuse. A local Chrome demo is available with
+`python -m Agents.browser_worker.ghost_cli --demo` while Ghost is running.
+
+## FastAPI service and workflow graph
+
+Requires Python 3.10 or later. From the repository root:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r ghostapi/requirements.txt
+python -m ghostapi.api
+```
+
+One process serves all agent endpoints and the workflow graph:
+
+- Workflow graph: <http://127.0.0.1:8765/graph>
+- Interactive API documentation: <http://127.0.0.1:8765/docs>
+- Health check: <http://127.0.0.1:8765/health>
+
+Set `GHOST_DATABASE_PATH` to select the SQLite registry. It defaults to
+`ghostapi/ghostapi.sqlite3`, which is ignored by Git. See the
+[development guide](DEVELOPMENT.md) for endpoint examples, failure behavior, tests,
+dependencies, and limitations.
+
+An agent starts with `POST /v1/workflows/lookup`. A compatible qualified version
+returns `{"decision":"reuse","workflow":{"bound_steps":[...]}}`; otherwise the
+successful lookup response is `{"decision":"explore","reason":{"code":"NO_MATCH",...}}`.
+After Steel exploration, submit the successful normalized trace to
+`POST /v1/workflows/candidates`. Invalid or unknown fields return HTTP 422, and an
+unknown workflow version returns HTTP 404 with `WORKFLOW_NOT_FOUND`.
+
+Current limitations: no authentication, deployment configuration, general migration
+framework, artifact retention service or quarantine/repair. Integrated `0.2` messages
+store evidence snapshots and require stored qualification run references; `0.1` remains
+the older fixture boundary. The worker performs independent configured-site checks;
+Ghost cannot independently prove arbitrary caller results. Live Steel/model verification
+of the new connection is pending.
+
+## Simulated workflow demo
 
 From the repository root:
 
@@ -8,10 +58,13 @@ From the repository root:
 python3 ghostapi/demo/live_demo.py
 ```
 
-Open [the local viewer](http://127.0.0.1:8765) to watch matching, executed steps, results, and qualification on an interactive flowchart while the task runs. Drag the empty chart canvas to pan, click nodes to inspect their evidence, use the history slider or Step buttons to revisit execution, adjust zoom, and select Follow live to resume tracking. Additional tasks queue while the viewer remains responsive. The browser/catalog are simulated; events and database writes come from the running demo. Stop the server with Ctrl+C.
+Open [the local viewer](http://127.0.0.1:8765) to watch the older simulated catalog lifecycle. Use a different port if the FastAPI service is already running. The browser/catalog are simulated; events and database writes come from the demo. Stop the server with Ctrl+C.
 
 
-Ghost receives a task from ARGUS, finds a compatible saved workflow, and binds the new inputs for execution. When no suitable workflow exists, a browser agent discovers a procedure and Ghost turns the successful trace into a candidate for qualification and future reuse.
+Each subagent asks Ghost for a compatible saved workflow and receives bound inputs
+for execution. When no suitable workflow exists, that subagent discovers a procedure
+with Steel and sends the successful trace to Ghost as a candidate for qualification
+and future reuse.
 
 ## Read first
 
@@ -35,7 +88,10 @@ Search `headphones` at `150`, then `keyboard` at `100`. On a new database, the f
 
 ## Tests and coverage
 
-Twelve Python tests cover workflow lifecycle, persistence, the live queue, error handling, and HTTP endpoints. Five JavaScript tests cover pointer panning and cleanup. CI generates Cobertura XML and LCOV reports and uploads them to Codecov using the `ghost-python` and `ghost-flowchart` flags. See the [demo instructions](demo/README.md) for local commands.
+Twelve legacy Python tests cover the fixture lifecycle and four FastAPI tests cover
+the agent-facing lifecycle, graph, validation, and qualification. Five JavaScript
+tests cover pointer panning and cleanup. See the [development guide](DEVELOPMENT.md)
+for local commands.
 
 ## Shared dependencies
 

@@ -2,9 +2,9 @@ import asyncio
 
 import httpx
 
-from browser_worker.api import create_app
-from browser_worker.config import Settings
-from browser_worker.schemas import SubtaskReport
+from Agents.browser_worker.api import create_app
+from Agents.browser_worker.config import Settings
+from Agents.browser_worker.schemas import SubtaskReport
 
 
 class StubWorker:

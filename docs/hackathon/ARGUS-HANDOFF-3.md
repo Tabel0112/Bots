@@ -1,5 +1,11 @@
 # ARGUS phase 3 handoff — connecting the real components
 
+2026-09-13 planning note: see the proposed [end-to-end integration plan](END-TO-END-PLAN.md)
+before applying these prompts. The checkout now has `Agents/` worker paths and a
+worker-owned Ghost API/visual continuation path. The old `GhostDemoAdapter` and visual
+session prerequisite below need re-evaluation against that implementation. These
+historical prompts are not instructions to launch parallel agents for a planning task.
+
 Written 2026-09-12 on `feat/argus-controller-base` after merging `origin/main` (Thomas's `moderator/` and the 72B visual-worker updates). Source of truth for what exists is [ARGUS-CONNECTION-AUDIT.md](ARGUS-CONNECTION-AUDIT.md); this file turns it into runnable prompts. All adapters live under a new package `argus/adapters/` so no teammate package is edited without its owner. Same working rules as phase 1b: one agent per prompt, listed files only, offline tests with fakes, no commits, no pip installs, no network. Live checks are separate manual commands run by Abel with real keys.
 
 ## What the merged `moderator/` module is, and is not

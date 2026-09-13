@@ -14,12 +14,52 @@ open-world delta and the controller/moderator boundary) and
 [docs/hackathon/ARGUS-IMPLEMENTATION.md](../docs/hackathon/ARGUS-IMPLEMENTATION.md)
 (phases and prompts).
 
-**Status: the controller is real; everything it calls out through is a fake.**
-No Steel session, no live model call and no Ghost service is connected. Records,
-screenshots, session handles and skills produced here are synthetic. Phase 1b
+**Status: Mission Control runs live by default.** It uses the real controller,
+real Steel browser sessions, public Staples/Wikivoyage/Remotive pages, Ghost's
+SQLite registry lookup, deterministic DOM extraction and the structured moderator.
+Set `ARGUS_RUNTIME=controlled` only for credential-free tests and offline demos.
+The general CLI still defaults to its older composition. Phase 1b
 (open-world navigation) is implemented offline end to end: two interpreter
 tiers, the S rules, model-planned chains through the model-client boundary,
 dependency data transfer and generic validation.
+
+## Mission Control demo
+
+Run from the repository root with Python 3.11 or newer:
+
+```bash
+python -m argus.api
+```
+
+Open `http://127.0.0.1:4173`. `STEEL_API_KEY` is required. `ARGUS_STORE`
+optionally selects the JSON run directory and `GHOST_DATABASE_PATH` selects the
+Ghost registry; defaults are `argus-runs/` and `ghostapi/ghostapi.sqlite3`.
+The API exposes run submission, history,
+snapshots, cancellation, a persisted event log, and an SSE stream.
+
+The submitted natural-language text selects the Shopping, Travel Plan, or Job Search
+domain and supplies its parameters and criteria. Shopping recognizes headphones and
+keyboards plus their price limits. Travel extracts a one-to-three-day Toronto plan
+and supported interests. Job Search extracts remote, salary ranking, and a result
+limit up to six. Unknown domains and unsupported product categories fail explicitly.
+
+Shopping creates one subtask per requested category and runs independent searches
+concurrently. Travel and Job Search run research followed by a dependent detail
+subtask. Each uses the controller stages, validation, structured moderator selection,
+controller-rendered answers, and persistence.
+
+The live sources are Staples product directories, the Toronto Wikivoyage guide,
+and Remotive's software-development jobs. Pages can change, block automation, or
+omit comparable prices/salaries; empty or unsupported evidence fails validation
+instead of producing a conclusion. Unknown scenarios return HTTP 422 and unknown
+runs return 404. Stop the server with Ctrl+C.
+
+`ARGUS_RUNTIME=controlled python -m argus.api` runs the explicit offline fixture.
+The live worker currently uses deterministic read-only DOM extraction and opens a
+fresh worker-owned Steel session per subtask. It does not yet invoke GPT/UI-TARS,
+replay a matched Ghost procedure, save a fully parameterized Ghost candidate, or
+serve screenshot image files; observation IDs, actions, decisions and handoffs are
+still persisted and streamed to Mission Control.
 
 ## Two interpreter tiers
 
@@ -554,5 +594,5 @@ These are required before any real open-world run and none of them exists here:
 Implement the protocols in `interfaces.py` and nothing else changes:
 `Toolbox` (Thomas, Tianqi), `Moderator` (Thomas), `Ghost` (Sting). The messages
 they exchange are in `contracts.py` with one JSON fixture each in `examples/`.
-`WorkerReport` is Thomas's `workers/visual/examples/hn-top-story/report.json`
+`WorkerReport` is Thomas's `Agents/visual/examples/hn-top-story/report.json`
 format verbatim, plus the optional `session_handle` and `typed_failures`.

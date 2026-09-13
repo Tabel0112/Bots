@@ -1,0 +1,21 @@
+{
+  "schema_version": "0.2",
+  "request_id": "request-demo-1",
+  "run_id": "run-demo-1",
+  "subtask_id": "catalog-search-1",
+  "objective": "Search the catalog for headphones costing at most 150 USD and return all visible matching products.",
+  "site_id": "demo-catalog",
+  "operation": "search_extract",
+  "start_url": "http://127.0.0.1:8765/",
+  "session": {"ownership": "worker"},
+  "parameters": {"query": "headphones", "max_price": 150},
+  "output_schema_id": "product-list.v1",
+  "success_conditions": [{"kind": "max_records", "value": 30}],
+  "allowed_actions": ["navigate", "fill", "select", "click", "wait_for", "inspect_element", "extract_records", "report_success", "report_failure", "request_visual_fallback"],
+  "allowed_domains": ["127.0.0.1"],
+  "allowed_url_patterns": ["http://127.0.0.1:8765/", "http://127.0.0.1:8765/products/*"],
+  "budgets": {"max_actions": 20, "max_model_calls": 30, "max_retries": 3, "max_runtime_seconds": 180, "no_progress_limit": 4},
+  "required_evidence": ["observations", "action_trace", "field_sources"],
+  "prerequisites": [],
+  "visual_fallback_available": true
+}

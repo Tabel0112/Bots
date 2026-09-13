@@ -18,38 +18,107 @@ Update this board in place. Detailed responsibilities are below; this table trac
 
 | ID | Deliverable | Responsible | Status | Dependency / next step | Evidence / branch |
 | --- | --- | --- | --- | --- | --- |
-| INT-1 | Shared example and interface agreement | All four; Abel coordinates ARGUS inputs/outputs | Planned | Walk through one request and agree the checklist below | Not reported |
-| GHOST-1 | Ghost lifecycle and callable boundary | Sting | Building | Connect the fixture boundary to a real worker trace; local demo remains simulated | `ghostapi/` on `feat/ghost-api-interactive-demo`; 12 Python and 5 JavaScript tests passed |
-| VLM-1 | Visual worker example and evidence report | Thomas | Building | Record an interaction-step example (click/type/scroll with semantic targets) that Ghost can compile; align report shape at INT-1 | `workers/visual/` on main (merged as eb3095b); see update below |
-| HTML-1 | HTML/code worker example and evidence report | Tianqi | Building | INT-1 agreement, live GPT/configured Steel task, then receiver checks | `browser_worker/`, tests; `codex/browser-worker-steel` rebased on `b4c9e76`; handoff below |
+| INT-1 | Shared example and interface agreement | All four; Abel coordinates ARGUS inputs/outputs | Planned | Agree the two-category example, contract translation, worker-owned Ghost calls and configuration in the [end-to-end plan](../hackathon/END-TO-END-PLAN.md) | 2026-09-13 source audit and proposed plan; receiver agreement pending |
+| GHOST-1 | Ghost lifecycle and callable boundary | Sting | Building | Run the new DOM-first connection with live Steel/UI-TARS and verify receiver handoff | `ghostapi/` on `feat/ghost-api-interactive-demo`; local browser/HTTP lifecycle verified; see connection update |
+| VLM-1 | Visual worker example and evidence report | Thomas | Building | Record an interaction-step example (click/type/scroll with semantic targets) that Ghost can compile; align report shape at INT-1 | `Agents/visual/` on main (merged as eb3095b); see update below |
+| HTML-1 | HTML/code worker example and evidence report | Tianqi | Building | INT-1 agreement, live GPT/configured Steel task, then receiver checks | `Agents/browser_worker/`, tests; `codex/browser-worker-steel` rebased on `b4c9e76`; handoff below |
 | ARGUS-1 | Task plan, routing and controller boundary | Abel | Building (re-review requested) | Tianqi's remaining finding showed that evidence-bound model prose could still make unsupported claims. Contract 0.5 removes moderator prose: the moderator selects validated records and fields, and the controller renders the answer. Wait for CI, then request Tianqi's re-review | PR #10; implementation commit `388764e`; 453 offline tests, Ruff and format checks pass |
-| ARGUS-3 | Phase 3 connections: session manager, DOM adapter, Ghost adapter, moderator adapter, visual adapter, first connected run | Sting (assigned by Abel 2026-09-12) | Planned | Prompts, order and owner questions in [ARGUS-HANDOFF-3.md](../hackathon/ARGUS-HANDOFF-3.md); P3-SESSION, P3-GHOST and P3-MOD have no dependencies; P3-VISUAL waits for Thomas's session change; currency (CAD vs USD) is Sting's own decision | Not started |
+| ARGUS-3 | Phase 3 connections: session manager, DOM adapter, Ghost adapter, moderator adapter, visual adapter, first connected run | Sting (assigned by Abel 2026-09-12) | Planned | Follow the proposed [end-to-end plan](../hackathon/END-TO-END-PLAN.md): bridge the existing worker/Ghost connection and structured moderator; older Phase 3 demo-adapter prompts need revision | Runtime adapters not started; 2026-09-13 plan below |
 | MOD-1 | Moderator callables: assess, reconcile, synthesize | Thomas (module) / Sting (adapter, under ARGUS-3) | Building | `moderator/` merged (PR #8) is a run harness, not an `argus.interfaces.Moderator`; P3-MOD may reuse its selection logic but must return `AnswerSelection`, never publish its prose or dispatch work. Thomas to confirm the structured boundary | `moderator/` on main at `eaed4c7`; harness check on Hacker News reported values wrong vs screenshots (see its README) |
 | INT-2 | First connected request with verified result | Sting runs it; Abel reviews | Planned | ARGUS-3 P3-SESSION + P3-DOM + P3-GHOST + P3-MOD, then P3-INT2 with STEEL_API_KEY, OPENAI_API_KEY, ARGUS_MODEL. Read-only decision workflow is finished at this point; execution and boundary handoff (DECISIONS) come after | Not run |
 | INT-3 | Learning, qualification, reuse and repair connections | All four | Planned | INT-2, GHOST-1, fresh worker replays and controlled-site cases | Not run |
 | DEMO-1 | Dashboard, controlled-site truth set and demo readiness | Tianqi (per Abel's report 2026-09-12; not yet confirmed by Tianqi in this doc) | Building | Controlled site needs two UI versions and a known result set for INT-3 repair and validation; dashboard consumes the ARGUS event stream (`events.jsonl`, `RunResult`) and must label fake runs as samples; use the evaluation checklist | Local, unreported |
 
+### DEMO-1 connected controlled runtime - 2026-09-13
+
+- Artifacts: `argus/demo_runtime.py`, `argus/api/`, controller worker-action
+  events, `frontend/dist/`, module READMEs and `argus/tests/test_demo_runtime.py`.
+- Behavior: Shopping uses two concurrent subagents; Travel and Job Search use
+  research-to-details dependencies. The UI streams and inspects ARGUS, Ghost,
+  subagent, worker-action and moderator events and reopens persisted conclusions.
+- Boundary: real controller/contracts/store with controlled worker records and
+  deterministic Ghost/moderator adapters. Live provider and receiver checks remain.
+- Checks actually run: all three direct controller scenarios succeeded with passed
+  validation (Shopping 2 selected records/41 events; Travel 6 itinerary stops/47
+  events; Job Search 3 selected records/47 events). The natural-language demo/API
+  suite passed 3 tests in 2.309s; the final full ARGUS suite passed 456 tests in
+  3.375s. JavaScript
+  syntax, Python compileall and whitespace passed. The running API returned healthy
+  and the page returned HTTP 200. Computer-use browser QA was unavailable because
+  this environment exposed no browser surface; responsive visual inspection remains.
+- Run: `/Users/ddxsuperman/miniconda3/bin/python3.13 -m argus.api`, then open
+  `http://127.0.0.1:4173`. Server was left running at this checkpoint.
+- Natural-language follow-up: scenario buttons now load examples only. The backend
+  classifies request text and extracts supported product/price, trip length/interests,
+  and job filter/rank/limit semantics. A live HTTP request for "top 2 remote software
+  engineering jobs by highest salary" classified as jobs, planned search -> details,
+  passed validation and published exactly two ordered records. Unsupported domains
+  and shopping categories return HTTP 422 instead of running a preset.
+
+### End-to-end integration planning - 2026-09-13
+
+- Tasks: INT-1, ARGUS-3, INT-2/3 and DEMO-1; planning only, assignments unchanged.
+- Artifact: [end-to-end plan](../hackathon/END-TO-END-PLAN.md), CURRENT/DECISIONS and
+  context entry link; `feat/ghost-api-interactive-demo`, inspected HEAD `35f6cb1`
+  with existing staged work preserved. Runtime usage remains in the linked module
+  READMEs; the plan labels proposed files and interfaces as unimplemented.
+- Findings/checks: read controller/interfaces/contracts, worker policy/config/report
+  and Ghost connection, service routes, moderator/frontend usage and UI source.
+  ARGUS uses fake wiring; the UI uses scripted ticks; the live worker supports
+  configured `search_extract`, not all open-world plan operations. No runtime tests,
+  live provider calls or receiver integration checks were run for this plan. All 67
+  local links in the six affected documents resolve; documentation whitespace checks
+  passed, including the new plan file.
+- Next: agree mapping, worker-resolved memory mode, validation ownership, model/site
+  configuration and JSON/SQLite storage exception; implement one complete UI run,
+  then parallel subtasks, learning/reuse, visual/repair and broader task support.
+- Receivers: Abel for controller contracts, Thomas/Tianqi for worker/moderator and
+  evidence, Sting for Ghost lifecycle; no connection newly marked Integrated.
+
 ### GHOST-1 update — 2026-09-12
 
 ```text
 Task ID / date / status: GHOST-1 / 2026-09-12 / Building
-Artifact, branch/revision or local files: ghostapi/ on feat/ghost-api-interactive-demo
-Module README / usage instructions: ghostapi/README.md and ghostapi/DEVELOPMENT.md
-Entry point + environment names: python3 ghostapi/demo/live_demo.py; no environment variables for the fixture demo
-Contract version + input/output/failure examples: simplified 0.1 fixture; demo-catalog search task, structured result, typed unsupported-discovery failure
-Checks run + result: 12 Python tests passed; 5 JavaScript pointer/flowchart tests passed; Python coverage 72%; flowchart line coverage 97.18% and branch coverage 91.30%
-Open issue / needed from / next action: discovery and replay are simulated; consume a real normalized browser trace and execute through the agreed worker boundary
+Artifact, branch/revision or local files: ghostapi/api/, ghostapi/client.py, Agents/browser_worker/ghost*.py, visual adapter and related tests/docs on feat/ghost-api-interactive-demo at base 60a45ec; uncommitted
+Module README / usage instructions: ghostapi/README.md; detailed connection guide ghostapi/INTEGRATION.md
+Entry point + environment names: python -m ghostapi.api; python -m Agents.browser_worker.ghost_cli; GHOST_API_URL, GHOST_DATABASE_PATH; worker/provider settings in module READMEs
+Contract version + input/output/failure examples: integrated 0.2, legacy 0.1 preserved; lookup/exploration/candidate/qualification/reuse; DOM-first same-session visual fallback; typed failure and inconclusive visual outputs
+Checks run + result: final rerun passed 94 worker/connection tests (38.24s), 4 FastAPI tests, 12 demo Python tests, 5 JavaScript tests and visual parser check on Python 3.13.13/macOS; local Chrome + separate Ghost HTTP process verified exploration, three fresh qualification cases and changed-input reuse (zero replay model calls); scoped Ruff, compileall, whitespace and 115 local documentation links passed; refreshed editable install verified worker/Ghost/visual imports and graph asset outside the repo
+Open issue / needed from / next action: explicit `--live-steel --request` path now guards hosted read-only tasks and emits sanitized phase events; live Steel/OpenAI/UI-TARS credentials, model endpoint and hosted site are still needed for the cloud receiver check; the DOM CLI has no browser viewport URL/screenshots yet; general canvas validation, auth, artifact retention, distributed locks, quarantine/repair and ARGUS/moderator integration remain unfinished
 Receiver + connection check/result: Abel/Thomas/Tianqi connection check pending
 ```
+
+### Worker–Ghost connection — 2026-09-12
+
+Follow-up credential check: real Steel create/connect/open example.com/observe/release
+passed in 4.353s using `Agents.browser_worker.demo.steel_sanity.run`. The live-model local
+catalog attempt failed configuration validation before a model call: user-selected
+`gpt-5.6-luna` / `low` is outside the current Settings allowlist. `.env` was not changed;
+next step is agreement on model settings or separately authorized model support.
+This is Steel-only evidence, not a live combined worker/Ghost or visual receiver check.
+
+The user authorized this shared implementation, then required DOM-first routing with
+visual fallback when DOM cannot handle the page. The local work touches GHOST-1, HTML-1
+and VLM-1 without claiming a teammate's receiver check. The [connection guide](../../ghostapi/INTEGRATION.md)
+and [DOM](../../Agents/browser_worker/README.md)/[visual](../../Agents/visual/README.md) READMEs
+describe actual setup, inputs, outputs, failures, dependencies and limitations.
+
+Tests consume real Chrome reports through the Ghost API and SQLite, plus simulate the
+Steel/UI-TARS handoff to check same-session routing, single release, cancellation, input
+origins and screenshot normalization. The standalone HTTP demo confirms candidate →
+qualified → changed-input reuse. These are local connection checks; INT-2 still needs
+ARGUS/moderator, and none of the team connections is marked Integrated. Next: configure
+the live providers/site, have Thomas/Tianqi verify continuation, then Sting verify the
+resulting candidate/qualification and Abel consume the final report.
 
 ### VLM-1 update — 2026-09-12
 
 ```text
 Task ID / date / status: VLM-1 / 2026-09-12 / Building
-Artifact, branch/revision or local files: workers/visual/ on main (merged as eb3095b)
-Module README / usage instructions: workers/visual/README.md
+Artifact, branch/revision or local files: Agents/visual/ on main (merged as eb3095b)
+Module README / usage instructions: Agents/visual/README.md
 Entry point + environment names: python -m browser_subagent "<subtask>" --url <start>; STEEL_API_KEY (required), UITARS_BASE_URL (default http://127.0.0.1:8080/v1), ANTHROPIC_API_KEY (claude backend only)
-Contract version + input/output/failure examples: report.json is 0.1-provisional, aligned with CONTRACTS v0.1 ActionRecord/RunResult/metrics concepts. Real-browser observation-only example: workers/visual/examples/hn-top-story/ (navigate -> one model call -> finished(); no interaction steps, semantic_target/findings null, report.json hand-edited to relocate evidence paths). Failure handling proven live: a mid-run Steel session timeout produced typed action failures and an honest failed outcome (fast-abort now added); unparseable model output aborts after 3 attempts.
+Contract version + input/output/failure examples: report.json is 0.1-provisional, aligned with CONTRACTS v0.1 ActionRecord/RunResult/metrics concepts. Real-browser observation-only example: Agents/visual/examples/hn-top-story/ (navigate -> one model call -> finished(); no interaction steps, semantic_target/findings null, report.json hand-edited to relocate evidence paths). Failure handling proven live: a mid-run Steel session timeout produced typed action failures and an honest failed outcome (fast-abort now added); unparseable model output aborts after 3 attempts.
 Checks run + result: test_parser.py passed (offline, no steel-sdk needed); smoke_test.py passed (live Steel: navigate, 1280x800 screenshot, click/scroll/key, DOM element under cursor, network capture); 3-point vision grounding calibration on UI-TARS-1.5-7B Q4 (2/3 within 11px, coords in original pixel space — rescale removed accordingly); live mousemove probe measured Steel action space = full-window screenshot space at constant (4,87)px offset from page viewport — element_at/semantic_target now corrected by a per-session measured offset; end-to-end run succeeded on news.ycombinator.com — correct title + points verified against the run's own screenshot, 1 model call, 20s, session replay on Steel dashboard.
 Open issue / needed from / next action: record an interaction-step example (click/type/scroll with corrected semantic targets) that Ghost can compile; claude backend untested. Driver model settled: UI-TARS-72B on a GPU node (set UITARS_BASE_URL, tunnel if remote) - measured zoom_rate 12/12 vs the 7B's 2/12 and 83% vs 58% correct on exact-value reads, so the 7B is a laptop fallback only.
 Receiver + connection check/result: Abel (consume examples/hn-top-story/report.json as the worker-report sample), Sting (needs the upcoming interaction-step trace for compilation) — connection checks pending
@@ -72,9 +141,9 @@ Receiver + connection check/result: no runtime receiver check has run
 
 ```text
 Task ID / date / status: HTML-1 / 2026-09-12 / Building
-Artifact, branch/revision or local files: browser_worker/, tests/browser_worker/, pyproject.toml and .github/workflows/browser-worker.yml on codex/browser-worker-steel, rebased onto main b4c9e76
-Module README / usage instructions: browser_worker/README.md and browser_worker/TESTING.md
-Entry point + environment names: Worker.run (ARGUS in-process); optional uvicorn browser_worker.main:app; OPENAI_API_KEY, STEEL_API_KEY, WORKER_BROWSER, WORKER_BROWSER_EXECUTABLE, WORKER_SITES_FILE, WORKER_API_TOKEN (full settings in module README)
+Artifact, branch/revision or local files: Agents/browser_worker/, tests/browser_worker/, pyproject.toml and .github/workflows/browser-worker.yml on codex/browser-worker-steel, rebased onto main b4c9e76
+Module README / usage instructions: Agents/browser_worker/README.md and Agents/browser_worker/TESTING.md
+Entry point + environment names: Worker.run (ARGUS in-process); optional uvicorn Agents.browser_worker.main:app; OPENAI_API_KEY, STEEL_API_KEY, WORKER_BROWSER, WORKER_BROWSER_EXECUTABLE, WORKER_SITES_FILE, WORKER_API_TOKEN (full settings in module README)
 Contract version + input/output/failure examples: local 0.2 boundary pending INT-1 agreement; examples/subtask.json -> independently checked records/report, typed failed/inconclusive/needs_visual outcomes; no receiver compatibility assumed
 Changes: preserve merged Ghost/visual docs, scope DOM choices, isolate pytest/Ruff, add Linux CI, abort ambient writes without failing the run, restrict model failure codes, document body-cache compatibility and portable browser setup
 Checks run + result: 74 DOM tests passed (Python 3.12.14/Windows, 37.72s); Ruff lint/format and whitespace checks passed. Existing Ghost Python suite: 12 passed. Ghost/visual source and Ghost CI unchanged against main. Dedicated Linux CI added; remote result pending. Prior live Steel create/connect/observe/release sanity passed (Example Domain, 5.671s); not rerun for review. No live GPT/configured-site task verified.
@@ -140,6 +209,21 @@ Status meanings: **Planned** = identified; **Researching** = approach under inve
 
 ## INT-1 — agree before connecting components
 
+### Mission Control live slice — 2026-09-13
+
+Status: **Building**. Local files on `feat/ghost-api-interactive-demo` add
+`argus/live_runtime.py`, `argus/api/`, and the event-driven `frontend/dist/` UI.
+Run `python -m argus.api` with `STEEL_API_KEY`; see
+[ARGUS usage](../../argus/README.md) and [UI usage](../../frontend/README.md).
+Natural-language Shopping, Toronto Travel, and remote Job Search plans now open real
+Staples, Wikivoyage, and Remotive pages in Steel and stream ARGUS/subagent/Ghost/action/
+moderator events. Live Shopping and Job Search passed validation; Travel extracted
+six section-aware records per pass and selected four distinct stops. `python -m unittest
+discover -s argus/tests -p 'test_*.py'` passed 456 tests in 3.597s; compileall,
+JavaScript syntax, and whitespace checks passed earlier in the same worktree.
+Remaining: Ghost replay/candidate qualification, visual fallback, screenshot files,
+and arbitrary-site support. No receiver has marked the combined connection Integrated.
+
 Read-only connection audit of all three packages against `argus/interfaces.py` (2026-09-12): [ARGUS-CONNECTION-AUDIT.md](../hackathon/ARGUS-CONNECTION-AUDIT.md). Phase 3 adapter prompts and order: [ARGUS-HANDOFF-3.md](../hackathon/ARGUS-HANDOFF-3.md). Note: the merged `moderator/` module is a run harness (dispatch, monitoring, aggregation, synthesis) and does not implement `argus.interfaces.Moderator`. Its prose synthesis cannot be published; P3-MOD must parse or replace it with the contract 0.5 `AnswerSelection` of validated records, fields and fixed notes. Two items need owner changes, not adapters: the visual worker cannot accept an ARGUS-owned session, and Ghost validates in CAD while ARGUS and the DOM worker fix USD. No moderator adapter exists yet.
 
 Use the [provisional contract](../hackathon/CONTRACTS.md) as a reference. Its existing fake types do not yet settle moderator/subtask or visual-target messages.
@@ -199,7 +283,7 @@ Handoff: tell Thomas and Tianqi what action/observation evidence compilation req
 
 ### Sting — phase 3 connections (ARGUS-3, assigned 2026-09-12)
 
-Owns connecting the real components to the ARGUS controller through `argus/interfaces.py`, using the prompts in [ARGUS-HANDOFF-3.md](../hackathon/ARGUS-HANDOFF-3.md) and the gaps in [ARGUS-CONNECTION-AUDIT.md](../hackathon/ARGUS-CONNECTION-AUDIT.md). Rules: adapters live under `argus/adapters/`; no edits to `workers/`, `browser_worker/` or `moderator/` without their owner; offline tests with fakes; Abel reviews and commits. Decide CAD vs USD before P3-GHOST. Ask Thomas for the visual worker's session-injection change and for agreement on the moderator boundary. Target: INT-2, the first connected read-only run with a validated answer.
+Owns connecting the real components to the ARGUS controller through `argus/interfaces.py`, using the prompts in [ARGUS-HANDOFF-3.md](../hackathon/ARGUS-HANDOFF-3.md) and the gaps in [ARGUS-CONNECTION-AUDIT.md](../hackathon/ARGUS-CONNECTION-AUDIT.md). Rules: adapters live under `argus/adapters/`; no edits to `Agents/visual/`, `Agents/browser_worker/` or `moderator/` without their owner; offline tests with fakes; Abel reviews and commits. Decide CAD vs USD before P3-GHOST. Ask Thomas for the visual worker's session-injection change and for agreement on the moderator boundary. Target: INT-2, the first connected read-only run with a validated answer.
 
 ## Thomas — VLM / visual interpretation
 
@@ -212,7 +296,7 @@ Handoff: provide an example worker report to Abel and a trace/evidence example t
 
 ## Tianqi — HTML/codebase interpretation
 
-Current implementation and review evidence is in the HTML-1 update above; see [module usage](../../browser_worker/README.md) and [testing runbook](../../browser_worker/TESTING.md).
+Current implementation and review evidence is in the HTML-1 update above; see [module usage](../../Agents/browser_worker/README.md) and [testing runbook](../../Agents/browser_worker/TESTING.md).
 
 - Define which HTML/DOM and available code sources the subagent consumes and how it interprets them.
 - Identify semantic controls, parameter fields, navigation context and result records.
@@ -242,7 +326,7 @@ Assigned by the user on 2026-09-12. Whether Thomas also keeps the VLM-1 visual i
 
 Use the same read-only search/filter/extraction example for all four deliverables. Agree one compatible worker-report shape containing subtask identity, outcome, findings, source evidence, observed actions/parameter origins, available measurements and failures. This is a planning requirement, not a new frozen schema.
 
-Thomas and Tianqi build the connection between subagents and Steel as one shared toolbox exposing browser actions, HTML/DOM interpretation and visual interpretation; sessions are opened, lent and closed by the ARGUS controller. Per the PR #7 review their separate local adapters (`workers/visual/`, `browser_worker/`) still need convergence; agree the shared adapter boundary, lifecycle ownership and file ownership before simultaneous edits. Sting consumes both kinds of evidence; Abel coordinates execution with Thomas's moderator.
+Thomas and Tianqi build the connection between subagents and Steel as one shared toolbox exposing browser actions, HTML/DOM interpretation and visual interpretation; sessions are opened, lent and closed by the ARGUS controller. Per the PR #7 review their separate local adapters (`Agents/visual/`, `Agents/browser_worker/`) still need convergence; agree the shared adapter boundary, lifecycle ownership and file ownership before simultaneous edits. Sting consumes both kinds of evidence; Abel coordinates execution with Thomas's moderator.
 
 Dashboard, controlled-site construction, presentation/backup recording and release work have not been assigned explicitly. Allocate those separately; do not infer ownership from the removed A–D plans. Thomas/Tianqi still need to agree the concrete shared Steel session-lifecycle implementation.
 

@@ -1,6 +1,12 @@
 # Intended architecture
 
-Status: intended product architecture. The DOM browser-worker slice is now implemented under [browser_worker/](../../browser_worker/README.md), with locally tested browser behavior; other components and connections are not established by that implementation. Decision status is maintained in [DECISIONS.md](DECISIONS.md).
+Status: intended product architecture. The DOM browser-worker slice is now implemented under [Agents/browser_worker/](../../Agents/browser_worker/README.md), with locally tested browser behavior; other components and connections are not established by that implementation. Decision status is maintained in [DECISIONS.md](DECISIONS.md).
+
+The [worker–Ghost connection](../../ghostapi/INTEGRATION.md) is now implemented locally:
+Ghost lookup → DOM replay/exploration → same-session UI-TARS fallback when DOM evidence is
+insufficient → independent validation → optional candidate saving. Explicit qualification
+opens fresh sessions. Local browser/API tests verify this memory lifecycle; visual cloud
+execution and the full ARGUS/moderator connection still require receiver checks.
 
 ## Product purpose
 

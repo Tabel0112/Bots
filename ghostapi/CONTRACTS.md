@@ -1,6 +1,14 @@
-# Ghost API workflow contract — version 0.1
+# Ghost API workflow contract — versions 0.1 and 0.2
 
-Owner: C for shared contracts, with B supplying Ghost behavior. Status: proposed live implementation contract. The local demo implements a simplified subset.
+The implemented worker connection uses **0.2** on the existing `/v1` routes. See the
+[integration contract and examples](INTEGRATION.md). It adds execution context,
+compatibility keys, validation checks, embedded artifacts and idempotency keys to
+candidates/runs; qualification references stored fresh runs. `0.1` fixture clients
+remain supported, and `0.2` lookup never reuses an older fixture workflow. The workflow
+examples below retain their historical `0.1` meaning.
+
+Status: provisional contract. The FastAPI service implements an initial direct
+subagent boundary; the local catalog demo remains a separate simplified fixture.
 
 This is the authoritative location for the workflow schema and Ghost function interface extracted from the [shared contract](../docs/hackathon/CONTRACTS.md). Request, browser, result, error, and frontend contracts remain there. Field names and contract version are unchanged by this file move.
 
@@ -41,7 +49,30 @@ Store `candidate → qualified → quarantined` as distinct states. One successf
 
 Repair creates a new candidate version with references to the old version, failure, and changed steps. Retain old version history. Quarantine the failing version for the affected scope; do not overwrite it or automatically promote an untested repair. C stores versions and run records durably for the demo; no concurrent promotion is needed.
 
-## Ghost interface — B supplies, C consumes
+## Agent-facing FastAPI interface
+
+Every Steel-powered subagent calls Ghost directly. Task assignment, Steel sessions,
+browser actions, and research remain outside Ghost.
+
+- `POST /v1/workflows/lookup`: find a compatible qualified version and bind current
+  values, or return an explicit `explore` decision.
+- `POST /v1/workflows/candidates`: compile a successful normalized action trace into
+  an immutable candidate version.
+- `POST /v1/workflows/{skill_id}/versions/{version}/runs`: record a subagent's fresh
+  reuse result, evidence, metrics, and failure data.
+- `POST /v1/workflows/{skill_id}/versions/{version}/qualification`: submit separate
+  replay reports; initial promotion requires three distinct passed input sets and an
+  evidenced empty-result report.
+- `GET /v1/workflows` and
+  `GET /v1/workflows/{skill_id}/versions/{version}`: inspect the registry.
+- `GET /v1/activity`: activity consumed by the workflow graph served at `/graph`.
+
+OpenAPI at `/docs` is the executable field-level reference. Version 0.1 requests
+reject unknown fields. Candidates are never returned by lookup. The first compiler
+supports explicit `input_parameter` origins; broader trace inference and independent
+operation-specific validation remain unfinished.
+
+## Ghost domain interface
 
 - `match(request, skills) -> MatchDecision`: compatible qualified skill or `explore`, with reason.
 - `compile(trace, request, checks) -> CandidateSkill`: parameterize supported values; reject missing evidence or unsupported action shapes.
@@ -50,4 +81,5 @@ Repair creates a new candidate version with references to the old version, failu
 - `qualify(candidate, replay_reports) -> QualificationReport`.
 - `propose_repair(skill, failure, observation) -> RepairProposal`: uses A's target proposal if needed; cannot broaden task authority or edit the validator to pass.
 
-C orchestrates these functions; B does not start a second competing run controller. A executes steps; B does not build a second browser backend.
+The FastAPI application exposes these operations without starting a browser or task
+controller. Subagents execute steps and return normalized evidence.

@@ -2,11 +2,16 @@
 
 Project for the Battle of the Schools Web Agents hackathon. ARGUS plans tasks, coordinates subagents and verifies their results. Ghost API turns successful browser interactions into reusable, parameterized capabilities. Browser subagents will use Steel.
 
-**HTML-1: DOM browser worker implemented locally; shared integration pending.** The [browser worker](browser_worker/README.md) provides an async Python subagent with an optional FastAPI transport, Steel and GPT-5.4 adapters, and independent result verification. Ghost and visual modules also exist; see [CURRENT.md](docs/ai/CURRENT.md) for their separate evidence.
+**HTML-1: DOM browser worker implemented locally; shared integration pending.** The [browser worker](Agents/browser_worker/README.md) provides an async Python subagent with an optional FastAPI transport, Steel and GPT-5.4 adapters, and independent result verification. Ghost and visual modules also exist; see [CURRENT.md](docs/ai/CURRENT.md) for their separate evidence.
+
+The [worker–Ghost connection](ghostapi/INTEGRATION.md) now implements DOM-first
+execution, same-session UI-TARS fallback, candidate saving, explicit qualification and
+semantic replay. The local Chrome/HTTP lifecycle is tested; live Steel/model and
+ARGUS/moderator receiver verification remain pending.
 
 ## Run the browser worker
 
-Follow [browser_worker/README.md](browser_worker/README.md) for setup, the no-key local demo, real GPT/Steel configuration, API requests, tests, and known limitations. The worker's versioned boundary is `SubtaskRequest` / `SubtaskReport` **0.2**; it does not replace the historical provisional ARGUS contract automatically.
+Follow [Agents/browser_worker/README.md](Agents/browser_worker/README.md) for setup, the no-key local demo, real GPT/Steel configuration, API requests, tests, and known limitations. The worker's versioned boundary is `SubtaskRequest` / `SubtaskReport` **0.2**; it does not replace the historical provisional ARGUS contract automatically.
 
 ## Start here
 
@@ -28,4 +33,4 @@ Each coding task should leave current module usage instructions, a concise chang
 
 One read-only search/filter/extraction workflow, one public website and one controlled website with two UI versions. Demonstrate actual exploration, trace compilation, fresh qualification, changed-input reuse, independent validation and bounded repair with honest failure handling.
 
-The [frontend](frontend/README.md), product-level [controlled site](demo-site/README.md) and [demo materials](docs/demo/README.md) directories still hold planning placeholders and need owners. The worker's small catalog under `browser_worker/demo/` is not the two-version product demonstration. The Ghost API module includes a standard-library fixture demo and interactive viewer; [the visual worker](workers/visual/README.md) has its own evidence. Public-site choice and cross-component integration remain open. Python/FastAPI, Playwright/Steel and GPT-5.4 are local HTML-1 implementation choices, not a frozen project-wide stack; contract 0.2 awaits INT-1 agreement and receiver verification.
+The [frontend](frontend/README.md), product-level [controlled site](demo-site/README.md) and [demo materials](docs/demo/README.md) directories still hold planning placeholders and need owners. The worker's small catalog under `Agents/browser_worker/demo/` is not the two-version product demonstration. The Ghost API module includes a standard-library fixture demo and interactive viewer; [the visual worker](Agents/visual/README.md) has its own evidence. Public-site choice and cross-component integration remain open. Python/FastAPI, Playwright/Steel and GPT-5.4 are local HTML-1 implementation choices, not a frozen project-wide stack; contract 0.2 awaits INT-1 agreement and receiver verification.

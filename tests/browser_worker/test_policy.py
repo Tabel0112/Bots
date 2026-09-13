@@ -3,10 +3,10 @@ import copy
 import pytest
 from pydantic import ValidationError
 
-from browser_worker.config import Settings
-from browser_worker.demo.run import action
-from browser_worker.policy import guard_url, validate_action, validate_request
-from browser_worker.schemas import Decision, Element, Observation, WorkerError
+from Agents.browser_worker.config import Settings
+from Agents.browser_worker.demo.run import action
+from Agents.browser_worker.policy import guard_url, validate_action, validate_request
+from Agents.browser_worker.schemas import Decision, Element, Observation, WorkerError
 
 
 @pytest.mark.parametrize(

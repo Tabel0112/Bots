@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from browser_worker.config import Settings, load_sites
-from browser_worker.demo.run import sample_request
+from Agents.browser_worker.config import Settings, load_sites
+from Agents.browser_worker.demo.run import sample_request
 
 
 @pytest.fixture

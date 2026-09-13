@@ -5,11 +5,11 @@ import httpx
 import pytest
 from openai import APITimeoutError
 
-from browser_worker.config import Settings
-from browser_worker.demo.run import action
-from browser_worker.llm import OpenAIReasoner
-from browser_worker.prompts import function_tools
-from browser_worker.schemas import WorkerError
+from Agents.browser_worker.config import Settings
+from Agents.browser_worker.demo.run import action
+from Agents.browser_worker.llm import OpenAIReasoner
+from Agents.browser_worker.prompts import function_tools
+from Agents.browser_worker.schemas import WorkerError
 
 
 def response(arguments=None, name="report_success", status="completed", count=1):

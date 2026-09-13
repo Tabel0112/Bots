@@ -1,4 +1,5 @@
 # Byte-compiled / optimized / DLL files
+.DS_Store
 __pycache__/
 *.py[codz]
 *$py.class
@@ -220,7 +221,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # ARGUS visual worker
-workers/visual/runs/
+Agents/visual/runs/
 *.gguf
 
 # ARGUS local run store

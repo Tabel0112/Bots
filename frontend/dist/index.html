@@ -1,60 +1,6 @@
-<!doctype html>
-<html lang="en" data-theme="paper">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="ARGUS Mission Control: sample browser execution, evidence, and recovery.">
-<title>ARGUS Mission Control</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='7' fill='%2352759b'/%3E%3Cellipse cx='32' cy='32' rx='27' ry='15' fill='none' stroke='%23497b66' stroke-width='4' transform='rotate(-24 32 32)'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="./styles.css">
-</head>
-<body>
-<div class="app-shell">
-<aside class="sidebar" aria-label="Primary navigation">
-<a class="brand" href="#mission" aria-label="ARGUS Mission Control home"><svg viewBox="0 0 64 64" aria-hidden="true"><ellipse cx="32" cy="32" rx="27" ry="15" transform="rotate(-24 32 32)"/><ellipse cx="32" cy="32" rx="27" ry="15" transform="rotate(35 32 32)"/><circle cx="32" cy="32" r="6"/></svg><span>ARGUS</span></a>
-<nav>
-<a href="#mission" class="nav-item" data-nav="mission" aria-label="Mission Control" title="Mission Control"><span aria-hidden="true">⌘</span><span>Mission Control</span></a>
-<a href="#runs" class="nav-item" data-nav="runs" aria-label="Runs" title="Runs"><span aria-hidden="true">≡</span><span>Runs</span><small id="runCount">0</small></a>
-<a href="#ghost" class="nav-item" data-nav="ghost" aria-label="Ghost Library" title="Ghost Library"><span aria-hidden="true">◎</span><span>Ghost Library</span></a>
-<a href="#evidence" class="nav-item" data-nav="evidence" aria-label="Evidence" title="Evidence"><span aria-hidden="true">▤</span><span>Evidence</span></a>
-</nav>
-<div class="simulation-note"><b>Sample workspace</b><span>Simulated browser & records</span><small>No live services connected</small></div>
-</aside>
-<div class="main-frame">
-<header class="topbar"><div class="breadcrumb"><span id="pageName">Mission Control</span><span class="divider">/</span><strong id="runId">New run</strong><span id="runStatus" class="badge">Ready</span></div><div class="top-actions"><span class="demo-label">Interactive demo</span><div class="theme-switch" aria-label="Appearance"><button data-theme="paper" aria-pressed="true">Paper</button><button data-theme="midnight" aria-pressed="false">Midnight</button></div></div></header>
-<main>
-<section id="missionView" class="view">
-<form id="missionForm" class="mission-brief">
-<div class="brief-title"><h1>Find five wireless headphones</h1><p>Under $150 CAD · sample catalog · read-only task</p></div>
-<div class="launch-controls"><label for="scenario">Demo scenario</label><select id="scenario"><option value="success">Successful reuse</option><option value="filter">Filter failure & recovery</option><option value="offline">Browser unavailable</option></select><button class="primary" id="launchRun" type="submit">Launch run</button></div>
-</form>
-<div class="run-bar"><div><strong id="liveAction">Ready to explore</strong><span id="liveDetail">Launch a sample run to follow its work.</span></div><div class="run-controls"><span id="elapsed">0.0s</span><button id="pauseRun" disabled>Pause</button><button id="cancelRun" disabled>Cancel</button></div></div>
-<div id="recovery" class="recovery" hidden><div><strong id="recoveryTitle"></strong><p id="recoveryText"></p></div><button id="recoverRun" class="primary"></button></div>
-<div id="selectionBar" class="selection-bar"><span id="selectionText">Live view · waiting for activity</span><button id="returnLive" hidden>Return to live</button></div>
-<div class="mobile-panels" aria-label="Workspace panels"><button data-panel="map" aria-pressed="true">Map</button><button data-panel="activity" aria-pressed="false">Activity</button><button data-panel="evidence" aria-pressed="false">Evidence</button></div>
-<div class="workspace" data-panel="map">
-<div class="execution-column">
-<section class="surface map-card" aria-labelledby="mapTitle"><header class="panel-heading"><div><h2 id="mapTitle">Execution flow</h2><p class="panel-subtitle">Follow the primary route and any recovery branch.</p></div><button id="fitGraph" title="Fit the complete flow into view">Fit flow</button></header>
-<div class="graph-viewport" id="graphViewport"><div class="graph-size" id="graphSize"><div class="flow-canvas" id="flowCanvas"><svg id="flowLines" class="flow-lines" aria-hidden="true"><defs><marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto-start-reverse"><path d="M0 0 L7 3.5 L0 7" fill="none" stroke="context-stroke" stroke-width="1.3"/></marker></defs></svg></div></div></div>
-<div class="graph-legend"><span><i class="legend-live"></i>Running</span><span><i class="legend-done"></i>Complete</span><span><i class="legend-blocked"></i>Blocked</span><span><i class="legend-recovery"></i>Recovery route</span></div>
-</section>
-<section class="surface timeline-card" aria-labelledby="timelineTitle"><header class="panel-heading"><h2 id="timelineTitle">Run activity <span id="eventCount" class="count">0</span></h2><span class="muted">Recorded events only</span></header><div id="timeline" class="timeline" aria-label="Recorded run activity"></div></section>
-</div>
-<aside class="surface inspector" aria-labelledby="inspectorTitle"><header class="panel-heading"><h2 id="inspectorTitle">Evidence inspector</h2><span class="sample-badge">Sample</span></header><div id="eventContext" class="event-context"></div>
-<div class="tabs" role="tablist" aria-label="Evidence views"><button id="browserTab" role="tab" aria-selected="true" aria-controls="browserPanel">Browser</button><button id="checksTab" role="tab" aria-selected="false" aria-controls="checksPanel" tabindex="-1">Checks</button><button id="rawTab" role="tab" aria-selected="false" aria-controls="rawPanel" tabindex="-1">Raw</button></div>
-<div id="browserPanel" role="tabpanel" aria-labelledby="browserTab"><div class="capture-controls"><div class="segmented" aria-label="Capture moment"><button id="beforeCapture" aria-pressed="false">Before</button><button id="afterCapture" aria-pressed="true">After</button></div><span id="captureId"></span></div><div id="browserCapture" class="browser-capture"></div><p id="captureCaption" class="capture-caption"></p></div>
-<div id="checksPanel" role="tabpanel" aria-labelledby="checksTab" hidden><div id="checksList"></div></div>
-<div id="rawPanel" role="tabpanel" aria-labelledby="rawTab" hidden><pre id="rawEvidence"></pre></div>
-<div id="resultSummary" class="result-summary" hidden></div>
-</aside>
-</div>
-</section>
-<section id="runsView" class="view library-view" hidden><header><h1>Runs</h1><p>Runs from this visit. Select one to inspect its recorded activity.</p></header><div class="filter-row"><label for="runFilter">Status</label><select id="runFilter"><option value="all">All runs</option><option value="completed">Completed</option><option value="blocked">Blocked</option><option value="running">Running</option><option value="paused">Paused</option><option value="cancelled">Cancelled</option></select></div><div id="runsList"></div></section>
-<section id="ghostView" class="view library-view" hidden><header><h1>Ghost Library</h1><p>Sample reusable workflows. Qualification is simulated in this demo.</p></header><article class="surface library-card"><div><span class="badge complete">Qualified · sample</span><h2>Catalog search · v2</h2><p>Search headphones, apply a maximum price, and extract five current records.</p></div><dl><div><dt>Parameters</dt><dd>query · max_price · currency · count</dd></div><div><dt>Scope</dt><dd>catalog.demo / headphones</dd></div><div><dt>Reuse condition</dt><dd>Current page controls match the qualified workflow.</dd></div></dl><button id="useGhost">Try this workflow</button></article><article class="surface library-card"><span class="badge">Archived · sample</span><h2>Catalog search · v1</h2><p>Superseded after the catalog filter control changed.</p></article></section>
-<section id="evidenceView" class="view library-view" hidden><header><h1>Evidence</h1><p>Sample captures recorded during this visit. Open a capture in its run context.</p></header><div id="evidenceList"></div></section>
-</main>
-</div>
-</div>
-<div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
-<script src="./app.js"></script>
-</body>
-</html>
+<!doctype html><html lang="en" data-theme="paper"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ARGUS Mission Control</title><link rel="stylesheet" href="/assets/styles.css"></head><body><div class="shell">
+<aside><a class="brand" href="#mission"><b>A</b> ARGUS</a><nav><a href="#mission" data-view="mission">Mission</a><a href="#workflow" data-view="workflow">Live workflow</a><a href="#runs" data-view="runs">Runs</a></nav><div class="runtime"><i></i><span><strong>Live Steel runtime</strong><small>Real ARGUS orchestration<br>Current public websites</small></span></div></aside>
+<main><header class="top"><span><small id="viewLabel">Mission</small><strong id="activeRunLabel">Ready</strong></span><button id="themeToggle" title="Toggle theme">◐</button></header>
+<section id="missionView" class="view"><div class="mission-grid"><section class="composer"><header><span><small>New mission</small><h1>What should ARGUS investigate?</h1></span><em>Read only</em></header><div class="scenario-tabs" aria-label="Example prompts"><button data-scenario="shopping" aria-selected="true">Shopping example</button><button data-scenario="travel">Travel example</button><button data-scenario="jobs">Jobs example</button></div><form id="missionForm"><label for="missionText">Describe your request in natural language</label><textarea id="missionText" rows="5"></textarea><footer><span id="scenarioNote">ARGUS will interpret the domain, parameters, and criteria.</span><button class="primary" id="runButton">Run mission →</button></footer></form></section><aside class="preview"><small>Expected execution</small><h2 id="previewTitle"></h2><ol id="previewSteps"></ol></aside></div><section class="recent"><header><span><small>Workspace</small><h2>Recent runs</h2></span><button id="refreshRuns">Refresh</button></header><div id="recentRuns" class="run-list"></div></section></section>
+<section id="workflowView" class="view" hidden><header class="workflow-head"><span><small>Live workflow</small><h1 id="workflowTitle">No run selected</h1><p id="workflowSubtitle">Launch a mission to see every handoff and decision.</p></span><span class="workflow-actions"><em id="workflowStatus" class="badge">Ready</em><button id="cancelButton" disabled>Cancel</button></span></header><div id="stageRail" class="stage-rail"></div><div class="workflow-grid"><section class="timeline-panel"><header><span><small>Event stream</small><h2>Handoffs and decisions</h2></span><em id="eventCount">0 events</em></header><div id="timeline" class="timeline"><p class="empty">Events will appear here as ARGUS works.</p></div></section><aside class="detail-panel"><header><small>Inspector</small><h2 id="detailTitle">Select an event</h2></header><div id="detailBody"><p>Select a workflow event to inspect its stage, subagent, decision, and evidence.</p></div></aside></div><section id="resultPanel" class="result-panel" hidden></section></section>
+<section id="runsView" class="view" hidden><header class="section-head"><span><small>Archive</small><h1>All runs</h1></span><button id="refreshAllRuns">Refresh</button></header><div id="allRuns" class="run-list"></div></section></main></div><div id="announcement" class="sr" aria-live="polite"></div><script src="/assets/app.js"></script></body></html>

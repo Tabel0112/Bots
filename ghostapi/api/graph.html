@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ghost API · Workflow graph</title><style>
+:root{font-family:system-ui,sans-serif;color:#e8eef9;background:#09111c}*{box-sizing:border-box}body{margin:0}header{padding:22px 4vw;border-bottom:1px solid #29394d;display:flex;justify-content:space-between;gap:20px}h1{margin:0;font-size:22px}a{color:#8feec0}main{padding:30px 4vw;display:grid;grid-template-columns:minmax(600px,1fr) 360px;gap:24px}.panel{background:#101b2a;border:1px solid #2d4057;border-radius:14px;padding:22px}.graph{display:grid;grid-template-columns:repeat(5,1fr);align-items:center;gap:14px;min-height:300px}.node{padding:18px 12px;border:1px solid #49627f;border-radius:10px;text-align:center;position:relative;background:#15253a}.node:not(:last-child)::after{content:'→';position:absolute;right:-24px;color:#7890ab}.node.active{border-color:#7ff0b7;background:#1a4836;box-shadow:0 0 20px #55d99d44}.node small{display:block;color:#9db0c8;margin-top:8px}.event{padding:12px 0;border-bottom:1px solid #26384d}.event strong{color:#8feec0}.muted{color:#9db0c8}code{color:#b9d4f5}@media(max-width:950px){main{grid-template-columns:1fr}.graph{grid-template-columns:1fr}.node:not(:last-child)::after{content:'↓';right:auto;bottom:-24px;left:50%}}
+</style></head><body><header><h1>GHOST / Workflow memory</h1><div><a href="/docs">API docs</a> · <span id="health">connecting</span></div></header>
+<main><section class="panel"><h2>Agent workflow lifecycle</h2><div class="graph">
+<div class="node" data-stage="lookup"><b>Lookup</b><small>Agent requests workflow</small></div>
+<div class="node" data-stage="explore"><b>Explore</b><small>Agent uses Steel</small></div>
+<div class="node" data-stage="candidate"><b>Save</b><small>Ghost stores candidate</small></div>
+<div class="node" data-stage="qualified"><b>Qualify</b><small>Fresh replay evidence</small></div>
+<div class="node" data-stage="run"><b>Reuse</b><small>Agent reports execution</small></div>
+</div><p class="muted">The graph is served by the same FastAPI process. Steel execution stays inside each agent.</p></section>
+<aside class="panel"><h2>Live activity</h2><div id="events" class="muted">No activity yet.</div><h2>Registry</h2><div id="workflows" class="muted">No workflows yet.</div></aside></main>
+<script>
+const nodes=[...document.querySelectorAll('.node')];
+function line(title,detail,tag='strong'){const row=document.createElement('div');row.className='event';const heading=document.createElement(tag);heading.textContent=title;row.append(heading,document.createElement('br'),document.createTextNode(detail));return row}
+async function refresh(){try{const [activity,workflows,health]=await Promise.all([fetch('/v1/activity').then(r=>r.json()),fetch('/v1/workflows').then(r=>r.json()),fetch('/health').then(r=>r.json())]);document.querySelector('#health').textContent=health.status;nodes.forEach(n=>n.classList.remove('active'));const latest=activity.at(-1);if(latest){const stage=latest.stage==='reuse'?'lookup':latest.stage;document.querySelector(`[data-stage="${stage}"]`)?.classList.add('active')}const events=document.querySelector('#events');events.replaceChildren();for(const event of activity.slice(-8).reverse())events.append(line(event.stage,event.message));if(!activity.length)events.textContent='No activity yet.';const registry=document.querySelector('#workflows');registry.replaceChildren();for(const workflow of workflows)registry.append(line(workflow.skill_id,`v${workflow.version} · ${workflow.status}`,'code'));if(!workflows.length)registry.textContent='No workflows yet.'}catch(error){document.querySelector('#health').textContent='disconnected'}}
+refresh();setInterval(refresh,750);
+</script></body></html>

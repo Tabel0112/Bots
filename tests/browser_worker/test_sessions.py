@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from browser_worker.browser.adapter import BrowserAdapter
-from browser_worker.config import Settings
-from browser_worker.policy import validate_request
+from Agents.browser_worker.browser.adapter import BrowserAdapter
+from Agents.browser_worker.config import Settings
+from Agents.browser_worker.policy import validate_request
 
 
 @pytest.mark.parametrize(

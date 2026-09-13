@@ -1278,6 +1278,25 @@ class Controller:
                 },
             ),
         )
+        for index, action in enumerate(report.actions if isinstance(report.actions, list) else []):
+            if not isinstance(action, dict):
+                continue
+            operation = action.get("action")
+            name = operation.get("name") if isinstance(operation, dict) else None
+            state.emit(
+                "worker_action_recorded",
+                f"{sid}: {name or 'browser action'}",
+                {
+                    "subtask_id": sid,
+                    "step_id": action.get("step_id") or f"action-{index + 1}",
+                    "action": name,
+                    "semantic_target": action.get("semantic_target"),
+                    "outcome": action.get("outcome"),
+                    "observation_before": action.get("observation_before"),
+                    "observation_after": action.get("observation_after"),
+                    "url": action.get("url"),
+                },
+            )
         if st.actions_used > self.max_actions:
             self._fail_subtask(
                 state,

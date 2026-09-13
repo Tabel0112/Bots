@@ -11,15 +11,18 @@ dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic>=2.10,<3",
   "openai>=2.26,<3", "steel-sdk>=0.9,<1", "playwright>=1.50,<2",
   "jsonschema>=4.23,<5", "python-dotenv>=1,<2",
+  "httpx>=0.28,<1",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "httpx>=0.28,<1", "ruff>=0.11,<1"]
+visual = ["Pillow>=10,<13"]
 
 [tool.setuptools.packages.find]
-include = ["browser_worker*", "argus*"]
+include = ["Agents*", "ghostapi*", "argus*"]
 exclude = ["argus.tests*"]
 
 [tool.setuptools.package-data]
-browser_worker = ["*.json", "*.md", "*.txt", "browser/*.js", "demo/*.html", "examples/*.json"]
+"Agents.browser_worker" = ["*.json", "*.md", "*.txt", "browser/*.js", "demo/*.html", "examples/*.json"]
+"ghostapi.api" = ["*.html"]
 argus = ["examples/*.json"]

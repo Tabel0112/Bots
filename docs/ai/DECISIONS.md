@@ -4,6 +4,21 @@ Updated: 2026-09-13. Keep status explicit; a proposal is not an implementation c
 
 ## Confirmed user direction
 
+- **End-to-end planning (2026-09-13):** the user requested the complete workflow and
+  implementation plan connecting input, ARGUS decomposition, Steel-connected workers,
+  Ghost and the final UI conclusion. The [plan](../hackathon/END-TO-END-PLAN.md) is a
+  proposal grounded in the current source, not approval of every implementation
+  choice or a claim of live integration. It identifies the existing Ghost SQLite
+  storage as a proposed explicit exception to the older JSON-only decision; that
+  exception and the worker-resolved ARGUS memory mode remain to be agreed at INT-1.
+
+- **Worker–Ghost execution (2026-09-12):** the user authorized implementation and specified
+  HTML/DOM first, then visual interpretation when DOM is insufficient (including canvas).
+  The implementation uses one continuing Steel session, with Ghost outside its lifecycle.
+  The integrated memory boundary is `0.2`; legacy `0.1` fixture clients stay supported.
+  This does not establish teammate receiver or live cloud verification.
+
+- **Phase (updated 2026-09-12):** the user explicitly requested the complete DOM browser worker implementation using a detailed runtime specification. This supersedes the planning-only restriction for HTML-1. Other workstreams remain at their reported state; the older synthetic scaffold remains provisional.
 - **Product:** ARGUS coordinates deliberation/orchestration/verification; Ghost supplies reusable procedural memory.
 - **Flow:** one user task becomes an overall request with subtasks; subagents execute; a moderator monitors, gathers, reasons over outputs and produces the final result.
 - **Browser infrastructure:** use Steel for browser subagents.
@@ -22,6 +37,8 @@ Updated: 2026-09-13. Keep status explicit; a proposal is not an implementation c
 - **Model access for ARGUS (2026-09-12):** ARGUS model calls (interpreter, open-world planner) go through OpenAI-compatible APIs, not the Anthropic SDK, because the team's workers already use OpenAI-style endpoints (GPT for the DOM worker, a local OpenAI-compatible server for UI-TARS) and the H100 box can serve models the same way. Implement one `argus/model_client.py` boundary with an OpenAI-compatible backend; tests keep injecting fakes. The Anthropic-SDK code written in phases A and 0b is to be replaced, not extended.
 - **VLM hardware (2026-09-12):** four H100s, 320 GB total. At most four VLM instances run at once, hence the per-run cap of four workers. The four-subtask open-plan cap is a separate MVP budget.
 - **Execution beyond read-only (Abel, 2026-09-12, direction; design not built):** the product should be able to execute tasks such as applying to jobs, not only read. Proposed shape, to be designed after INT-2: each subtask carries an action class (read_only, interactive, committing); the gate classifies instead of rejecting outright; a committing action pauses the run in a needs_confirmation state showing exactly what will be submitted, and proceeds only on the user's yes; the toolbox enforces the class at execution time; before/after screenshots and the sent request are stored as evidence; credentials never pass through ARGUS, the human logs in inside the live session viewer; Ghost never replays a committing skill without fresh confirmation. The hackathon demo path stays read-only.
+- **Ghost caller boundary (2026-09-12):** Steel-powered subagents call Ghost API directly for workflow lookup, candidate saving, qualification reports, and reuse reporting. ARGUS task assignment is outside the Ghost implementation. Starting Ghost serves its workflow graph from the same FastAPI process.
+- **Mission Control live sources (2026-09-13):** the bounded demo uses current public Staples product directories, the Toronto Wikivoyage guide, and Remotive software-development jobs through worker-owned Steel sessions. `ARGUS_RUNTIME=controlled` is an explicit offline fallback, never the default or a source of live claims. Site DOM changes are handled as validation failures. This does not broaden the worker into arbitrary-site extraction or establish Ghost replay/qualification or visual recovery.
 - **Documentation sharing (2026-09-12):** user authorized commit and push of the shared planning/AI handoff docs. The provisional runtime remains a local experiment; publication of these docs does not imply a working shared backend.
 - **ARGUS publication boundary (Abel, 2026-09-13; implemented locally, receiver confirmation pending):** the moderator never writes user-facing prose. Contract 0.5 makes synthesis an `AnswerSelection` of validated-record indices, structured field claims and typed notes with controller-checked subjects. The controller derives final records and renders every answer line. Known prose fields are discarded and logged by field path only. This replaces the evidence-reference-only rule, which could not prevent arbitrary prose from citing a real observation; Tianqi's `"is free and cures cancer"` case is the regression test. Thomas must confirm the adapter boundary before MOD-1 is connected.
 
@@ -37,9 +54,9 @@ The retained provisional contract budgets at most one repair followed by at most
 
 ### HTML-1 local implementation choices — awaiting INT-1 agreement
 
-Python/Pydantic, Playwright/Steel, GPT-5.4 Responses with medium reasoning and optional FastAPI transport are implemented for the DOM worker only. `SubtaskRequest` / `SubtaskReport` 0.2 is its local boundary, not a settled shared contract; 0.1 remains provisional. See [module usage](../../browser_worker/README.md). Stack adoption, message compatibility and receiver verification remain pending INT-1.
+Python/Pydantic, Playwright/Steel, GPT-5.4 Responses with medium reasoning and optional FastAPI transport are implemented for the DOM worker only. `SubtaskRequest` / `SubtaskReport` 0.2 is its local boundary, not a settled shared contract; 0.1 remains provisional. See [module usage](../../Agents/browser_worker/README.md). Stack adoption, message compatibility and receiver verification remain pending INT-1.
 
-The PR #7 review reiterates no required HTTP layer between ARGUS and its toolbox: ARGUS calls `Worker.run` in-process, while FastAPI is optional for standalone clients. It also identifies Thomas and Tianqi as the shared Steel toolbox owners. Separate adapters currently exist in `workers/visual/` and `browser_worker/`; convergence, shared session ownership and `needs_visual` compatibility require their coordination, not unilateral adoption of either adapter. No shared-toolbox integration is claimed.
+The PR #7 review reiterates no required HTTP layer between ARGUS and its toolbox: ARGUS calls `Worker.run` in-process, while FastAPI is optional for standalone clients. It also identifies Thomas and Tianqi as the shared Steel toolbox owners. Separate adapters currently exist in `Agents/visual/` and `Agents/browser_worker/`; convergence, shared session ownership and `needs_visual` compatibility require their coordination, not unilateral adoption of either adapter. No shared-toolbox integration is claimed.
 
 | Question/proposal | Current position |
 | --- | --- |
