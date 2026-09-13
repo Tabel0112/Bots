@@ -8,13 +8,16 @@ own when the task needs an exact number -- UI-TARS-1.5-7B does not, in a live ru
 called zoom zero times over 8 steps and misread the value anyway.
 
 Protocol per trial, using the production UI-TARS prompt with zoom in the action space:
-  turn 1  full-page screenshot + "report the exact points for row X"
-          -> if the action is zoom(), self-direction worked
-          -> if it is finished(), the model answered without magnifying
-  turn 2  if it zoomed, feed back the magnified crop of the region *it asked for*
-          -> did it then answer correctly?
+the agent is shown the full page and asked for an exact value, then run as a real loop
+(up to --max-turns). A zoom() is answered with the magnified crop of the region it asked
+for; any other action is a no-op that re-shows the page. The trial ends at finished().
 
-Reports zoom_rate (the headline) plus accuracy broken down by path.
+Reports zoom_rate (the headline: did it choose to magnify at all) and accuracy.
+
+Measured, image 9d4f489a6dc239c8, UI-TARS Q4_K_M:
+  7B   zoom_rate  1/12 -- and that one region was degenerate
+  72B  zoom_rate 12/12 -- self-direction scales; note 3/12 of its regions were
+       lines rather than boxes, which magnify() and steel_browser both now widen.
 
     pip install --user pillow httpx
     python3 zoom_selfdirect_bench.py --base-url http://127.0.0.1:8080/v1 --label uitars-72b
@@ -127,10 +130,20 @@ def build_image():
     return img
 
 
-def magnify(img, box, target_w=900):
+def magnify(img, box, target_w=900, min_side=24):
     x0, y0, x1, y1 = box
-    x0, x1 = sorted((max(0, int(x0)), min(img.width, int(x1))))
-    y0, y1 = sorted((max(0, int(y0)), min(img.height, int(y1))))
+    x0, x1 = sorted((int(x0), int(x1)))
+    y0, y1 = sorted((int(y0), int(y1)))
+    # Models often give a line rather than a box (UI-TARS-72B did this in 3/12 trials);
+    # grow it about its centre rather than failing, matching steel_browser.zoom_b64.
+    if x1 - x0 < min_side:
+        c = (x0 + x1) // 2
+        x0, x1 = c - min_side // 2, c + min_side // 2
+    if y1 - y0 < min_side:
+        c = (y0 + y1) // 2
+        y0, y1 = c - min_side // 2, c + min_side // 2
+    x0, x1 = max(0, x0), min(img.width, x1)
+    y0, y1 = max(0, y0), min(img.height, y1)
     if x1 - x0 < 4 or y1 - y0 < 4:
         return None
     crop = img.crop((x0, y0, x1, y1))
@@ -169,6 +182,8 @@ def main():
     p.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
     p.add_argument("--model", default="vlm")
     p.add_argument("--label", default="model")
+    p.add_argument("--max-turns", type=int, default=6,
+                   help="let the agent iterate (zoom, look, zoom again, answer)")
     args = p.parse_args()
 
     img = build_image()
@@ -184,41 +199,44 @@ def main():
         instruction = (f'Report the exact number of points for the row titled "{title}". '
                        "The points are rendered in small text.")
         rec = {"title": title, "expected": points, "zoomed": False,
-               "action": None, "correct": False, "note": ""}
+               "action": None, "correct": False, "turns": 0, "path": [], "note": ""}
+        # Let the agent actually run its loop: it may zoom, look, zoom again, then
+        # answer. Stopping at turn 2 measures impatience, not capability.
+        parts = [PROMPT_TEMPLATE.format(instruction=instruction), img]
         try:
-            reply = chat(client, args.base_url.rstrip("/"), args.model,
-                         [PROMPT_TEMPLATE.format(instruction=instruction), img])
-            name, kw = parse_action(reply)
-            rec["action"] = name
-            if name == "zoom":
-                rec["zoomed"] = True
-                x0, y0 = coords(kw.get("start_box"))
-                x1, y1 = coords(kw.get("end_box"))
-                crop = magnify(img, (x0, y0, x1, y1))
-                if crop is None:
-                    rec["note"] = f"degenerate region ({x0},{y0})-({x1},{y1})"
+            for turn in range(args.max_turns):
+                rec["turns"] = turn + 1
+                reply = chat(client, args.base_url.rstrip("/"), args.model, parts)
+                name, kw = parse_action(reply)
+                rec["path"].append(name)
+                if rec["action"] is None:
+                    rec["action"] = name
+                if name == "finished":
+                    rec["correct"] = first_int(kw.get("content")) == points
+                    break
+                if name == "zoom":
+                    rec["zoomed"] = True
+                    x0, y0 = coords(kw.get("start_box"))
+                    x1, y1 = coords(kw.get("end_box"))
+                    crop = magnify(img, (x0, y0, x1, y1))
+                    if crop is None:
+                        rec["note"] = f"unusable region ({x0},{y0})-({x1},{y1})"
+                        break
+                    parts = [PROMPT_TEMPLATE.format(instruction=instruction),
+                             "Magnified view of the region you requested. Coordinates "
+                             "still refer to the full-page screenshot. If you can now read "
+                             "the value, report it with finished().", crop]
                 else:
-                    reply2 = chat(client, args.base_url.rstrip("/"), args.model,
-                                  [PROMPT_TEMPLATE.format(instruction=instruction),
-                                   "Magnified view of the region you requested. "
-                                   "Coordinates still refer to the full-page screenshot.",
-                                   crop])
-                    try:
-                        n2, kw2 = parse_action(reply2)
-                        rec["note"] = f"turn2={n2}"
-                        rec["correct"] = first_int(kw2.get("content")) == points
-                    except ValueError:
-                        rec["note"] = f"turn2 unparseable: {reply2[:60]}"
-            elif name == "finished":
-                rec["correct"] = first_int(kw.get("content")) == points
-                rec["note"] = "answered without magnifying"
-            else:
-                rec["note"] = f"did neither: {name}"
+                    # Any other action is a no-op here; re-show the page and let it retry.
+                    parts = [PROMPT_TEMPLATE.format(instruction=instruction),
+                             f"'{name}' does nothing in this read-only task. Read the value "
+                             "and report it with finished(), zooming first if needed.", img]
+            rec["note"] = rec["note"] or "->".join(rec["path"])
         except Exception as e:
             rec["note"] = f"ERROR: {type(e).__name__}: {e}"[:90]
         rows.append(rec)
         print(f"{args.label:12s} {title[:34]:36s} action={str(rec['action']):9s} "
-              f"zoom={'Y' if rec['zoomed'] else 'n'} "
+              f"zoom={'Y' if rec['zoomed'] else 'n'} turns={rec['turns']} "
               f"{'OK' if rec['correct'] else 'WRONG':5s} {rec['note'][:46]}")
 
     n = len(rows)
