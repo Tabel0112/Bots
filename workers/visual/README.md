@@ -36,6 +36,8 @@ Names only, values in an untracked `.env` in this directory (`KEY=value` lines):
 - `STEEL_API_KEY` — required (Steel cloud browser).
 - `ANTHROPIC_API_KEY` — only for `--backend claude`.
 - `UITARS_BASE_URL` — OpenAI-compatible endpoint, default `http://127.0.0.1:8080/v1`.
+- `READER_BASE_URL` — optional second endpoint used only to read exact values off
+  magnified crops (see "Split driver and reader"). Unset by default.
 
 ## Local UI-TARS server
 
@@ -81,6 +83,27 @@ independent fixes:
 - **Magnified region reads** (`zoom()`) — 100%, but requires either the model to invoke
   it (the 7B does not) or the worker to magnify around a located region.
 
+### Model size does help, measured on a GPU cluster
+
+`cluster_bench.py` generates its own test image deterministically and prints a SHA256 of
+it, so a cluster node and a laptop can prove they scored identical pixels before their
+numbers are compared. Run on one Trillium GPU node, image `9d4f489a6dc239c8`, both
+Q4_K_M:
+
+| Condition | Holo1.5-**7B** | Holo1.5-**72B** |
+| --- | --- | --- |
+| Full page | 10/12 (83%) | **11/12 (92%)** |
+| Magnified crop | 11/12 (92%) | **12/12 (100%)** |
+
+The 72B wins in both conditions, and only the 72B reaches 100%. The 7B's misses are also
+worse in kind — 345→**7** on the full page, and 55→**1** even when magnified — whereas
+the 72B's single miss is a near-hit (229→223). So for reading exact values, both axes
+matter: magnify *and* use the larger reader where one is available.
+
+Do not compare numbers across different image hashes. An earlier laptop run of the 7B on
+a different image scored 11/12 and made the 72B look no better; on identical pixels the
+7B scores 10/12.
+
 Reproduce:
 
 ```bash
@@ -94,6 +117,42 @@ python eval_reading.py --label other --base-url http://127.0.0.1:8081/v1 \
 (Caveat: with `--page-zoom`, `getBoundingClientRect` returns unzoomed coordinates under
 `body.zoom`, so the *magnified* column of a zoomed run crops the wrong rows and its
 number is not meaningful. The full-page column is unaffected.)
+
+### Split driver and reader (cluster deployment)
+
+The driver and the value-reader do not have to be the same model, and the measurements
+say they should not be: UI-TARS has the action space and grounds clicks well, while
+Holo1.5-72B is the better reader. Point them at separate endpoints:
+
+```bash
+# reader on a cluster GPU node, reached through an SSH tunnel
+ssh -N -L 8081:localhost:8081 user@cluster-node &
+python -m browser_subagent "<subtask>" --url <start> \
+    --base-url http://127.0.0.1:8080/v1 \
+    --reader-url http://127.0.0.1:8081/v1
+```
+
+`--reader-url` (or `READER_BASE_URL`) is optional. When set, every `zoom()` also goes to
+the reader model and its answer is added to the driver's feedback and recorded in the
+trace as `reader_answer`. When unset, or if the reader call fails, the driver still sees
+the magnified image — the reader is an enhancement, never a dependency.
+
+Serving the 72B reader on a node (Q4_K_M, ~47GB, fits one 80GB GPU or splits across
+several; SciNet Trillium mounts `$HOME` read-only on compute nodes, so write to
+`$SCRATCH`):
+
+```bash
+hf download mradermacher/Holo1.5-72B-GGUF Holo1.5-72B.Q4_K_M.gguf \
+    Holo1.5-72B.mmproj-f16.gguf --local-dir $SCRATCH/models
+llama-server -m $SCRATCH/models/Holo1.5-72B.Q4_K_M.gguf \
+    --mmproj $SCRATCH/models/Holo1.5-72B.mmproj-f16.gguf \
+    -ngl 99 -c 8192 --port 8081 > $SCRATCH/server.log 2>&1 &
+```
+
+The reader question must be a **targeted question**, not a transcription request.
+Holo1.5 answers "…how many points does it have? Answer with the number only" accurately
+but hallucinates on "transcribe this image exactly" — the worker derives the question
+from the subtask for this reason.
 
 ### Aggregate questions are not a VLM capability at this size
 
