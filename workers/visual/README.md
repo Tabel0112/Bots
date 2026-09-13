@@ -154,6 +154,36 @@ Holo1.5 answers "…how many points does it have? Answer with the number only" a
 but hallucinates on "transcribe this image exactly" — the worker derives the question
 from the subtask for this reason.
 
+### Self-direction: does the driver choose to zoom?
+
+Reading accuracy and *deciding to magnify* are different abilities. `zoom_selfdirect_bench.py`
+measures the second: the agent is shown a full page, asked for an exact value, and run as a
+real loop (its `zoom()` returns a magnified crop). Same generated image `9d4f489a6dc239c8`,
+UI-TARS Q4_K_M, on one H100:
+
+| | zoom_rate | overall correct | correct when it zoomed |
+| --- | --- | --- | --- |
+| UI-TARS-1.5-**7B** | 2/12 (17%) | 7/12 (58%) | 2/2 |
+| UI-TARS-**72B** | **12/12 (100%)** | **10/12 (83%)** | 10/12 |
+
+Self-direction is the ability that scales. The 7B almost never magnifies — it answers
+straight from the full page (a coin flip) or wanders into stray clicks, drags and scrolls.
+The 72B magnifies every time and then answers, in two or three turns.
+
+Two ways to exploit that, and the cheap one is worth trying first:
+
+- **Use the 72B as the driver** on DOM-less pages — 83% vs 58%, at ~10x the serving cost.
+- **Stop relying on self-direction.** Both models are accurate *once magnified*, and 7B
+  grounding is good, so the worker can locate with the 7B and magnify deterministically
+  in code rather than hoping the model asks. That keeps the 7B and needs no cluster.
+
+Two measurement traps are worth repeating, because both produced confidently wrong
+numbers before they were found. The bench originally stopped after two turns, which
+measured impatience rather than capability; and it was stateless, rebuilding one fresh
+message per turn, so UI-TARS — which reasons from its own action history — repeated
+itself forever (`zoom->wait->zoom->wait`) and scored 1/12 despite zooming every time.
+Any harness measuring an agent must carry its history.
+
 ### Aggregate questions are not a VLM capability at this size
 
 Asked "which story has the HIGHEST number of points?" on the same page (true answer:
