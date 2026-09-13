@@ -171,11 +171,25 @@ class SteelBrowser:
         resp = self._computer(action="take_screenshot")
         return resp.base64_image
 
-    def zoom_b64(self, region):
+    def zoom_b64(self, region, min_side=24):
         full = self.screenshot_b64()
         img = Image.open(io.BytesIO(base64.b64decode(full)))
         x0, y0, x1, y1 = [int(v) for v in region]
+        x0, x1 = sorted((x0, x1))
+        y0, y1 = sorted((y0, y1))
+        # Models often describe a region as a line rather than a box (UI-TARS-72B did
+        # this in 3/12 trials, e.g. (54,288)-(231,286)). Grow such a region about its
+        # centre instead of failing on an empty crop.
+        if x1 - x0 < min_side:
+            c = (x0 + x1) // 2
+            x0, x1 = c - min_side // 2, c + min_side // 2
+        if y1 - y0 < min_side:
+            c = (y0 + y1) // 2
+            y0, y1 = c - min_side // 2, c + min_side // 2
         crop = img.crop((max(0, x0), max(0, y0), min(img.width, x1), min(img.height, y1)))
+        if crop.width and crop.width < 800:
+            factor = min(4, max(2, round(800 / crop.width)))
+            crop = crop.resize((crop.width * factor, crop.height * factor), Image.LANCZOS)
         buf = io.BytesIO()
         crop.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode()
